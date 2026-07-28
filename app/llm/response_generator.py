@@ -1,6 +1,6 @@
 import json
 from typing import Any, Dict, List
-from app.llm.client import LLMClient
+from app.llm.client import LLMClient, LLMRateLimitError
 from app.llm.prompts import RESPONSE_GENERATION_SYSTEM_PROMPT, RESPONSE_GENERATION_USER_PROMPT_TEMPLATE
 from app.utils.logger import log_error
 
@@ -79,6 +79,8 @@ class ResponseGenerator:
                 format_json=False
             )
             return response
+        except LLMRateLimitError as rle:
+            raise rle
         except Exception as exc:
             log_error(session_id, "RESPONSE_GENERATION_FAILED", str(exc))
             # Graceful fallback: return a default message and serialized information

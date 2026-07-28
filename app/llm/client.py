@@ -8,6 +8,10 @@ class LLMClientError(Exception):
     """Exception raised for LLM communication errors."""
     pass
 
+class LLMRateLimitError(LLMClientError):
+    """Exception raised when LLM returns a 429 rate limit error."""
+    pass
+
 class LLMClient:
     def __init__(self):
         self.url = "https://api.groq.com/openai/v1/chat/completions"
@@ -45,7 +49,9 @@ class LLMClient:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(self.url, headers=headers, json=payload)
                 
-            if response.status_code != 200:
+            if response.status_code == 429:
+                raise LLMRateLimitError(f"Groq returned status code 429: {response.text}")
+            elif response.status_code != 200:
                 raise LLMClientError(f"Groq returned status code {response.status_code}: {response.text}")
                 
             result = response.json()
@@ -58,6 +64,8 @@ class LLMClient:
         except httpx.TimeoutException as te:
             log_error("LLM", "LLM_TIMEOUT", "Timeout contacting Groq server.")
             raise LLMClientError("LLM response timed out.") from te
+        except LLMRateLimitError as rle:
+            raise rle
         except Exception as e:
             log_error("LLM", "LLM_ERROR", str(e))
             raise LLMClientError(f"Failed to communicate with LLM: {str(e)}") from e

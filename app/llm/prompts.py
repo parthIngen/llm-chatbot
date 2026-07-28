@@ -6,6 +6,11 @@ The output JSON MUST follow this format exactly:
 {
   "entity": "trip",
   "operation": "count" | "find",
+  "analytics": [
+    {
+      "type": "departureDelayed" | "arrivalDelayed"
+    }
+  ],
   "filters": [
     {
       "field": "fieldName",
@@ -16,11 +21,13 @@ The output JSON MUST follow this format exactly:
   "select": []
 }
 
+Note: "analytics" is optional. Only include it when the query specifically asks about delayed departures or arrivals.
+
 CRITICAL RULES:
 1. "entity" is always "trip".
 2. "operation" must be:
-   - "count": for queries asking for "all trips", "count", "how many", "number of", "total number of".
-   - "find": for queries asking for "Show all", "show active", "list", "view", "Download all", "Download".
+   - "count": for queries asking specifically for counts or totals (e.g., "count", "how many", "number of", "total number of"). If a query simply requests "all trips" (without verbs like "show" or "list"), use "count".
+   - "find": for queries asking to retrieve/display/list records (e.g., "Show all", "show active", "list", "view", "Download all", "Download", "Show all trips").
 3. A filter for "groupId" with "operator": "eq" and "value": "0041" MUST ALWAYS be included in "filters".
 4. Use exact field mappings:
    - "<Region> region" -> region eq "<Region>" (e.g. "East region" -> region: "East")
@@ -31,9 +38,9 @@ CRITICAL RULES:
    - "GPS active/inactive trips" -> gps eq "active"/"inactive"
    - "Fixed E-Lock inactive" or "fixed lock inactive" -> fixedelock eq "inactive"
    - "Portable E-Lock inactive" or "portable lock inactive" -> portableelock eq "inactive"
-   - "GPS status is NA" -> imei eq "gps is NA"
-   - "Fixed E-Lock where GPS is NA" -> Imei2 eq "gps is NA"
-   - "Portable E-Lock where GPS is NA" -> Imei3 eq "gps is NA"
+   - "GPS status is NA/na/not applicable/not captured/inactive" -> gps eq "inactive"
+   - "Fixed E-Lock (trips) where GPS is NA/na/not applicable/not captured/inactive" -> fixedelock eq "inactive" (do not include gps filter)
+   - "Portable E-Lock (trips) where GPS is NA/na/not applicable/not captured/inactive" -> portableelock eq "inactive" (do not include gps filter)
    - "GPS is active" -> gps eq "active"
    - "Portable Lock is active" -> portableelock eq "active"
    - "ATD is missing" -> atd eq "missing"
@@ -46,7 +53,9 @@ CRITICAL RULES:
    - "fleet <Fleet>" -> Fleet eq "<Fleet>"
    - "DL01HU5859" -> vehicleNo eq "DL01HU5859"
    - "destination is BIB" -> destination eq "BIB"
-   - "completed or closed trips" -> tripStatus eq "completed"
+   - "from <Location>", "origin <Location>", "start from <Location>", "departure <Location>" -> From eq "<Location>"
+   - "to <Location>", "destination <Location>", "end on <Location>", "ends <Location>", "arrival <Location>" -> To eq "<Location>"
+   - "completed, closed, finished, or inactive trips" -> tripStatus eq "InActive"
    - "scheduled, running, or live trips" -> tripStatus eq "running"
    - "active or open trips" -> tripStatus eq "active"
    - "cancelled trips" -> tripStatus eq "cancelled"
@@ -57,6 +66,8 @@ CRITICAL RULES:
    - 'yesterday' -> runDate gte 'YESTERDAY_START', runDate lte 'YESTERDAY_END'
 6. For fields representing status or missing elements (e.g. 'active', 'inactive', 'missing'), the operator MUST be 'eq' and the value is the status/missing word (e.g. 'active' or 'missing'). Do NOT use 'missing' as an operator name.
 7. For the fields 'fixedelock' and 'portableelock', when the query asks about device trips (e.g. 'Fixed E-Lock device trips', '3rd-party device trips'), the value MUST be a blank string (""). The value should only be "active" or "inactive" if those specific status words are mentioned. Do NOT use "device" or "Fixed E-Lock" as a filter value.
+8. Never map date, time, or temporal terms (such as "today", "yesterday", "last month", "last week", "January 2026", etc.) to the "region" field. The "region" field must only contain actual geographic regions (e.g., "North", "South", "East", "West").
+9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed"), include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed" or "arrivalDelayed" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
 
 Reference Examples:
 - "Download all trips for the North region." ->
@@ -64,11 +75,17 @@ Reference Examples:
 - "all trips for the East region" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "region", "operator": "eq", "value": "East"}], "select": []}
 - "Download all completed trips for the North region last month." ->
-  {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_MONTH_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_MONTH_END"}, {"field": "tripStatus", "operator": "eq", "value": "completed"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "region", "operator": "eq", "value": "North"}], "select": []}
+  {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_MONTH_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_MONTH_END"}, {"field": "tripStatus", "operator": "eq", "value": "InActive"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "region", "operator": "eq", "value": "North"}], "select": []}
 - "Download all ICICI device trips for January 2026." ->
   {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}], "select": []}
 - "Download all trips where GPS and Portable Lock are active but ATD is missing for date range 2026-01-01 to 2026-01-31" ->
   {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "gps", "operator": "eq", "value": "active"}, {"field": "portableelock", "operator": "eq", "value": "active"}, {"field": "atd", "operator": "eq", "value": "missing"}], "select": []}
+- "Download all Fixed E-Lock trips where GPS is NA for January 2026" ->
+  {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "fixedelock", "operator": "eq", "value": "inactive"}], "select": []}
+- "Show all active trips from NGA location during the last week" ->
+  {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_WEEK_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_WEEK_END"}, {"field": "tripStatus", "operator": "eq", "value": "active"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "From", "operator": "eq", "value": "NGA"}], "select": []}
+- "Show all trips where the vehicle departure was delayed. this week" ->
+  {"entity": "trip", "operation": "find", "analytics": [{"type": "departureDelayed"}], "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_WEEK_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_WEEK_END"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "select": []}
 
 Ensure valid JSON output. No markdown, backticks, or comments.
 """

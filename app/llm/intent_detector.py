@@ -2,7 +2,7 @@ import json
 import datetime
 import re
 from typing import List, Dict, Any
-from app.llm.client import LLMClient
+from app.llm.client import LLMClient, LLMRateLimitError
 from app.llm.prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_PROMPT_TEMPLATE
 from app.utils.logger import log_intent_detected, log_entities_extracted, log_error
 from app.config import settings
@@ -129,6 +129,51 @@ class IntentDetector:
             if "select" not in query_payload or not isinstance(query_payload["select"], list):
                 query_payload["select"] = []
                 
+            # Post-process analytics filters: extract from filters and place at the top level
+            analytics_list = []
+            new_filters = []
+            for f in query_payload.get("filters", []):
+                if isinstance(f, dict) and f.get("field") == "analytics":
+                    val = f.get("value")
+                    if isinstance(val, list):
+                        for item in val:
+                            analytics_list.append({"type": item})
+                    elif isinstance(val, str):
+                        analytics_list.append({"type": val})
+                else:
+                    new_filters.append(f)
+            query_payload["filters"] = new_filters
+
+            # Also handle if LLM generated analytics directly as top-level key
+            if "analytics" in query_payload:
+                existing_analytics = query_payload["analytics"]
+                if isinstance(existing_analytics, list):
+                    for item in existing_analytics:
+                        if isinstance(item, dict) and "type" in item:
+                            analytics_list.append(item)
+                        elif isinstance(item, str):
+                            analytics_list.append({"type": item})
+                elif isinstance(existing_analytics, str):
+                    analytics_list.append({"type": existing_analytics})
+                elif isinstance(existing_analytics, dict):
+                    if "type" in existing_analytics:
+                        analytics_list.append(existing_analytics)
+                    else:
+                        for k, v in existing_analytics.items():
+                            analytics_list.append({"type": v})
+            
+            # Deduplicate items by type
+            seen_types = set()
+            deduped_analytics = []
+            for item in analytics_list:
+                t = item.get("type")
+                if t and t not in seen_types:
+                    seen_types.add(t)
+                    deduped_analytics.append(item)
+
+            if deduped_analytics:
+                query_payload["analytics"] = deduped_analytics
+                
             # Replace placeholder dates in filters
             for f in query_payload["filters"]:
                 if not isinstance(f, dict):
@@ -194,6 +239,17 @@ class IntentDetector:
                     val = f.get("value")
                     if isinstance(val, str) and val.lower() not in ["active", "inactive"]:
                         f["value"] = ""
+
+            # If fixedelock or portableelock is inactive, remove the redundant/duplicate gps inactive filter
+            has_inactive_elock = any(
+                isinstance(f, dict) and f.get("field") in ["fixedelock", "portableelock"] and f.get("value") == "inactive"
+                for f in query_payload["filters"]
+            )
+            if has_inactive_elock:
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") == "gps" and f.get("value") == "inactive")
+                ]
                         
             # Ensure groupId is always present as a filter with "0041"
             has_group_id = False
@@ -218,9 +274,28 @@ class IntentDetector:
             def word_in_text(words, text):
                 return any(re.search(r'\b' + re.escape(w) + r'\b', text) for w in words)
 
-            if word_in_text(["completed", "finish", "closed"], msg_lower):
-                has_status_keyword = True
-                status_override = "completed"
+            if word_in_text(["completed", "finish", "finished", "closed", "inactive"], msg_lower):
+                is_inactive_for_trip = True
+                has_inactive = re.search(r'\binactive\b', msg_lower) is not None
+                if has_inactive:
+                    inactive_field_filters = [
+                        f for f in query_payload.get("filters", [])
+                        if isinstance(f, dict) and f.get("field") in ["gps", "portableelock", "fixedelock"] and f.get("value") == "inactive"
+                    ]
+                    if inactive_field_filters:
+                        explicit_inactive_trip = (
+                            (re.search(r'\binactive\s+trips?\b', msg_lower) is not None and not re.search(r'\b(?:gps|lock|elock|e-lock|portable|fixed|device)\s+inactive\s+trips?\b', msg_lower)) or
+                            re.search(r'\btrips?\s+(?:status\s+)?is\s+inactive\b', msg_lower) is not None or
+                            re.search(r'\btrips?\s+are\s+inactive\b', msg_lower) is not None
+                        )
+                        if not explicit_inactive_trip:
+                            inactive_count = len(re.findall(r'\binactive\b', msg_lower))
+                            if inactive_count <= len(inactive_field_filters):
+                                is_inactive_for_trip = False
+                
+                if is_inactive_for_trip:
+                    has_status_keyword = True
+                    status_override = "InActive"
             elif word_in_text(["cancelled", "canceled"], msg_lower):
                 has_status_keyword = True
                 status_override = "cancelled"
@@ -238,9 +313,16 @@ class IntentDetector:
                         if isinstance(f, dict) and f.get("field") in ["gps", "portableelock", "fixedelock"] and f.get("value") == "active"
                     ]
                     if active_field_filters:
-                        active_count = len(re.findall(r'\bactive\b', msg_lower))
-                        if active_count == len(active_field_filters):
-                            is_active_for_trip = False
+                        # Check if "active" explicitly describes trips/trip
+                        explicit_active_trip = (
+                            (re.search(r'\bactive\s+trips?\b', msg_lower) is not None and not re.search(r'\b(?:gps|lock|elock|e-lock|portable|fixed|device)\s+active\s+trips?\b', msg_lower)) or
+                            re.search(r'\btrips?\s+(?:status\s+)?is\s+active\b', msg_lower) is not None or
+                            re.search(r'\btrips?\s+are\s+active\b', msg_lower) is not None
+                        )
+                        if not explicit_active_trip:
+                            active_count = len(re.findall(r'\bactive\b', msg_lower))
+                            if active_count <= len(active_field_filters):
+                                is_active_for_trip = False
                 
                 if is_active_for_trip:
                     has_status_keyword = True
@@ -263,11 +345,32 @@ class IntentDetector:
                         "value": status_override
                     })
             else:
-                # If no status keywords were present, remove any existing tripStatus filters
-                query_payload["filters"] = [
-                    f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") == "tripStatus")
-                ]
+                has_device_filters = any(
+                    isinstance(f, dict) and f.get("field") in ["gps", "fixedelock", "portableelock"]
+                    for f in query_payload.get("filters", [])
+                )
+                has_analytics = "analytics" in query_payload
+                if has_device_filters or has_analytics:
+                    # If it's a GPS/Lock query or contains analytics, remove any tripStatus filters
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                    ]
+                else:
+                    # Otherwise, default to Active status
+                    has_trip_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            has_trip_status = True
+                            f["value"] = settings.DEFAULT_TRIP_STATUS
+                            f["operator"] = "eq"
+                            break
+                    if not has_trip_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": settings.DEFAULT_TRIP_STATUS
+                        })
                 
             log_intent_detected(session_id, "trip_report")
             log_entities_extracted(session_id, query_payload)
@@ -277,6 +380,8 @@ class IntentDetector:
                 "entities": query_payload
             }
             
+        except LLMRateLimitError as rle:
+            raise rle
         except Exception as exc:
             log_error(session_id, "INTENT_DETECTION_FAILED", str(exc))
             # Fallback structure

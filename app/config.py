@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: float = 500.0
 
     # Trip API settings
-    TRIP_API_URL: str = "http://13.203.65.203:8002/api/tripsTest"
+    TRIP_API_URL: str = "https://prompt.secutrak.in/api/tripsTest"
     TRIP_API_TIMEOUT: float = 120.0
     
     # Defaults for API calls
@@ -39,4 +39,4 @@ class Settings(BaseSettings):
 
 settings = Settings()
 # Force override TRIP_API_URL to use the correct tripsTest endpoint, preventing environment overrides
-settings.TRIP_API_URL = "http://13.203.65.203:8002/api/tripsTest"
+settings.TRIP_API_URL = "https://prompt.secutrak.in/api/tripsTest"
