@@ -4,14 +4,25 @@ import time
 from typing import Any, Dict
 from fastapi import Request
 
-# Configure structured-like console logging
+# Configure structured console logging
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+handler.setFormatter(formatter)
+
+logger = logging.getLogger("chatbot")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    logger.addHandler(handler)
+logger.propagate = False
+
+# Also configure root logger with force=True for any other loggers
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True
 )
-
-logger = logging.getLogger("chatbot")
 
 def log_request_received(session_id: str, message: str):
     logger.info(f"[REQUEST_RECEIVED] Session: {session_id} | Message: '{message}'")

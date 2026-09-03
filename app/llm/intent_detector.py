@@ -30,7 +30,8 @@ def extract_date_range(text: str) -> tuple[str | None, str | None]:
 
 class IntentDetector:
     def __init__(self, llm_client: LLMClient = None):
-        self.llm_client = llm_client or LLMClient()
+        provider = getattr(settings, "INTENT_LLM_PROVIDER", "groq")
+        self.llm_client = llm_client or LLMClient(provider=provider)
 
     async def detect(self, message: str, history: List[Dict[str, Any]], session_id: str) -> Dict[str, Any]:
         """
@@ -94,11 +95,15 @@ class IntentDetector:
             f"- LAST_MONTH_END: {last_month_end}"
         )
         
+        msg_lower = message.lower()
+        has_status_keyword = False
+        status_override = None
+
         # Format user prompt
         prompt = INTENT_EXTRACTION_USER_PROMPT_TEMPLATE.format(message=message, date_context=date_context)
         
         try:
-            # We enforce JSON output from Ollama
+            # We enforce JSON output from LLM
             response_text = await self.llm_client.generate(
                 prompt=prompt,
                 system=INTENT_EXTRACTION_SYSTEM_PROMPT,
@@ -226,6 +231,22 @@ class IntentDetector:
                     "value": extracted_end
                 })
 
+            # If no runDate filter was extracted by regex or LLM, check for relative date keywords in user query
+            has_run_date = any(isinstance(f, dict) and f.get("field") == "runDate" for f in query_payload["filters"])
+            if not has_run_date:
+                if re.search(r'\btoday\b', msg_lower):
+                    query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": today_start})
+                    query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": today_end})
+                elif re.search(r'\byesterday\b', msg_lower):
+                    query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": yesterday_start})
+                    query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": yesterday_end})
+                elif re.search(r'\blast\s+week\b', msg_lower):
+                    query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": last_week_start})
+                    query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": last_week_end})
+                elif re.search(r'\blast\s+month\b', msg_lower):
+                    query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": last_month_start})
+                    query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": last_month_end})
+
             # Ensure operator "missing" is corrected to "eq" with value "missing"
             for f in query_payload["filters"]:
                 if isinstance(f, dict):
@@ -345,32 +366,12 @@ class IntentDetector:
                         "value": status_override
                     })
             else:
-                has_device_filters = any(
-                    isinstance(f, dict) and f.get("field") in ["gps", "fixedelock", "portableelock"]
-                    for f in query_payload.get("filters", [])
-                )
-                has_analytics = "analytics" in query_payload
-                if has_device_filters or has_analytics:
-                    # If it's a GPS/Lock query or contains analytics, remove any tripStatus filters
-                    query_payload["filters"] = [
-                        f for f in query_payload["filters"]
-                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
-                    ]
-                else:
-                    # Otherwise, default to Active status
-                    has_trip_status = False
-                    for f in query_payload["filters"]:
-                        if isinstance(f, dict) and f.get("field") == "tripStatus":
-                            has_trip_status = True
-                            f["value"] = settings.DEFAULT_TRIP_STATUS
-                            f["operator"] = "eq"
-                            break
-                    if not has_trip_status:
-                        query_payload["filters"].append({
-                            "field": "tripStatus",
-                            "operator": "eq",
-                            "value": settings.DEFAULT_TRIP_STATUS
-                        })
+                # No explicit status keyword in the query — remove any tripStatus filter
+                # the LLM may have hallucinated. Never inject a default tripStatus.
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                ]
                 
             log_intent_detected(session_id, "trip_report")
             log_entities_extracted(session_id, query_payload)
@@ -403,6 +404,38 @@ class IntentDetector:
                     "operator": "eq",
                     "value": status_override
                 })
+            else:
+                # Basic keyword check for fallback
+                if any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["completed", "finish", "finished", "closed", "inactive"]):
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "InActive"
+                    })
+                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["cancelled", "canceled"]):
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "cancelled"
+                    })
+                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["running", "scheduled", "sceduled"]):
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "running"
+                    })
+                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["active", "open"]):
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "active"
+                    })
+                else:
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": settings.DEFAULT_TRIP_STATUS
+                    })
             if extracted_start and extracted_end:
                 fallback_payload["filters"].append({
                     "field": "runDate",

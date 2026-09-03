@@ -4,12 +4,32 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    # Groq settings
+    # LLM Provider Routing Settings
+    LLM_PROVIDER: str = "hybrid"  # groq, hybrid, ollama
+    INTENT_LLM_PROVIDER: str = "groq"  # Used for intent detection & payload generation (Groq API)
+    RESPONSE_LLM_PROVIDER: str = "ollama"  # Used for natural language response generation (Local Ollama LLM)
+
+    # Local LLM Settings (Ollama / LM Studio)
+    LOCAL_LLM_BASE_URL: str = "http://localhost:11434/v1"
+    LOCAL_LLM_MODEL: str = "phi4-mini:latest"
+    LOCAL_LLM_API_KEY: str = "ollama"
+    LOCAL_LLM_MAX_TOKENS: int = 1500
+    LOCAL_LLM_TEMPERATURE: float = 0.2
+    LOCAL_LLM_TIMEOUT: float = 500.0
+
+    # Generic LLM Fallbacks
+    LLM_BASE_URL: str = "http://localhost:11434/v1"
+    LLM_MODEL: str = "phi4-mini:latest"
+    LLM_API_KEY: str = "ollama"
+    LLM_MAX_TOKENS: int = 1500
+    LLM_TEMPERATURE: float = 0.2
+    LLM_TIMEOUT: float = 500.0
+
+    # Groq Settings (Remote Cloud API)
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.1-8b-instant"
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
     GROQ_MAX_TOKENS: int = 1500
     GROQ_TEMPERATURE: float = 0.2
-    LLM_TIMEOUT: float = 500.0
 
     # Trip API settings
     TRIP_API_URL: str = "https://prompt.secutrak.in/api/tripsTest"
@@ -40,3 +60,4 @@ class Settings(BaseSettings):
 settings = Settings()
 # Force override TRIP_API_URL to use the correct tripsTest endpoint, preventing environment overrides
 settings.TRIP_API_URL = "https://prompt.secutrak.in/api/tripsTest"
+

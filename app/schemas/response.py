@@ -6,3 +6,5 @@ class ChatMessageResponse(BaseModel):
     intent: str = Field(..., description="Detected intent of the message")
     entities: Dict[str, Any] = Field(..., description="Extracted entities from the message")
     data: Optional[Any] = Field(None, description="Raw structured data retrieved from external systems, if any")
+    download_url: Optional[str] = Field(None, description="URL or relative link to download the exported Excel report")
+    query_payload: Optional[Dict[str, Any]] = Field(None, description="Structured query payload forwarded to the external Trip API")

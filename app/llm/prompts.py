@@ -68,6 +68,7 @@ CRITICAL RULES:
 7. For the fields 'fixedelock' and 'portableelock', when the query asks about device trips (e.g. 'Fixed E-Lock device trips', '3rd-party device trips'), the value MUST be a blank string (""). The value should only be "active" or "inactive" if those specific status words are mentioned. Do NOT use "device" or "Fixed E-Lock" as a filter value.
 8. Never map date, time, or temporal terms (such as "today", "yesterday", "last month", "last week", "January 2026", etc.) to the "region" field. The "region" field must only contain actual geographic regions (e.g., "North", "South", "East", "West").
 9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed"), include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed" or "arrivalDelayed" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
+10. NEVER add a "tripStatus" filter unless the user's query explicitly mentions trip status words such as "active", "inactive", "completed", "closed", "finished", "scheduled", "running", "live", or "cancelled". Do NOT default or assume any tripStatus when the query does not mention it.
 
 Reference Examples:
 - "Download all trips for the North region." ->
@@ -82,6 +83,8 @@ Reference Examples:
   {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "gps", "operator": "eq", "value": "active"}, {"field": "portableelock", "operator": "eq", "value": "active"}, {"field": "atd", "operator": "eq", "value": "missing"}], "select": []}
 - "Download all Fixed E-Lock trips where GPS is NA for January 2026" ->
   {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "fixedelock", "operator": "eq", "value": "inactive"}], "select": []}
+- "Download all trips from January 2026 where ATA was not captured" ->
+  {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "ata", "operator": "eq", "value": "missing"}], "select": []}
 - "Show all active trips from NGA location during the last week" ->
   {"entity": "trip", "operation": "find", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_WEEK_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_WEEK_END"}, {"field": "tripStatus", "operator": "eq", "value": "active"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "From", "operator": "eq", "value": "NGA"}], "select": []}
 - "Show all trips where the vehicle departure was delayed. this week" ->
@@ -104,14 +107,28 @@ Parse this query and output the correct query JSON:"""
 
 
 RESPONSE_GENERATION_SYSTEM_PROMPT = """You are a helpful customer support agent.
-Answer the User Query using ONLY the provided API Results.
+Answer the User Query using ONLY the provided API Results and QueryFilters. Format your answer using clean, modern HTML with inline CSS styling for maximum visual appeal in the frontend chat.
 
-Rules:
-1. When the user asks for count, total, or how many trips, respond with the exact count.
-2. If the API returns success and a count in the "data" field (e.g. 1138), state this number as the total number of trips matching the query.
-3. If the API returns a list of trips in "data", summarize it or list the vehicle numbers, transporter names, status, etc., as appropriate for the query.
-4. Keep the answer direct, friendly, and concise. Do not mention JSON, endpoints, query parameters, databases, or systems.
-5. Look at the QueryFilters (like tripStatus eq "Running" or "Active", region eq "North", date range etc.) in the context and make sure to explicitly include these details (especially the trip status, e.g., "running trips" or "active trips") in your response so the user knows exactly what filters the results are based on (e.g. "There are no running trips available for the North region from last month.").
+CRITICAL ACCURACY RULES:
+1. Do NOT invent, hallucinate, or mention any region (such as "North", "South", "East", "West"), vehicle number, transporter, or filter UNLESS it is explicitly present in QueryFilters or API Results.
+2. If no region is present in QueryFilters, do NOT state or mention any region in your response.
+
+HTML Formatting and Content Rules:
+1. Always start your response with a summary header:
+   <div style="font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;"><span>📋</span> Summary</div>
+2. Wrap the overview in a clean <p> tag, highlighting ONLY the actual parameters present in the context:
+   <p style="margin: 0 0 8px 0; color: #334155; font-size: 14px; line-height: 1.5;">There are <strong>152 total trips</strong> scheduled for <strong>2026-09-03</strong> in group <strong>0041</strong>.</p>
+3. When individual trips or vehicles are listed (e.g. for small lists or vehicle details), format them in a neat list of modern cards:
+   <div style="display: flex; flex-direction: column; gap: 6px; margin: 10px 0;">
+     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+       <div><strong style="color: #1e293b;">🚛 {Vehicle No}</strong> <span style="color: #64748b; font-size: 12px; margin-left: 6px;">(transporter: <em>{Transporter Name}</em>)</span></div>
+       <span style="background: #dcfce7; color: #166534; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{Status}</span>
+     </div>
+   </div>
+4. When the user asks for count or total, state the count with <strong>count</strong>.
+5. If the user asks to download or export trips, include:
+   <p style="margin: 6px 0 0 0; color: #475569; font-size: 13px;">Your Excel file with all these trips is ready for download.</p>
+6. Keep the answer direct, friendly, and concise. Do not output markdown codeblock ticks (like ```html), output the raw HTML directly.
 """
 
 RESPONSE_GENERATION_USER_PROMPT_TEMPLATE = """API Results:

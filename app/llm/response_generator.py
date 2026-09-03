@@ -6,7 +6,9 @@ from app.utils.logger import log_error
 
 class ResponseGenerator:
     def __init__(self, llm_client: LLMClient = None):
-        self.llm_client = llm_client or LLMClient()
+        from app.config import settings
+        provider = getattr(settings, "RESPONSE_LLM_PROVIDER", "ollama")
+        self.llm_client = llm_client or LLMClient(provider=provider)
 
     def _truncate_data_for_llm(self, data: Any, max_list_len: int = 3) -> Any:
         """
@@ -78,7 +80,12 @@ class ResponseGenerator:
                 system=RESPONSE_GENERATION_SYSTEM_PROMPT,
                 format_json=False
             )
-            return response
+            cleaned = response.strip()
+            if cleaned.startswith("```html") and cleaned.endswith("```"):
+                cleaned = cleaned[7:-3].strip()
+            elif cleaned.startswith("```") and cleaned.endswith("```"):
+                cleaned = cleaned[3:-3].strip()
+            return cleaned
         except LLMRateLimitError as rle:
             raise rle
         except Exception as exc:
