@@ -44,7 +44,7 @@ class TripTool(BaseTool):
         # Make the actual API request
         try:
             start_time = time.time()
-            async with httpx.AsyncClient(timeout=settings.TRIP_API_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=settings.TRIP_API_TIMEOUT, verify=False) as client:
                 response = await client.post(
                     settings.TRIP_API_URL,
                     json=payload,

@@ -106,7 +106,7 @@ async def chat_endpoint(
         try:
             extraction = await intent_detector.detect(
                 message=request.message,
-                history=[h.model_dump() for h in request.history],
+                history=[h.model_dump() for h in request.history[-3:]],
                 session_id=session_id
             )
         except IntentDetectorError as ide:
@@ -136,24 +136,35 @@ async def chat_endpoint(
             has_start_date = False
             has_end_date = False
             filters = entities.get("filters", [])
-            for f in filters:
-                if isinstance(f, dict) and f.get("field") == "runDate":
-                    op = f.get("operator")
-                    if op == "gte":
-                        has_start_date = True
-                    elif op == "lte":
-                        has_end_date = True
-            
-            if not (has_start_date and has_end_date):
-                reply = "Please provide the date range (start date and end date) for the trips."
-                return ChatMessageResponse(
-                    reply=reply,
-                    intent=intent,
-                    entities=entities,
-                    data=None,
-                    download_url=None,
-                    query_payload=entities if entities else None
-                )
+
+            # Check if this is a currently-active/live trip query (tripStatus = "Active" or "Running").
+            # Active trips are live by definition and do not require a historical date range.
+            is_active_trip_query = any(
+                isinstance(f, dict)
+                and f.get("field") == "tripStatus"
+                and str(f.get("value", "")).lower() in ("running", "active")
+                for f in filters
+            ) or bool(re.search(r'\b(?:in[\s-]transit|transit|running|currently\s+active)\b', request.message.lower()))
+
+            if not is_active_trip_query:
+                for f in filters:
+                    if isinstance(f, dict) and f.get("field") == "runDate":
+                        op = f.get("operator")
+                        if op == "gte":
+                            has_start_date = True
+                        elif op == "lte":
+                            has_end_date = True
+
+                if not (has_start_date and has_end_date):
+                    reply = "Please provide the date range (start date and end date) for the trips."
+                    return ChatMessageResponse(
+                        reply=reply,
+                        intent=intent,
+                        entities=entities,
+                        data=None,
+                        download_url=None,
+                        query_payload=entities if entities else None
+                    )
 
         # 2. Tool Execution
         try:
@@ -213,12 +224,11 @@ async def chat_endpoint(
             log_error(session_id, "RESPONSE_GEN_ERROR", str(exc))
             reply = f"I found {len(records)} trip details matching your query."
 
-        # Append download card to reply if download was requested and link isn't already included
+        # Append plain text download link if download was requested and link isn't already included
         is_download_request = any(w in request.message.lower() for w in ["download", "export", "excel", "sheet", "csv", "xlsx", "file"])
         if download_url and is_download_request:
             if download_url not in reply:
-                card_html = render_download_card_html(download_url, len(records))
-                reply = reply.strip() + f"\n\n{card_html}"
+                reply = reply.strip() + f"\n\nDownload Excel report: {download_url}"
 
         return ChatMessageResponse(
             reply=reply,

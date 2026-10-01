@@ -796,7 +796,7 @@ async def test_trip_status_keywords_mapping_flow():
         assert response.status_code == 200
         filters = response.json()["entities"]["filters"]
         status_filter = [f for f in filters if f.get("field") == "tripStatus"][0]
-        assert status_filter["value"] == "active"
+        assert status_filter["value"] == "Active"
 
     # 3. "cancelled" keyword
     user_query_cancelled = "Download cancelled trips for January 2026"
@@ -1522,6 +1522,305 @@ async def test_delayed_departure_trip_flow():
         assert "analytics" not in fields
         assert "tripStatus" not in fields
         assert len(filters) == 3
+
+
+@pytest.mark.asyncio
+async def test_show_all_currently_active_trips_flow():
+    user_query = "Show all currently active trips"
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "Running"
+            }
+        ],
+        "select": []
+    })
+
+    llm_natural_response = "Total 25 active trips found."
+    api_response_data = {"success": True, "data": 25}
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+
+        mock_generate.side_effect = [llm_payload_response, llm_natural_response]
+
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-currently-active-trips",
+            "AccessToken": "mock-token"
+        }
+
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert len(filters) == 2
+
+        group_id_filter = [f for f in filters if f.get("field") == "groupId"][0]
+        status_filter = [f for f in filters if f.get("field") == "tripStatus"][0]
+
+        assert group_id_filter["operator"] == "eq"
+        assert group_id_filter["value"] == "0041"
+
+        assert status_filter["operator"] == "eq"
+        assert status_filter["value"] == "Active"
+
+@pytest.mark.asyncio
+async def test_trips_currently_in_transit_flow():
+    user_query = "What trips are currently in transit?"
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "Active"
+            }
+        ],
+        "select": []
+    })
+
+    llm_natural_response = "Total 2976 trips found."
+    api_response_data = {"success": True, "data": 2976}
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+
+        mock_generate.side_effect = [llm_payload_response, llm_natural_response]
+
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-trips-in-transit",
+            "AccessToken": "mock-token"
+        }
+
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert len(filters) == 2
+
+        group_id_filter = [f for f in filters if f.get("field") == "groupId"][0]
+        status_filter = [f for f in filters if f.get("field") == "tripStatus"][0]
+
+        assert group_id_filter["operator"] == "eq"
+        assert group_id_filter["value"] == "0041"
+
+        assert status_filter["operator"] == "eq"
+        assert status_filter["value"] == "Active"
+
+
+@pytest.mark.asyncio
+async def test_running_feeder_trips_flow():
+    user_query = "Show all running Feeder trips"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "tripStatus", "operator": "eq", "value": "running"},
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "shipmentMethod", "operator": "eq", "value": "feeder"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-running-feeder",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+
+        filters = entities["filters"]
+        fields = {f["field"]: f for f in filters}
+
+        assert "tripStatus" in fields
+        assert fields["tripStatus"]["operator"] == "eq"
+        assert fields["tripStatus"]["value"] == "running"
+
+        assert "groupId" in fields
+        assert fields["groupId"]["operator"] == "eq"
+        assert fields["groupId"]["value"] == "0041"
+
+        assert "shipmentMethod" in fields
+        assert fields["shipmentMethod"]["operator"] == "eq"
+        assert fields["shipmentMethod"]["value"] == "feeder"
+
+
+@pytest.mark.asyncio
+async def test_active_air_intercity_trips_flow():
+    user_query = "Show active Air Intercity trips"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "tripStatus", "operator": "eq", "value": "active"},
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "shipmentMethod", "operator": "eq", "value": "air"},
+            {"field": "routeCategory", "operator": "eq", "value": "intercity"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-active-air-intercity",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+
+        filters = entities["filters"]
+        fields = {f["field"]: f for f in filters}
+
+        assert "tripStatus" in fields
+        assert fields["tripStatus"]["operator"] == "eq"
+        assert fields["tripStatus"]["value"] == "active"
+
+        assert "groupId" in fields
+        assert fields["groupId"]["operator"] == "eq"
+        assert fields["groupId"]["value"] == "0041"
+
+        assert "shipmentMethod" in fields
+        assert fields["shipmentMethod"]["operator"] == "eq"
+        assert fields["shipmentMethod"]["value"] == "air"
+
+        assert "routeCategory" in fields
+        assert fields["routeCategory"]["operator"] == "eq"
+        assert fields["routeCategory"]["value"] == "intercity"
+
+
+@pytest.mark.asyncio
+async def test_active_pickup_trips_flow():
+    user_query = "Show all active Pick Up trips"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "tripStatus", "operator": "eq", "value": "active"},
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "shipmentMethod", "operator": "eq", "value": "Pick Up"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-active-pickup",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+
+        filters = entities["filters"]
+        fields = {f["field"]: f for f in filters}
+
+        assert "tripStatus" in fields
+        assert fields["tripStatus"]["operator"] == "eq"
+        assert fields["tripStatus"]["value"] == "active"
+
+        assert "groupId" in fields
+        assert fields["groupId"]["operator"] == "eq"
+        assert fields["groupId"]["value"] == "0041"
+
+        assert "shipmentMethod" in fields
+        assert fields["shipmentMethod"]["operator"] == "eq"
+        assert fields["shipmentMethod"]["value"] == "Pick Up"
+
+
+
+
 
 
 

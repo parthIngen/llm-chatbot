@@ -22,16 +22,14 @@ class LLMClient:
             base_url = "https://api.groq.com/openai/v1"
             self.url = f"{base_url}/chat/completions"
             self.api_key = settings.GROQ_API_KEY
-            self.model = settings.GROQ_MODEL or "openai/gpt-oss-120b"
-            if self.model in ["llama-3.1-8b-instant", "llama3-8b-8192", "llama3-70b-8192"]:
-                self.model = "openai/gpt-oss-120b"
+            self.model = settings.GROQ_MODEL or "qwen-2.5-coder-32b"
             self.max_tokens = settings.GROQ_MAX_TOKENS
             self.temperature = settings.GROQ_TEMPERATURE
         elif selected_provider in ["ollama", "local", "lmstudio"]:
             base_url = (settings.LOCAL_LLM_BASE_URL or settings.LLM_BASE_URL).rstrip('/')
             self.url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
             self.api_key = settings.LOCAL_LLM_API_KEY or settings.LLM_API_KEY or "ollama"
-            self.model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "phi4-mini:latest"
+            self.model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "qwen2.5-coder:0.5b"
             self.max_tokens = settings.LOCAL_LLM_MAX_TOKENS or settings.LLM_MAX_TOKENS
             self.temperature = settings.LOCAL_LLM_TEMPERATURE or settings.LLM_TEMPERATURE
         else:
@@ -39,7 +37,7 @@ class LLMClient:
             base_url = (settings.LLM_BASE_URL).rstrip('/')
             self.url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
             self.api_key = settings.LLM_API_KEY or "ollama"
-            self.model = settings.LLM_MODEL or "phi4-mini:latest"
+            self.model = settings.LLM_MODEL or "qwen2.5-coder:0.5b"
             self.max_tokens = settings.LLM_MAX_TOKENS
             self.temperature = settings.LLM_TEMPERATURE
 
@@ -49,7 +47,7 @@ class LLMClient:
         self.max_retries = 3
         self.retry_base_delay = 2.0  # seconds (doubles each attempt: 2s, 4s, 8s)
 
-    async def generate(self, prompt: str, system: Optional[str] = None, format_json: bool = False) -> str:
+    async def generate(self, prompt: str, system: Optional[str] = None, format_json: bool = False, max_tokens: Optional[int] = None) -> str:
         """
         Sends a generation request to the LLM chat completions endpoint (Ollama / LM Studio / Groq).
         Automatically retries up to self.max_retries times on HTTP 429 (rate limit)
@@ -69,7 +67,7 @@ class LLMClient:
         payload = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens or self.max_tokens,
             "temperature": self.temperature
         }
         

@@ -56,6 +56,22 @@ class ResponseGenerator:
         else:
             api_data = api_result
 
+        start_date = None
+        end_date = None
+        if entities and "filters" in entities:
+            for f in entities["filters"]:
+                if isinstance(f, dict) and f.get("field") == "runDate":
+                    if f.get("operator") == "gte":
+                        start_date = f.get("value")
+                    elif f.get("operator") == "lte":
+                        end_date = f.get("value")
+
+        # Fast-path: Instant 0ms response formatting for simple count queries
+        if start_date and end_date:
+            return f"Total {total_trips} trips found for date range from {start_date} to {end_date}."
+        elif total_trips is not None and not (isinstance(api_data, list) and len(api_data) > 0):
+            return f"Total {total_trips} trips found."
+
         # Truncate lists in API result to protect local LLM context window
         truncated_result = self._truncate_data_for_llm(api_data)
         
@@ -78,17 +94,21 @@ class ResponseGenerator:
             response = await self.llm_client.generate(
                 prompt=prompt,
                 system=RESPONSE_GENERATION_SYSTEM_PROMPT,
-                format_json=False
+                format_json=False,
+                max_tokens=60
             )
             cleaned = response.strip()
             if cleaned.startswith("```html") and cleaned.endswith("```"):
                 cleaned = cleaned[7:-3].strip()
             elif cleaned.startswith("```") and cleaned.endswith("```"):
                 cleaned = cleaned[3:-3].strip()
+            import re
+            cleaned = re.sub(r'<[^>]+>', '', cleaned).strip()
             return cleaned
         except LLMRateLimitError as rle:
             raise rle
         except Exception as exc:
             log_error(session_id, "RESPONSE_GENERATION_FAILED", str(exc))
-            # Graceful fallback: return a default message and serialized information
-            return f"I found the trip details, but had trouble formatting the response: {total_trips} trips found."
+            if start_date and end_date:
+                return f"Total {total_trips} trips found for date range from {start_date} to {end_date}."
+            return f"Total {total_trips} trips found."
