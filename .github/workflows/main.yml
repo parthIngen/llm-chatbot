@@ -7,122 +7,72 @@ on:
 
 jobs:
   deploy:
-    name: Deploy to Production Server
     runs-on: ubuntu-latest
 
     steps:
 
-      # --------------------------------------------------
-      # 1. Checkout latest code from GitHub
-      # --------------------------------------------------
-      - name: Checkout repository
+      # 1. Get latest code from GitHub
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # --------------------------------------------------
-      # 2. Setup SSH private key
-      # --------------------------------------------------
+      # 2. Configure SSH
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
 
-      # --------------------------------------------------
-      # 3. Add server to known_hosts
-      # --------------------------------------------------
+      # 3. Add server to known hosts
       - name: Add server to known hosts
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 
-      # --------------------------------------------------
-      # 4. Create deployment package
-      #
-      # Do NOT upload:
-      # - .git
-      # - .github
-      # - .env
-      # - venv
-      # - Python cache
-      # --------------------------------------------------
-      - name: Create deployment package
+      # 4. Install rsync on GitHub runner
+      - name: Install rsync
         run: |
-          tar \
-            --exclude='.git' \
-            --exclude='.github' \
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+      # 5. Upload code
+      - name: Upload application files
+        run: |
+          rsync -avz \
+            --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
             --exclude='.env' \
-            --exclude='venv' \
-            --exclude='__pycache__' \
+            --exclude='venv/' \
+            --exclude='__pycache__/' \
             --exclude='*.pyc' \
-            -czf deploy.tar.gz .
+            ./ \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/data/llm-chatbot-main/
 
-      # --------------------------------------------------
-      # 5. Upload code to server
-      # --------------------------------------------------
-      - name: Upload application
-        run: |
-          scp \
-            deploy.tar.gz \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/llm-chatbot-deploy.tar.gz
-
-      # --------------------------------------------------
-      # 6. Deploy application
-      # --------------------------------------------------
-      - name: Deploy application
+      # 6. Install dependencies and restart API
+      - name: Restart API
         run: |
           ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
 
             set -e
 
-            echo "========================================="
-            echo "Starting deployment..."
-            echo "========================================="
-
-            PROJECT_DIR="/data/llm-chatbot-main"
-
-            cd "$PROJECT_DIR"
-
-            echo "Current directory:"
-            pwd
-
-            echo "Stopping API service..."
-
-            sudo systemctl stop llm-chatbot-main
-
-            echo "Extracting new code..."
-
-            tar -xzf /tmp/llm-chatbot-deploy.tar.gz -C "$PROJECT_DIR"
-
-            echo "Removing deployment package..."
-
-            rm -f /tmp/llm-chatbot-deploy.tar.gz
+            cd /data/llm-chatbot-main
 
             echo "Activating virtual environment..."
 
-            source "$PROJECT_DIR/venv/bin/activate"
+            source venv/bin/activate
 
             echo "Python version:"
             python --version
 
             echo "Installing dependencies..."
 
-            pip install --upgrade pip
+            pip install -r requirements.txt
 
-            pip install -r "$PROJECT_DIR/requirements.txt"
+            echo "Restarting API..."
 
-            echo "Starting API service..."
+            sudo systemctl restart llm-chatbot-main
 
-            sudo systemctl start llm-chatbot-main
-
-            echo "Waiting for service..."
-
-            sleep 5
-
-            echo "Checking service status..."
+            echo "Checking service..."
 
             sudo systemctl status llm-chatbot-main --no-pager
-
-            echo "========================================="
-            echo "Deployment completed successfully!"
-            echo "========================================="
 
           EOF
