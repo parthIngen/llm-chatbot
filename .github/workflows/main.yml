@@ -7,21 +7,43 @@ on:
 
 jobs:
   deploy:
+    name: Deploy to Production Server
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+
+      # --------------------------------------------------
+      # 1. Checkout latest code from GitHub
+      # --------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # --------------------------------------------------
+      # 2. Setup SSH private key
+      # --------------------------------------------------
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
 
+      # --------------------------------------------------
+      # 3. Add server to known_hosts
+      # --------------------------------------------------
       - name: Add server to known hosts
         run: |
+          mkdir -p ~/.ssh
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 
+      # --------------------------------------------------
+      # 4. Create deployment package
+      #
+      # Do NOT upload:
+      # - .git
+      # - .github
+      # - .env
+      # - venv
+      # - Python cache
+      # --------------------------------------------------
       - name: Create deployment package
         run: |
           tar \
@@ -33,37 +55,74 @@ jobs:
             --exclude='*.pyc' \
             -czf deploy.tar.gz .
 
-      - name: Upload code to server
+      # --------------------------------------------------
+      # 5. Upload code to server
+      # --------------------------------------------------
+      - name: Upload application
         run: |
-          scp deploy.tar.gz \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/deploy.tar.gz
+          scp \
+            deploy.tar.gz \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/llm-chatbot-deploy.tar.gz
 
-      - name: Deploy and restart API
+      # --------------------------------------------------
+      # 6. Deploy application
+      # --------------------------------------------------
+      - name: Deploy application
         run: |
           ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
 
-            cd /data/llm-chatbot-main
+            set -e
+
+            echo "========================================="
+            echo "Starting deployment..."
+            echo "========================================="
+
+            PROJECT_DIR="/data/llm-chatbot-main"
+
+            cd "$PROJECT_DIR"
+
+            echo "Current directory:"
+            pwd
+
+            echo "Stopping API service..."
+
+            sudo systemctl stop llm-chatbot-main
 
             echo "Extracting new code..."
 
-            tar -xzf /tmp/deploy.tar.gz
+            tar -xzf /tmp/llm-chatbot-deploy.tar.gz -C "$PROJECT_DIR"
 
-            rm -f /tmp/deploy.tar.gz
+            echo "Removing deployment package..."
+
+            rm -f /tmp/llm-chatbot-deploy.tar.gz
 
             echo "Activating virtual environment..."
 
-            source /data/llm-chatbot-main/venv/bin/activate
+            source "$PROJECT_DIR/venv/bin/activate"
+
+            echo "Python version:"
+            python --version
 
             echo "Installing dependencies..."
 
-            pip install -r requirements.txt
+            pip install --upgrade pip
 
-            echo "Restarting API..."
+            pip install -r "$PROJECT_DIR/requirements.txt"
 
-            sudo systemctl restart llm-chatbot-main
+            echo "Starting API service..."
+
+            sudo systemctl start llm-chatbot-main
+
+            echo "Waiting for service..."
+
+            sleep 5
 
             echo "Checking service status..."
 
             sudo systemctl status llm-chatbot-main --no-pager
+
+            echo "========================================="
+            echo "Deployment completed successfully!"
+            echo "========================================="
 
           EOF
