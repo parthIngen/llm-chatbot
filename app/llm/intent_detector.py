@@ -294,6 +294,7 @@ class IntentDetector:
                     "operator": "lte",
                     "value": extracted_end
                 })
+                
 
             # If no runDate filter was extracted by regex or LLM, check for relative date keywords in user query
             has_run_date = any(isinstance(f, dict) and f.get("field") == "runDate" for f in query_payload["filters"])
