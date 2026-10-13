@@ -39,7 +39,8 @@ FIELD REFERENCE (use these exact API field names and allowed values):
 
   Feeder Type   -> field: "shipmentMethod"
                    values: "feeder", "empty", "surface", "sfc", "speed", "air",
-                            "network", "delivery", "Pick Up", "sfc_network"
+                            "network", "delivery", "Pick Up"
+                   note: \"sfc network schedule\" queries map to shipmentMethod \"sfc\"
 
   Trip Status   -> field: "tripStatus"
                    values: "running" (= active/live/in-transit/scheduled/ongoing),
@@ -121,7 +122,7 @@ CRITICAL RULES:
    - "destination is BIB" -> To eq "BIB"
    - "from <Location>", "origin <Location>", "start from <Location>", "departure <Location>" -> From eq "<Location>"
    - "to <Location>", "destination <Location>", "end on <Location>", "ends <Location>", "arrival <Location>" -> To eq "<Location>"
-   - "sfc network schedule trips" or "sfc schedule trips" -> tripStatus eq "active", shipmentMethod eq "sfc_network"
+   - "sfc network schedule trips" or "sfc schedule trips" -> tripStatus eq "active", shipmentMethod eq "sfc"
    - "completed, closed, finished, or inactive trips" -> tripStatus eq "closed"
    - "running trips" or "running" -> tripStatus eq "running"
    - "active trips" or "active" -> tripStatus eq "active"

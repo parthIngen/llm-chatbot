@@ -480,7 +480,7 @@ class IntentDetector:
                 query_payload["filters"].append({
                     "field": "shipmentMethod",
                     "operator": "eq",
-                    "value": "sfc_network"
+                    "value": "sfc"
                 })
 
             # --- Vendor Post-Processing ---
@@ -627,16 +627,21 @@ class IntentDetector:
                         f["value"] = _ATD_ATA_VALUE_MAP[raw_val]
 
             # --- ShipmentMethod Post-Processing ---
-            # Full list of recognized shipmentMethod values
+            # Full list of recognized shipmentMethod values.
+            # NOTE: "sfc network schedule" queries are already handled by is_sfc_network_schedule above;
+            #       skip this block entirely for those to avoid double-injection.
             sm_val: str | None = None
-            if re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
+            if is_sfc_network_schedule:
+                pass  # shipmentMethod already injected as "sfc" above
+            elif re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
                 sm_val = "Pick Up"
-            elif re.search(r'\bsfc[\s-]+network\b', msg_lower):
-                pass  # handled separately by sfc_network_schedule block above
             else:
+                # Exclude "network" and "sfc" when the phrase "sfc network" appears,
+                # so standalone "sfc" and "network" keywords only match non-schedule queries.
+                sm_msg = re.sub(r'\bsfc[\s-]+network\b', '', msg_lower)
                 sm_match = re.search(
                     r'\b(feeder|empty|surface|sfc|speed|air|network|delivery|rail|express|sea)\b',
-                    msg_lower
+                    sm_msg
                 )
                 if sm_match:
                     sm_val = sm_match.group(1)
@@ -805,14 +810,15 @@ class IntentDetector:
                 )
 
             fb_sm_val: str | None = None
-            if re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
+            if is_sfc_network_schedule:
+                pass  # shipmentMethod already injected as "sfc" in the main path above
+            elif re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
                 fb_sm_val = "Pick Up"
-            elif re.search(r'\bsfc[\s-]+network\b', msg_lower):
-                pass  # handled separately by is_sfc_network_schedule above
             else:
+                fb_sm_msg = re.sub(r'\bsfc[\s-]+network\b', '', msg_lower)
                 fb_sm_match = re.search(
                     r'\b(feeder|empty|surface|sfc|speed|air|network|delivery|rail|express|sea)\b',
-                    msg_lower
+                    fb_sm_msg
                 )
                 if fb_sm_match:
                     fb_sm_val = fb_sm_match.group(1)
