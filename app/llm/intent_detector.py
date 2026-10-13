@@ -662,6 +662,8 @@ class IntentDetector:
             sm_val: str | None = None
             if is_sfc_network_schedule:
                 pass  # shipmentMethod already injected as "sfc" above
+            elif re.search(r'\b(?:pick[\s-]?up|pickup)\s*(?:and|&|\+)\s*delivery\b', msg_lower):
+                sm_val = "Pick Up and Delivery"
             elif re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
                 sm_val = "Pick Up"
             else:
@@ -841,6 +843,8 @@ class IntentDetector:
             fb_sm_val: str | None = None
             if is_sfc_network_schedule:
                 pass  # shipmentMethod already injected as "sfc" in the main path above
+            elif re.search(r'\b(?:pick[\s-]?up|pickup)\s*(?:and|&|\+)\s*delivery\b', msg_lower):
+                fb_sm_val = "Pick Up and Delivery"
             elif re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
                 fb_sm_val = "Pick Up"
             else:

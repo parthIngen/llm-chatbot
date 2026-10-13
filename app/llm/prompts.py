@@ -137,6 +137,7 @@ CRITICAL RULES:
    - "network trips" -> shipmentMethod eq "network"
    - "delivery trips" -> shipmentMethod eq "delivery"
    - "pick up / pickup trips" -> shipmentMethod eq "Pick Up"
+   - "pickup and delivery" or "pick up & delivery" or "pick up and delivery" -> shipmentMethod eq "Pick Up and Delivery"
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
