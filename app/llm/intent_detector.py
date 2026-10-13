@@ -396,6 +396,9 @@ class IntentDetector:
             elif word_in_text(["scheduled", "sceduled", "transit", "ongoing"], msg_lower) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                 has_status_keyword = True
                 status_override = "running"
+            elif re.search(r'\bsfc[\s-]+network[\s-]+schedule\b|\bsfc[\s-]+schedule\b', msg_lower):
+                has_status_keyword = True
+                status_override = "active"
             elif word_in_text(["valid", "used"], msg_lower) or re.search(r'\bdevice\s+(?:report|data)\b', msg_lower) or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 has_status_keyword = True
                 status_override = "valid"

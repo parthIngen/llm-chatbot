@@ -144,7 +144,11 @@ async def chat_endpoint(
                 and f.get("field") == "tripStatus"
                 and str(f.get("value", "")).lower() in ("running", "active")
                 for f in filters
-            ) or bool(re.search(r'\b(?:in[\s-]transit|transit|running|currently\s+active)\b', request.message.lower()))
+            ) or bool(re.search(
+                r'\b(?:in[\s-]transit|transit|running|currently\s+active'
+                r'|sfc[\s-]+network[\s-]+schedule|sfc[\s-]+schedule)\b',
+                request.message.lower()
+            ))
 
             if not is_active_trip_query:
                 for f in filters:

@@ -62,6 +62,7 @@ CRITICAL RULES:
    - "destination is BIB" -> destination eq "BIB"
    - "from <Location>", "origin <Location>", "start from <Location>", "departure <Location>" -> From eq "<Location>"
    - "to <Location>", "destination <Location>", "end on <Location>", "ends <Location>", "arrival <Location>" -> To eq "<Location>"
+   - "sfc network schedule trips" or "sfc schedule trips" -> tripStatus eq "active"
    - "completed, closed, finished, or inactive trips" -> tripStatus eq "closed"
    - "running trips" or "running" -> tripStatus eq "running"
    - "active trips" or "active" -> tripStatus eq "active"
