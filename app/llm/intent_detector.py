@@ -324,22 +324,39 @@ class IntentDetector:
                         f["operator"] = "eq"
                         f["value"] = "missing"
                         
-            # Normalize fixedelock and portableelock values to empty string unless active/inactive status is requested
+            # Normalize fixedelock/portableelock/gps legacy lowercase field names to canonical PascalCase
+            field_alias_map = {
+                "fixedelock": "FixedELock",
+                "portableelock": "PortableELock",
+                "gps": "FixedGPS",
+                "atd": "ATD",
+                "ata": "ATA",
+            }
             for f in query_payload["filters"]:
-                if isinstance(f, dict) and f.get("field") in ["fixedelock", "portableelock"]:
+                if isinstance(f, dict):
+                    alias = f.get("field", "").lower()
+                    if alias in field_alias_map:
+                        f["field"] = field_alias_map[alias]
+
+            # Normalize FixedELock and PortableELock values to empty string unless a known status is requested
+            _ELOCK_KNOWN_VALUES = {"active", "inactive", "nogps", "gpsinactive", "na"}
+            for f in query_payload["filters"]:
+                if isinstance(f, dict) and f.get("field") in ["FixedELock", "PortableELock"]:
                     val = f.get("value")
-                    if isinstance(val, str) and val.lower() not in ["active", "inactive"]:
+                    if isinstance(val, str) and val.lower() not in _ELOCK_KNOWN_VALUES:
                         f["value"] = ""
 
-            # If fixedelock or portableelock is inactive, remove the redundant/duplicate gps inactive filter
+            # If FixedELock or PortableELock is inactive/nogps/etc., remove the redundant FixedGPS inactive filter
             has_inactive_elock = any(
-                isinstance(f, dict) and f.get("field") in ["fixedelock", "portableelock"] and f.get("value") == "inactive"
+                isinstance(f, dict)
+                and f.get("field") in ["FixedELock", "PortableELock"]
+                and f.get("value", "").lower() in {"inactive", "nogps", "gpsinactive", "na"}
                 for f in query_payload["filters"]
             )
             if has_inactive_elock:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") == "gps" and f.get("value") == "inactive")
+                    if not (isinstance(f, dict) and f.get("field") == "FixedGPS" and f.get("value", "").lower() in {"inactive", "nogps", "gpsinactive", "na"})
                 ]
                         
             # Ensure groupId is always present as a filter with "0041"
@@ -372,7 +389,7 @@ class IntentDetector:
                 if has_inactive:
                     inactive_field_filters = [
                         f for f in query_payload.get("filters", [])
-                        if isinstance(f, dict) and f.get("field") in ["gps", "portableelock", "fixedelock"] and f.get("value") == "inactive"
+                        if isinstance(f, dict) and f.get("field") in ["FixedGPS", "PortableELock", "FixedELock"] and f.get("value", "").lower() in {"inactive", "nogps", "gpsinactive", "na"}
                     ]
                     if inactive_field_filters:
                         explicit_inactive_trip = (
@@ -412,7 +429,7 @@ class IntentDetector:
                 if has_active and not has_open:
                     active_field_filters = [
                         f for f in query_payload.get("filters", [])
-                        if isinstance(f, dict) and f.get("field") in ["gps", "portableelock", "fixedelock"] and f.get("value") == "active"
+                        if isinstance(f, dict) and f.get("field") in ["FixedGPS", "PortableELock", "FixedELock"] and f.get("value") in ["Active", "active"]
                     ]
                     if active_field_filters:
                         # Check if "active" explicitly describes trips/trip
@@ -527,7 +544,7 @@ class IntentDetector:
                 # Remove legacy-style device filters (gps, fixedelock, portableelock)
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") in ["gps", "fixedelock", "portableelock", "fixed-gps status"])
+                    if not (isinstance(f, dict) and f.get("field") in ["FixedGPS", "FixedELock", "PortableELock", "fixed-gps status", "gps", "fixedelock", "portableelock"])
                 ]
 
                 group_by_fields: list = []
@@ -550,8 +567,7 @@ class IntentDetector:
                 ]
 
             # --- RouteCategory Post-Processing ---
-            # Detect "intracity" or "intercity" keywords and inject a routeCategory filter.
-            # Server-side detection ensures the LLM can't hallucinate or miss this field.
+            # Also handle tripType as a synonym for routeCategory.
             route_category_value: str | None = None
             if re.search(r'\bintracity\b', msg_lower):
                 route_category_value = "intracity"
@@ -559,10 +575,10 @@ class IntentDetector:
                 route_category_value = "intercity"
 
             if route_category_value:
-                # Remove any routeType or routeCategory filter the LLM may have generated (to avoid duplicates)
+                # Remove any routeType, routeCategory, or tripType filter the LLM may have generated
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory"])
+                    if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
                 ]
                 query_payload["filters"].append({
                     "field": "routeCategory",
@@ -570,12 +586,58 @@ class IntentDetector:
                     "value": route_category_value
                 })
 
+            # --- closeRemarks Post-Processing ---
+            _VALID_REMARKS = {"manual", "forcefully", "geofence", "api", "backend", "web"}
+            remark_match = re.search(
+                r'\b(manual|forcefully|geofence|api|backend|web)\b(?:\s+remark)?',
+                msg_lower
+            )
+            if not remark_match:
+                remark_match = re.search(
+                    r'\bremark[s]?\s+(manual|forcefully|geofence|api|backend|web)\b',
+                    msg_lower
+                )
+            if remark_match:
+                remark_val = remark_match.group(1)
+                # Remove any existing closeRemarks filter from LLM output first
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") == "closeRemarks")
+                ]
+                query_payload["filters"].append({
+                    "field": "closeRemarks",
+                    "operator": "eq",
+                    "value": remark_val
+                })
+
+            # --- ATD / ATA Post-Processing ---
+            # Normalize ATD/ATA field values to canonical forms
+            _ATD_ATA_VALUE_MAP = {
+                "notcaptured": "notcaptured",
+                "not captured": "notcaptured",
+                "captured": "Captured",
+                "missing": "missing",
+                "notmissing": "NotMissing",
+                "not missing": "NotMissing",
+            }
+            for f in query_payload["filters"]:
+                if isinstance(f, dict) and f.get("field") in ["ATD", "ATA"]:
+                    raw_val = str(f.get("value", "")).lower().strip()
+                    if raw_val in _ATD_ATA_VALUE_MAP:
+                        f["value"] = _ATD_ATA_VALUE_MAP[raw_val]
+
             # --- ShipmentMethod Post-Processing ---
+            # Full list of recognized shipmentMethod values
             sm_val: str | None = None
             if re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
                 sm_val = "Pick Up"
+            elif re.search(r'\bsfc[\s-]+network\b', msg_lower):
+                pass  # handled separately by sfc_network_schedule block above
             else:
-                sm_match = re.search(r'\b(feeder|air|surface|rail|express|sea)\b', msg_lower)
+                sm_match = re.search(
+                    r'\b(feeder|empty|surface|sfc|speed|air|network|delivery|rail|express|sea)\b',
+                    msg_lower
+                )
                 if sm_match:
                     sm_val = sm_match.group(1)
 
@@ -709,7 +771,7 @@ class IntentDetector:
             if fb_has_fixed_elock or fb_has_portable_elock:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") in ["gps", "fixedelock", "portableelock", "fixed-gps status"])
+                    if not (isinstance(f, dict) and f.get("field") in ["FixedGPS", "FixedELock", "PortableELock", "fixed-gps status", "gps", "fixedelock", "portableelock"])
                 ]
                 fb_group_by: list = []
                 if fb_has_fixed_elock:
@@ -736,7 +798,7 @@ class IntentDetector:
             if fb_route_category:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory"])
+                    if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
                 ]
                 fallback_payload["filters"].append(
                     {"field": "routeCategory", "operator": "eq", "value": fb_route_category}
@@ -745,8 +807,13 @@ class IntentDetector:
             fb_sm_val: str | None = None
             if re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
                 fb_sm_val = "Pick Up"
+            elif re.search(r'\bsfc[\s-]+network\b', msg_lower):
+                pass  # handled separately by is_sfc_network_schedule above
             else:
-                fb_sm_match = re.search(r'\b(feeder|air|surface|rail|express|sea)\b', msg_lower)
+                fb_sm_match = re.search(
+                    r'\b(feeder|empty|surface|sfc|speed|air|network|delivery|rail|express|sea)\b',
+                    msg_lower
+                )
                 if fb_sm_match:
                     fb_sm_val = fb_sm_match.group(1)
 

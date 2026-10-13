@@ -32,6 +32,59 @@ The output JSON MUST follow this format exactly:
 Note: "analytics" is optional. Only include it when the query specifically asks about delayed departures or arrivals.
 Note: "groupBy" and "metrics" are optional. Include them for device-combo queries or transporter/unique-vehicle count queries (see field mappings below).
 
+FIELD REFERENCE (use these exact API field names and allowed values):
+
+  Trip Type     -> field: "routeCategory" (also accepted as "tripType")
+                   values: "intercity", "intracity"
+
+  Feeder Type   -> field: "shipmentMethod"
+                   values: "feeder", "empty", "surface", "sfc", "speed", "air",
+                            "network", "delivery", "Pick Up", "sfc_network"
+
+  Trip Status   -> field: "tripStatus"
+                   values: "running" (= active/live/in-transit/scheduled/ongoing),
+                            "active" (= running — treat running and active as equivalent),
+                            "closed" (= completed/finished/inactive),
+                            "cancelled",
+                            "valid" (used for device-report / 3rd-party data queries)
+
+  Region        -> field: "region"   (e.g. "North", "South", "East", "West")
+
+  Origin        -> field: "From"     (city/hub code — e.g. "NGA", "DEL")
+  Destination   -> field: "To"       (city/hub code — e.g. "BIB", "MUM")
+
+  Vehicle       -> field: "vehicleNo" (e.g. "DL01HU5859")
+
+  Route         -> field: "Route"    (route name/code)
+
+  GPS Vendor    -> field: "vendor"
+                   values: "ICICI" maps to "Secutrak",
+                            "Secutrak",
+                            "ThirdParty" (= 3rd-party / portable device)
+
+  Fixed GPS Exception    -> field: "FixedGPS"  (also accepted as "gps")
+                            values: "inactive", "nogps", "gpsInactive", "NA", "Active"
+
+  Fixed ELock Exception  -> field: "FixedELock"  (also accepted as "fixedelock")
+                            values: "inactive", "nogps", "gpsInactive", "NA", "Active"
+
+  Portable ELock Exception -> field: "PortableELock"  (also accepted as "portableelock")
+                              values: "inactive", "nogps", "gpsInactive", "NA", "Active"
+
+  Remarks       -> field: "closeRemarks"
+                   values: "manual", "forcefully", "geofence", "api", "backend", "web"
+
+  ATD (Actual Time of Departure) -> field: "ATD"
+                   values: "notcaptured", "Captured", "missing", "NotMissing"
+                   Natural language: "ATD not captured" -> ATD eq "notcaptured"
+                                     "ATD captured"     -> ATD eq "Captured"
+                                     "ATD missing"      -> ATD eq "missing"
+                                     "ATD not missing"  -> ATD eq "NotMissing"
+
+  ATA (Actual Time of Arrival)   -> field: "ATA"
+                   values: "notcaptured", "Captured", "missing", "NotMissing"
+                   Natural language: same pattern as ATD above
+
 CRITICAL RULES:
 1. "entity" is always "trip".
 2. "operation" MUST ALWAYS be "count" for all queries. Do not use "find".
@@ -42,24 +95,30 @@ CRITICAL RULES:
    - "ICICI device trips" -> vendor eq "Secutrak"
    - "3rd-party device trips" or "portable device trips" or "portable lock device trips" -> portableelock eq ""
    - "Fixed E-Lock device trips" or "fixed lock device trips" or "elock device trips" -> fixedelock eq ""
-   - "GPS active/inactive trips" -> gps eq "active"/"inactive"
-   - "Fixed E-Lock inactive" or "fixed lock inactive" -> fixedelock eq "inactive"
-   - "Portable E-Lock inactive" or "portable lock inactive" -> portableelock eq "inactive"
-   - "GPS status is NA/na/not applicable/not captured/inactive" -> gps eq "inactive"
-   - "Fixed E-Lock (trips) where GPS is NA/na/not applicable/not captured/inactive" -> fixedelock eq "inactive" (do not include gps filter)
-   - "Portable E-Lock (trips) where GPS is NA/na/not applicable/not captured/inactive" -> portableelock eq "inactive" (do not include gps filter)
-   - "GPS is active" -> gps eq "active"
-   - "Portable Lock is active" -> portableelock eq "active"
-   - "ATD is missing" -> atd eq "missing"
-   - "ATA is missing" -> ata eq "missing"
-   - "GPS is active but ATD is not captured/missing" -> gps eq "active", atd eq "missing"
-   - "GPS is active but ATA is missing" -> gps eq "active", ata eq "missing"
+   - "Fixed GPS inactive/nogps/gpsInactive/NA" -> FixedGPS eq "inactive"/"nogps"/"gpsInactive"/"NA"
+   - "Fixed ELock inactive/nogps/gpsInactive/NA" -> FixedELock eq "inactive"/"nogps"/"gpsInactive"/"NA"
+   - "Portable ELock inactive/nogps/gpsInactive/NA" -> PortableELock eq "inactive"/"nogps"/"gpsInactive"/"NA"
+   - "GPS active/inactive trips" -> FixedGPS eq "Active"/"inactive"
+   - "Fixed E-Lock inactive" or "fixed lock inactive" -> FixedELock eq "inactive"
+   - "Portable E-Lock inactive" or "portable lock inactive" -> PortableELock eq "inactive"
+   - "GPS status is NA/na/not applicable/not captured/inactive" -> FixedGPS eq "inactive"
+   - "Fixed E-Lock (trips) where GPS is NA/na/not applicable/not captured/inactive" -> FixedELock eq "inactive" (do not include FixedGPS filter)
+   - "Portable E-Lock (trips) where GPS is NA/na/not applicable/not captured/inactive" -> PortableELock eq "inactive" (do not include FixedGPS filter)
+   - "GPS is active" -> FixedGPS eq "Active"
+   - "Portable Lock is active" -> PortableELock eq "Active"
+   - "ATD is missing" -> ATD eq "missing"
+   - "ATD is not captured" -> ATD eq "notcaptured"
+   - "ATA is missing" -> ATA eq "missing"
+   - "ATA is not captured" -> ATA eq "notcaptured"
+   - "GPS is active but ATD is not captured/missing" -> FixedGPS eq "Active", ATD eq "missing"
+   - "GPS is active but ATA is missing" -> FixedGPS eq "Active", ATA eq "missing"
+   - "closed with remark manual/forcefully/geofence/api/backend/web" -> closeRemarks eq "<remark>"
    - "departure/arrival was delayed" -> analytics: [{"type": "departureDelayed"/"arrivalDelayed"}]
    - "route <Name>" -> Route eq "<Name>" or RouteName eq "<Name>"
    - "vehicles belonging to transporter <Transporter>" -> Transporter eq "<Transporter>", select: ["vehicle_no"]
    - "fleet <Fleet>" -> Fleet eq "<Fleet>"
    - "DL01HU5859" -> vehicleNo eq "DL01HU5859"
-   - "destination is BIB" -> destination eq "BIB"
+   - "destination is BIB" -> To eq "BIB"
    - "from <Location>", "origin <Location>", "start from <Location>", "departure <Location>" -> From eq "<Location>"
    - "to <Location>", "destination <Location>", "end on <Location>", "ends <Location>", "arrival <Location>" -> To eq "<Location>"
    - "sfc network schedule trips" or "sfc schedule trips" -> tripStatus eq "active", shipmentMethod eq "sfc_network"
@@ -68,7 +127,15 @@ CRITICAL RULES:
    - "active trips" or "active" -> tripStatus eq "active"
    - "scheduled, live, open, in transit, or transit trips" -> tripStatus eq "running"
    - "cancelled trips" -> tripStatus eq "cancelled"
-   - "feeder, air, pick up / pickup, surface, rail, or express trips" -> shipmentMethod eq "feeder" | "air" | "Pick Up" | "surface" | "rail" | "express"
+   - "feeder trips" -> shipmentMethod eq "feeder"
+   - "empty trips" -> shipmentMethod eq "empty"
+   - "surface trips" -> shipmentMethod eq "surface"
+   - "sfc trips" (without "network") -> shipmentMethod eq "sfc"
+   - "speed trips" -> shipmentMethod eq "speed"
+   - "air trips" -> shipmentMethod eq "air"
+   - "network trips" -> shipmentMethod eq "network"
+   - "delivery trips" -> shipmentMethod eq "delivery"
+   - "pick up / pickup trips" -> shipmentMethod eq "Pick Up"
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
@@ -88,12 +155,19 @@ CRITICAL RULES:
    - 'august' or 'of august' or 'for august' (no year) -> use the most recent August; if current month is September 2026, resolve to runDate gte '2026-08-01 00:00:00', runDate lte '2026-08-31 23:59:59'
    - 'august 2025' or 'for August 2025' -> runDate gte '2025-08-01 00:00:00', runDate lte '2025-08-31 23:59:59'
    - Any other month name with or without year -> compute the first and last day of that month accordingly
-6. For fields representing status or missing elements (e.g. 'active', 'inactive', 'missing'), the operator MUST be 'eq' and the value is the status/missing word (e.g. 'active' or 'missing'). Do NOT use 'missing' as an operator name.
-7. For the fields 'fixedelock' and 'portableelock', when the query asks about device trips (e.g. 'Fixed E-Lock device trips', '3rd-party device trips'), the value MUST be a blank string (""). The value should only be "active" or "inactive" if those specific status words are mentioned. Do NOT use "device" or "Fixed E-Lock" as a filter value.
+6. For fields representing status or missing elements (e.g. 'active', 'inactive', 'missing', 'notcaptured'), the operator MUST be 'eq' and the value is the exact status word. Do NOT use 'missing' or 'notcaptured' as operator names.
+7. For the fields 'FixedELock' and 'PortableELock', when the query asks about device trips (e.g. 'Fixed E-Lock device trips', '3rd-party device trips'), the value MUST be a blank string (""). The value should only be a specific status ("Active", "inactive", "nogps", "gpsInactive", "NA") if those status words are mentioned. Do NOT use "device" or "Fixed E-Lock" as a filter value.
 8. Never map date, time, or temporal terms (such as "today", "yesterday", "last month", "last week", "January 2026", etc.) to the "region" field. The "region" field must only contain actual geographic regions (e.g., "North", "South", "East", "West").
 9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed"), include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed" or "arrivalDelayed" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
-10. NEVER add a "tripStatus" filter unless the user's query explicitly mentions trip status words such as "active", "inactive", "completed", "closed", "finished", "scheduled", "running", "live", "transit", "in transit", "en route", or "cancelled". Do NOT default or assume any tripStatus when the query does not mention it.
+10. NEVER add a "tripStatus" filter unless the user's query explicitly mentions trip status words such as "active", "running", "closed", "completed", "finished", "scheduled", "live", "transit", "in transit", "en route", "cancelled", or "valid". Do NOT default or assume any tripStatus when the query does not mention it.
 11. When the query asks to count total unique vehicles and distinct transporters (or vehicle counts per transporter), include "groupBy": ["Transporter"] and "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]. However, when the query asks ONLY for the total number of unique or distinct transporters (without asking for vehicles), do NOT include "groupBy", and set "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}].
+12. For ATD / ATA queries: use field "ATD" / "ATA" (uppercase). Map natural language as follows:
+    - "not captured" / "notcaptured" -> value: "notcaptured"
+    - "captured" -> value: "Captured"
+    - "missing" -> value: "missing"
+    - "not missing" / "notmissing" -> value: "NotMissing"
+13. For Remarks queries: use field "closeRemarks". Valid values are: "manual", "forcefully", "geofence", "api", "backend", "web".
+14. For GPS / ELock exception queries: use fields "FixedGPS", "FixedELock", "PortableELock" (PascalCase). Valid values: "inactive", "nogps", "gpsInactive", "NA", "Active".
 
 - "3rd party device data" or "3rd-party device data" or "3rd party device" or "3rd-party device" -> tripStatus eq "valid", vendor eq "ThirdParty"
 - "Generate the <Vendor> device report" or "<Vendor> device report" -> tripStatus eq "valid", vendor contains "<Vendor>"
@@ -114,15 +188,25 @@ Reference Examples:
 - "Download all trips where GPS and Portable Lock are active but ATD is missing for date range 2026-01-01 to 2026-01-31" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "gps", "operator": "eq", "value": "active"}, {"field": "portableelock", "operator": "eq", "value": "active"}, {"field": "atd", "operator": "eq", "value": "missing"}], "select": []}
 - "Download all Fixed E-Lock trips where GPS is NA for January 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "fixedelock", "operator": "eq", "value": "inactive"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "FixedELock", "operator": "eq", "value": "inactive"}], "select": []}
 - "Download all trips from January 2026 where ATA was not captured" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "ata", "operator": "eq", "value": "missing"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "ATA", "operator": "eq", "value": "notcaptured"}], "select": []}
 - "Show all active trips from NGA location during the last week" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_WEEK_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_WEEK_END"}, {"field": "tripStatus", "operator": "eq", "value": "Active"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "From", "operator": "eq", "value": "NGA"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_WEEK_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_WEEK_END"}, {"field": "tripStatus", "operator": "eq", "value": "active"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "From", "operator": "eq", "value": "NGA"}], "select": []}
 - "Show all currently active trips" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "Active"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "active"}], "select": []}
 - "What trips are currently in transit?" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "Active"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}], "select": []}
+- "Show empty trips for last month" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_MONTH_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_MONTH_END"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "empty"}], "select": []}
+- "Count speed trips closed with geofence remark in January 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "closed"}, {"field": "shipmentMethod", "operator": "eq", "value": "speed"}, {"field": "closeRemarks", "operator": "eq", "value": "geofence"}], "select": []}
+- "Show delivery trips where ATD is not captured" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "delivery"}, {"field": "ATD", "operator": "eq", "value": "notcaptured"}], "select": []}
+- "Show network trips with FixedGPS as nogps" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "network"}, {"field": "FixedGPS", "operator": "eq", "value": "nogps"}], "select": []}
+- "Show all Secutrak vendor intercity trips" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "Show the total count of vehicles using both Fixed E-Lock and Portable E-Lock for January 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "fixed-e-lock status", "operator": "eq", "value": "existing"}, {"field": "portable-e-lock status", "operator": "eq", "value": "existing"}], "groupBy": ["fixed-e-lock status", "portable-e-lock status"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}], "select": []}
 - "How many intracity trips were completed using Fixed E-Lock and Portable E-Lock for January 2026?" ->
