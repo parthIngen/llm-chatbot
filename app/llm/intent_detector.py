@@ -118,6 +118,35 @@ class IntentDetector:
         if is_follow_up and prev_user_msg:
             message = f"{prev_user_msg} for date range {message}"
 
+        # --- Date-Refinement Follow-Up Detection ---
+        # Handle cases like "i want for july" / "for last month" / "july 2026" sent
+        # AFTER the bot already returned a result (not a clarification question).
+        # If the current message is short and contains only a temporal reference,
+        # automatically prepend the last substantive user query so the full intent
+        # (e.g. "sfc network schedule trips for july") is reconstructed.
+        if not is_follow_up and history:
+            _DATE_REF_PATTERNS = [
+                r'\b(january|february|march|april|may|june|july|august|september|october|november|december'
+                r'|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b',
+                r'\blast\s+(?:week|month|year)\b',
+                r'\bthis\s+(?:week|month|year)\b',
+                r'\btoday\b',
+                r'\byesterday\b',
+                r'\b\d{4}-\d{2}-\d{2}\b',
+            ]
+            _msg_lower_tmp = message.lower()
+            _msg_is_date_ref = any(re.search(p, _msg_lower_tmp) for p in _DATE_REF_PATTERNS)
+            _msg_is_short = len(message.strip().split()) <= 8
+
+            if _msg_is_date_ref and _msg_is_short:
+                # Find the last substantive user query in history (more than 3 words)
+                for _item in reversed(history):
+                    if _item.get("role") == "user":
+                        _prev_q = _item.get("content", "").strip()
+                        if len(_prev_q.split()) > 3:
+                            message = f"{_prev_q} {message}"
+                            break
+
         # Extract dates using regex as a reliable fallback
         extracted_start, extracted_end = extract_date_range(message)
 
