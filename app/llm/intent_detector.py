@@ -361,6 +361,7 @@ class IntentDetector:
             msg_lower = message.lower()
             has_status_keyword = False
             status_override = None
+            is_sfc_network_schedule = False
 
             def word_in_text(words, text):
                 return any(re.search(r'\b' + re.escape(w) + r'\b', text) for w in words)
@@ -399,6 +400,7 @@ class IntentDetector:
             elif re.search(r'\bsfc[\s-]+network[\s-]+schedule\b|\bsfc[\s-]+schedule\b', msg_lower):
                 has_status_keyword = True
                 status_override = "active"
+                is_sfc_network_schedule = True
             elif word_in_text(["valid", "used"], msg_lower) or re.search(r'\bdevice\s+(?:report|data)\b', msg_lower) or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 has_status_keyword = True
                 status_override = "valid"
@@ -451,6 +453,18 @@ class IntentDetector:
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                 ]
+
+            # --- SFC Network Schedule: inject shipmentMethod filter ---
+            if is_sfc_network_schedule:
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
+                ]
+                query_payload["filters"].append({
+                    "field": "shipmentMethod",
+                    "operator": "eq",
+                    "value": "sfc_network"
+                })
 
             # --- Vendor Post-Processing ---
             target_vendor = None
