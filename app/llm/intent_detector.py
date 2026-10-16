@@ -526,6 +526,7 @@ class IntentDetector:
 
             # --- Vendor Post-Processing ---
             target_vendor = None
+            dev_vendor_match = None
 
             if re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 target_vendor = "ThirdParty"
@@ -535,6 +536,8 @@ class IntentDetector:
                     candidate = dev_vendor_match.group(1)
                     if candidate.lower() not in ["the", "a", "an", "generate", "download", "get", "show", "fetch", "all", "party"]:
                         target_vendor = candidate
+                    else:
+                        dev_vendor_match = None
 
                 if not target_vendor and re.search(r'\bdevice\s+(?:report|data)\b', msg_lower):
                     v_match = re.search(r'\b(wheelseye|secutrak|icici)\b', msg_lower)
@@ -601,6 +604,9 @@ class IntentDetector:
             _has_together_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_lower))
             _has_together_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?lock\b|\bfixed[\s-]lock\b', msg_lower))
             _has_together_portable_elock = bool(re.search(r'\bportable[\s-]e[\s-]?lock\b|\bportable[\s-]lock\b', msg_lower))
+
+            has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?lock\b', msg_lower))
+            has_portable_elock = bool(re.search(r'\bportable[\s-]e[\s-]?lock\b', msg_lower))
 
             if _is_devices_together and (_has_together_gps or _has_together_fixed_elock or _has_together_portable_elock):
                 # Remove legacy / other device filters
@@ -912,6 +918,9 @@ class IntentDetector:
             fb_has_together_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_lower))
             fb_has_together_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?lock\b|\bfixed[\s-]lock\b', msg_lower))
             fb_has_together_portable_elock = bool(re.search(r'\bportable[\s-]e[\s-]?lock\b|\bportable[\s-]lock\b', msg_lower))
+
+            fb_has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?lock\b', msg_lower))
+            fb_has_portable_elock = bool(re.search(r'\bportable[\s-]e[\s-]?lock\b', msg_lower))
 
             if fb_is_devices_together and (fb_has_together_gps or fb_has_together_fixed_elock or fb_has_together_portable_elock):
                 fallback_payload["filters"] = [
