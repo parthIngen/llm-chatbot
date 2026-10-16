@@ -141,6 +141,12 @@ CRITICAL RULES:
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
+   - DEVICES TOGETHER: When the query asks about trips using devices together (e.g. "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?"):
+       * GPS / Fixed GPS -> field: "GPS", operator: "eq", value: "existing"
+       * Fixed E-Lock -> field: "FixedELock", operator: "eq", value: "existing"
+       * Portable E-Lock -> field: "PortableELock", operator: "eq", value: "existing"
+       * Do NOT include groupBy or metrics for "together" queries.
+       * Do NOT add a tripStatus filter (the word "used" is not a status keyword).
    - DEVICE COMBO: When query mentions "Fixed E-Lock" as a device type (not a status) ->
        filter: fixed-e-lock status eq "existing", include in groupBy, add metrics block
    - DEVICE COMBO: When query mentions "Portable E-Lock" as a device type (not a status) ->
@@ -223,6 +229,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "active"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "Pick Up"}], "select": []}
 - "Count total unique vehicles and distinct transporters for April 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-04-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-04-30 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["Transporter"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}], "select": []}
+- "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "existing"}, {"field": "PortableELock", "operator": "eq", "value": "existing"}], "select": []}
 - "Show total number of unique transporters used in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}], "select": []}
 
