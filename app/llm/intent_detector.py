@@ -83,6 +83,44 @@ def extract_date_range(text: str) -> tuple[str | None, str | None]:
         return start_date, end_date
     return None, None
 
+def detect_shipment_method(msg_lower: str) -> str | None:
+    """Detect and normalize shipment method names to canonical values:
+    feeder, empty, surface, sfc, speed, air, network, delivery, Pick Up, Pick Up and Delivery, Comm/BZ-Out, Comm/BZ-In.
+    """
+    if re.search(r'\b(?:pick[\s-]?up|pickup)\s*(?:and|&|\+)\s*delivery\b', msg_lower):
+        return "Pick Up and Delivery"
+    if re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
+        return "Pick Up"
+    if re.search(r'\bcomm[\s/_-]*bz[\s/_-]*out\b', msg_lower):
+        return "Comm/BZ-Out"
+    if re.search(r'\bcomm[\s/_-]*bz[\s/_-]*in\b', msg_lower):
+        return "Comm/BZ-In"
+    if re.search(r'\bcustomer[\s_-]+delivery\b|\bcustomer[\s_-]+del\b', msg_lower):
+        return "delivery"
+    if re.search(r'\bair[\s_-]+(?:network|truck)\b', msg_lower):
+        return "air"
+    if re.search(r'\bsfc[\s_-]+(?:network|truck|schedule)\b', msg_lower):
+        return "sfc"
+    if re.search(r'\bspeed[\s_-]+(?:truck|network)\b', msg_lower):
+        return "speed"
+    if re.search(r'\bfeeder[\s_-]+(?:truck|network)\b', msg_lower):
+        return "feeder"
+    if re.search(r'\bempty[\s_-]+(?:truck|network)\b', msg_lower):
+        return "empty"
+    if re.search(r'\bsurface[\s_-]+(?:network|truck)\b', msg_lower):
+        return "surface"
+    
+    # Standalone keywords
+    m = re.search(
+        r'\b(feeder|empty|surface|sfc|speed|air|delivery)\b',
+        msg_lower
+    )
+    if m:
+        return m.group(1)
+    if re.search(r'\bnetwork\b', msg_lower):
+        return "network"
+    return None
+
 class IntentDetector:
     def __init__(self, llm_client: LLMClient = None):
         provider = getattr(settings, "INTENT_LLM_PROVIDER", "groq")
@@ -189,11 +227,10 @@ class IntentDetector:
             f"- LAST_MONTH_START: {last_month_start}\n"
             f"- LAST_MONTH_END: {last_month_end}"
         )
-        
+
         msg_lower = message.lower()
         has_status_keyword = False
         status_override = None
-        is_sfc_network_schedule = False
 
         # Format user prompt
         prompt = INTENT_EXTRACTION_USER_PROMPT_TEMPLATE.format(message=message, date_context=date_context)
@@ -412,9 +449,9 @@ class IntentDetector:
                 
             # Determine if a status was requested based on keywords in user message
             msg_lower = message.lower()
+            detected_sm = detect_shipment_method(msg_lower)
             has_status_keyword = False
             status_override = None
-            is_sfc_network_schedule = False
 
             def word_in_text(words, text):
                 return any(re.search(r'\b' + re.escape(w) + r'\b', text) for w in words)
@@ -444,16 +481,15 @@ class IntentDetector:
             elif word_in_text(["cancelled", "canceled"], msg_lower):
                 has_status_keyword = True
                 status_override = "cancelled"
-            elif word_in_text(["running"], msg_lower):
+            elif detected_sm:
+                # Queries mentioning any shipment method ("AIR_Network", "SFC_Network", "Speed_Truck",
+                # "Feeder", "Empty", "Delivery", "Customer Delivery", "Surface", "Network", etc.)
+                # default to tripStatus="running" unless an explicit closed/cancelled status was requested.
                 has_status_keyword = True
                 status_override = "running"
-            elif word_in_text(["scheduled", "sceduled", "transit", "ongoing"], msg_lower) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
+            elif word_in_text(["running", "scheduled", "sceduled", "transit", "ongoing", "moving", "intransit", "live"], msg_lower) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                 has_status_keyword = True
                 status_override = "running"
-            elif re.search(r'\bsfc[\s-]+network[\s-]+schedule\b|\bsfc[\s-]+schedule\b', msg_lower):
-                has_status_keyword = True
-                status_override = "active"
-                is_sfc_network_schedule = True
             elif (
                 word_in_text(["valid"], msg_lower)
                 or re.search(r'\bdevice\s+(?:report|data)\b', msg_lower)
@@ -512,8 +548,8 @@ class IntentDetector:
                     if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                 ]
 
-            # --- SFC Network Schedule: inject shipmentMethod filter ---
-            if is_sfc_network_schedule:
+            # --- ShipmentMethod Injection ---
+            if detected_sm:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -521,7 +557,7 @@ class IntentDetector:
                 query_payload["filters"].append({
                     "field": "shipmentMethod",
                     "operator": "eq",
-                    "value": "sfc"
+                    "value": detected_sm
                 })
 
             # --- Vendor Post-Processing ---
@@ -751,27 +787,7 @@ class IntentDetector:
 
             # --- ShipmentMethod Post-Processing ---
             # Full list of recognized shipmentMethod values.
-            # NOTE: "sfc network schedule" queries are already handled by is_sfc_network_schedule above;
-            #       skip this block entirely for those to avoid double-injection.
-            sm_val: str | None = None
-            if is_sfc_network_schedule:
-                pass  # shipmentMethod already injected as "sfc" above
-            elif re.search(r'\b(?:pick[\s-]?up|pickup)\s*(?:and|&|\+)\s*delivery\b', msg_lower):
-                sm_val = "Pick Up and Delivery"
-            elif re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
-                sm_val = "Pick Up"
-            else:
-                # Exclude "network" and "sfc" when the phrase "sfc network" appears,
-                # so standalone "sfc" and "network" keywords only match non-schedule queries.
-                sm_msg = re.sub(r'\bsfc[\s-]+network\b', '', msg_lower)
-                sm_match = re.search(
-                    r'\b(feeder|empty|surface|sfc|speed|air|network|delivery|rail|express|sea)\b',
-                    sm_msg
-                )
-                if sm_match:
-                    sm_val = sm_match.group(1)
-
-            if sm_val:
+            if detected_sm:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -779,7 +795,7 @@ class IntentDetector:
                 query_payload["filters"].append({
                     "field": "shipmentMethod",
                     "operator": "eq",
-                    "value": sm_val
+                    "value": detected_sm
                 })
 
             # --- Transporter & Vehicle Metrics Post-Processing ---
@@ -839,7 +855,8 @@ class IntentDetector:
                 })
             else:
                 # Basic keyword check for fallback — only inject tripStatus when
-                # the user explicitly mentioned a status term. Never default.
+                # the user explicitly mentioned a status term or a shipmentMethod. Never default otherwise.
+                fb_detected_sm = detect_shipment_method(msg_lower)
                 if any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["completed", "finish", "finished", "closed", "inactive"]):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
@@ -852,7 +869,7 @@ class IntentDetector:
                         "operator": "eq",
                         "value": "cancelled"
                     })
-                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["running", "scheduled", "sceduled", "active", "open", "transit", "ongoing"]) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
+                elif fb_detected_sm or any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["running", "scheduled", "sceduled", "active", "open", "transit", "ongoing", "moving", "intransit", "live"]) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
                         "operator": "eq",
@@ -1006,22 +1023,7 @@ class IntentDetector:
                     {"field": "routeCategory", "operator": "eq", "value": fb_route_category}
                 )
 
-            fb_sm_val: str | None = None
-            if is_sfc_network_schedule:
-                pass  # shipmentMethod already injected as "sfc" in the main path above
-            elif re.search(r'\b(?:pick[\s-]?up|pickup)\s*(?:and|&|\+)\s*delivery\b', msg_lower):
-                fb_sm_val = "Pick Up and Delivery"
-            elif re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
-                fb_sm_val = "Pick Up"
-            else:
-                fb_sm_msg = re.sub(r'\bsfc[\s-]+network\b', '', msg_lower)
-                fb_sm_match = re.search(
-                    r'\b(feeder|empty|surface|sfc|speed|air|network|delivery|rail|express|sea)\b',
-                    fb_sm_msg
-                )
-                if fb_sm_match:
-                    fb_sm_val = fb_sm_match.group(1)
-
+            fb_sm_val = detect_shipment_method(msg_lower)
             if fb_sm_val:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
@@ -1030,6 +1032,16 @@ class IntentDetector:
                 fallback_payload["filters"].append(
                     {"field": "shipmentMethod", "operator": "eq", "value": fb_sm_val}
                 )
+                has_fb_trip_status = any(
+                    isinstance(f, dict) and f.get("field") == "tripStatus"
+                    for f in fallback_payload["filters"]
+                )
+                if not has_fb_trip_status:
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "running"
+                    })
 
             # Apply Transporter / Unique Vehicle post-processing to fallback
             fb_has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))

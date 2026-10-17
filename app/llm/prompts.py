@@ -39,8 +39,13 @@ FIELD REFERENCE (use these exact API field names and allowed values):
 
   Feeder Type   -> field: "shipmentMethod"
                    values: "feeder", "empty", "surface", "sfc", "speed", "air",
-                            "network", "delivery", "Pick Up"
-                   note: \"sfc network schedule\" queries map to shipmentMethod \"sfc\"
+                            "network", "delivery", "Pick Up", "Pick Up and Delivery"
+                   note: Users can ask with different variations (e.g. "AIR_Network" -> "air",
+                         "SFC_Network" -> "sfc", "Speed_Truck" -> "speed", "Feeder" -> "feeder",
+                         "Empty" -> "empty", "Customer Delivery" -> "delivery", "Delivery" -> "delivery",
+                         "Surface" -> "surface", "Network" -> "network").
+                         All trip queries for these shipment methods default to tripStatus eq "running"
+                         (with schedule, running, intransit, active, moving, etc.) unless closed/cancelled is requested.
 
   Trip Status   -> field: "tripStatus"
                    values: "running" (= active/live/in-transit/scheduled/ongoing),
@@ -122,22 +127,22 @@ CRITICAL RULES:
    - "destination is BIB" -> To eq "BIB"
    - "from <Location>", "origin <Location>", "start from <Location>", "departure <Location>" -> From eq "<Location>"
    - "to <Location>", "destination <Location>", "end on <Location>", "ends <Location>", "arrival <Location>" -> To eq "<Location>"
-   - "sfc network schedule trips" or "sfc schedule trips" -> tripStatus eq "active", shipmentMethod eq "sfc"
    - "completed, closed, finished, or inactive trips" -> tripStatus eq "closed"
-   - "running trips" or "running" -> tripStatus eq "running"
+   - "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" -> tripStatus eq "running"
    - "active trips" or "active" -> tripStatus eq "active"
-   - "scheduled, live, open, in transit, or transit trips" -> tripStatus eq "running"
    - "cancelled trips" -> tripStatus eq "cancelled"
-   - "feeder trips" -> shipmentMethod eq "feeder"
-   - "empty trips" -> shipmentMethod eq "empty"
-   - "surface trips" -> shipmentMethod eq "surface"
-   - "sfc trips" (without "network") -> shipmentMethod eq "sfc"
-   - "speed trips" -> shipmentMethod eq "speed"
-   - "air trips" -> shipmentMethod eq "air"
-   - "network trips" -> shipmentMethod eq "network"
-   - "delivery trips" -> shipmentMethod eq "delivery"
-   - "pick up / pickup trips" -> shipmentMethod eq "Pick Up"
-   - "pickup and delivery" or "pick up & delivery" or "pick up and delivery" -> shipmentMethod eq "Pick Up and Delivery"
+   - SHIPMENT METHODS:
+       * "AIR_Network", "air network", "air truck", "air trips", "air" -> shipmentMethod eq "air"
+       * "SFC_Network", "sfc network", "sfc truck", "sfc schedule", "sfc trips", "sfc" -> shipmentMethod eq "sfc"
+       * "Speed_Truck", "speed truck", "speed network", "speed trips", "speed" -> shipmentMethod eq "speed"
+       * "Feeder", "feeder truck", "feeder network", "feeder trips", "feeder" -> shipmentMethod eq "feeder"
+       * "Empty", "empty truck", "empty network", "empty trips", "empty" -> shipmentMethod eq "empty"
+       * "Customer Delivery", "customer delivery", "Delivery", "delivery trips", "delivery" -> shipmentMethod eq "delivery"
+       * "Surface", "surface network", "surface truck", "surface trips", "surface" -> shipmentMethod eq "surface"
+       * "Network", "network trips", "network" -> shipmentMethod eq "network"
+       * "Pick Up", "pickup trips", "pick up" -> shipmentMethod eq "Pick Up"
+       * "Pick Up and Delivery", "pickup and delivery" -> shipmentMethod eq "Pick Up and Delivery"
+       * NOTE: For all shipment method trip queries (with "schedule", "running", "intransit", "active", "moving", etc., or just count of trips), if no closed or cancelled status is specified, tripStatus defaults to "running".
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
@@ -227,6 +232,14 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "active"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "air"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "Show all active Pick Up trips" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "active"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "Pick Up"}], "select": []}
+- "how the count of sfc network trips" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "sfc"}], "select": []}
+- "how the count of speed truck schedule trips" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "speed"}], "select": []}
+- "how the count of AIR_Network trips" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "air"}], "select": []}
+- "how the count of Customer Delivery trips" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "delivery"}], "select": []}
 - "Count total unique vehicles and distinct transporters for April 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-04-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-04-30 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["Transporter"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}], "select": []}
 - "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?" ->
