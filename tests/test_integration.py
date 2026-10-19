@@ -1819,6 +1819,90 @@ async def test_active_pickup_trips_flow():
         assert fields["shipmentMethod"]["value"] == "Pick Up"
 
 
+@pytest.mark.asyncio
+async def test_intercity_fixed_gps_only_flow():
+    user_query = "Count Intercity trips that used Fixed GPS only in Aug 2026"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "GPS", "operator": "eq", "value": "existing"},
+            {"field": "FixedELock", "operator": "eq", "value": "na"},
+            {"field": "PortableELock", "operator": "eq", "value": "na"},
+            {"field": "routeCategory", "operator": "eq", "value": "intercity"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-fixed-gps-only",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "GPS",
+                    "operator": "eq",
+                    "value": "existing"
+                },
+                {
+                    "field": "FixedELock",
+                    "operator": "eq",
+                    "value": "na"
+                },
+                {
+                    "field": "PortableELock",
+                    "operator": "eq",
+                    "value": "na"
+                },
+                {
+                    "field": "routeCategory",
+                    "operator": "eq",
+                    "value": "intercity"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+
 
 
 
