@@ -2062,8 +2062,127 @@ async def test_active_device_fixed_elock_intercity_flow():
         assert entities == expected_entities
 
 
+@pytest.mark.asyncio
+async def test_trip_report_aug_1_2026_flow():
+    user_query = "show the count of the trip report for Aug 1, 2026"
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-01 23:59:59"
+            }
+        ],
+        "select": []
+    })
+
+    llm_natural_response = "Total 42 trips found for Aug 1, 2026."
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, llm_natural_response]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 42}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-aug1-llm",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-01 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
 
 
+@pytest.mark.asyncio
+async def test_trip_report_aug_1_2026_fallback_flow():
+    user_query = "show the count of the trip report for Aug 1, 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Groq 413 Payload Too Large")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 42}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-aug1-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-01 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
 
 
 

@@ -28,12 +28,28 @@ _MONTH_MAP: dict[str, int] = {
     "december": 12,"dec": 12,
 }
 
+_MONTHS_STR = r'(?:january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)'
+
 _MONTH_PATTERN = re.compile(
     r'\b(january|jan|february|feb|march|mar|april|apr|may|june|jun'
     r'|july|jul|august|aug|september|sept|sep|october|oct'
     r'|november|nov|december|dec)'
     r'(?:[\s,]+(?P<year>20\d{2}))?\b',
     re.IGNORECASE,
+)
+
+_SPECIFIC_DATE_PAT1 = re.compile(
+    r'\b(?P<month>' + _MONTHS_STR + r')\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(?P<year>20\d{2}))?\b',
+    re.IGNORECASE,
+)
+
+_SPECIFIC_DATE_PAT2 = re.compile(
+    r'\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>' + _MONTHS_STR + r')(?:\s*,?\s*(?P<year>20\d{2}))?\b',
+    re.IGNORECASE,
+)
+
+_ISO_DATE_PAT = re.compile(
+    r'(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}:\d{2}))?'
 )
 
 def _resolve_month_range(text: str, reference_now: datetime.datetime) -> tuple[str | None, str | None]:
@@ -43,6 +59,9 @@ def _resolve_month_range(text: str, reference_now: datetime.datetime) -> tuple[s
     Otherwise the most-recently-passed occurrence of that month relative to
     *reference_now* is used (so 'august' in September 2026 → August 2026).
     """
+    if _SPECIFIC_DATE_PAT1.search(text) or _SPECIFIC_DATE_PAT2.search(text):
+        return None, None
+
     m = _MONTH_PATTERN.search(text)
     if not m:
         return None, None
@@ -66,21 +85,60 @@ def _resolve_month_range(text: str, reference_now: datetime.datetime) -> tuple[s
     end   = f"{year}-{month_num:02d}-{last_day:02d} 23:59:59"
     return start, end
 
-def extract_date_range(text: str) -> tuple[str | None, str | None]:
+def extract_date_range(text: str, reference_now: datetime.datetime | None = None) -> tuple[str | None, str | None]:
     # Match YYYY-MM-DD HH:MM:SS or YYYY-MM-DD
-    pattern = r'(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}:\d{2}))?'
-    matches = re.findall(pattern, text)
-    
-    if len(matches) >= 2:
-        # First match is start date
-        m1_date, m1_time = matches[0]
+    iso_matches = _ISO_DATE_PAT.findall(text)
+    if len(iso_matches) >= 2:
+        m1_date, m1_time = iso_matches[0]
         start_date = f"{m1_date} {m1_time}" if m1_time else f"{m1_date} 00:00:00"
-        
-        # Second match is end date
-        m2_date, m2_time = matches[1]
+        m2_date, m2_time = iso_matches[1]
         end_date = f"{m2_date} {m2_time}" if m2_time else f"{m2_date} 23:59:59"
-        
         return start_date, end_date
+    elif len(iso_matches) == 1:
+        m1_date, m1_time = iso_matches[0]
+        start_date = f"{m1_date} {m1_time}" if m1_time else f"{m1_date} 00:00:00"
+        end_date = f"{m1_date} {m1_time}" if m1_time else f"{m1_date} 23:59:59"
+        return start_date, end_date
+
+    # Natural language specific day patterns (e.g. 'Aug 1, 2026', '1st August 2026')
+    ref_year = reference_now.year if reference_now else datetime.datetime.now().year
+    dates: list[tuple[int, str]] = []
+
+    for m in _SPECIFIC_DATE_PAT1.finditer(text):
+        m_name = m.group("month").lower()
+        m_num = _MONTH_MAP.get(m_name)
+        if not m_num:
+            continue
+        day = int(m.group("day"))
+        year_str = m.group("year")
+        year = int(year_str) if year_str else ref_year
+        try:
+            d = datetime.date(year, m_num, day)
+            dates.append((m.start(), d.strftime("%Y-%m-%d")))
+        except ValueError:
+            pass
+
+    for m in _SPECIFIC_DATE_PAT2.finditer(text):
+        m_name = m.group("month").lower()
+        m_num = _MONTH_MAP.get(m_name)
+        if not m_num:
+            continue
+        day = int(m.group("day"))
+        year_str = m.group("year")
+        year = int(year_str) if year_str else ref_year
+        try:
+            d = datetime.date(year, m_num, day)
+            dates.append((m.start(), d.strftime("%Y-%m-%d")))
+        except ValueError:
+            pass
+
+    dates.sort(key=lambda x: x[0])
+
+    if len(dates) >= 2:
+        return f"{dates[0][1]} 00:00:00", f"{dates[-1][1]} 23:59:59"
+    elif len(dates) == 1:
+        return f"{dates[0][1]} 00:00:00", f"{dates[0][1]} 23:59:59"
+
     return None, None
 
 def detect_shipment_method(msg_lower: str) -> str | None:
@@ -193,11 +251,11 @@ class IntentDetector:
                             message = f"{_prev_q} {message}"
                             break
 
-        # Extract dates using regex as a reliable fallback
-        extracted_start, extracted_end = extract_date_range(message)
-
         # 1. Compute dynamic date context
         now = datetime.datetime.now()
+
+        # Extract dates using regex as a reliable fallback
+        extracted_start, extracted_end = extract_date_range(message, now)
         
         # Calculate today
         today_start = now.strftime("%Y-%m-%d 00:00:00")
