@@ -127,10 +127,12 @@ CRITICAL RULES:
    - "destination is BIB" -> To eq "BIB"
    - "from <Location>", "origin <Location>", "start from <Location>", "departure <Location>" -> From eq "<Location>"
    - "to <Location>", "destination <Location>", "end on <Location>", "ends <Location>", "arrival <Location>" -> To eq "<Location>"
+   - "valid trips", "valid trip", or "valid" -> tripStatus eq "valid"
    - "completed, closed, finished, or inactive trips" -> tripStatus eq "closed"
    - "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" -> tripStatus eq "running"
    - "active trips" or "active" -> tripStatus eq "active"
-   - "cancelled trips" -> tripStatus eq "cancelled"
+   - "cancelled trips" or "cancelled" -> tripStatus eq "cancelled"
+   - NOTE: When a query mentions trip status (e.g. "valid", "completed", "cancelled", "active", "running") alongside a vendor (e.g. "Secutrak") or any other field, always include both the tripStatus filter and the vendor / other field filters.
    - SHIPMENT METHODS:
        * "AIR_Network", "air network", "air truck", "air trips", "air" -> shipmentMethod eq "air"
        * "SFC_Network", "sfc network", "sfc truck", "sfc schedule", "sfc trips", "sfc" -> shipmentMethod eq "sfc"
@@ -239,6 +241,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "Generate the July 2026 report for all Secutrak devices" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "runDate", "operator": "gte", "value": "2026-07-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-07-31 23:59:59"}], "select": []}
+- "Generate the July 2026 report for all valid trip which is using Secutrak devices" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "runDate", "operator": "gte", "value": "2026-07-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-07-31 23:59:59"}], "select": []}
 - "Show the total count of vehicles using both Fixed E-Lock and Portable E-Lock for January 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "fixed-e-lock status", "operator": "eq", "value": "existing"}, {"field": "portable-e-lock status", "operator": "eq", "value": "existing"}], "groupBy": ["fixed-e-lock status", "portable-e-lock status"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}], "select": []}
 - "How many intracity trips were completed using Fixed E-Lock and Portable E-Lock for January 2026?" ->

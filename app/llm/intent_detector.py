@@ -969,16 +969,18 @@ class IntentDetector:
                     op = flt.get("operator")
                     if field == "groupId":
                         return 1
-                    elif field == "vendor":
+                    elif field == "tripStatus":
                         return 2
-                    elif field == "runDate" and op == "gte":
+                    elif field == "vendor":
                         return 3
-                    elif field == "runDate" and op == "lte":
+                    elif field == "runDate" and op == "gte":
                         return 4
-                    elif field == "routeCategory":
+                    elif field == "runDate" and op == "lte":
                         return 5
-                    elif field == "shipmentMethod":
+                    elif field == "routeCategory":
                         return 6
+                    elif field == "shipmentMethod":
+                        return 7
                     return 10
 
                 query_payload["filters"].sort(key=_vendor_sort_key)
@@ -1029,6 +1031,12 @@ class IntentDetector:
                         "field": "tripStatus",
                         "operator": "eq",
                         "value": "cancelled"
+                    })
+                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["valid"]):
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "valid"
                     })
                 elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["active", "open"]):
                     fallback_payload["filters"].append({
@@ -1436,16 +1444,18 @@ class IntentDetector:
                     op = flt.get("operator")
                     if field == "groupId":
                         return 1
-                    elif field == "vendor":
+                    elif field == "tripStatus":
                         return 2
-                    elif field == "runDate" and op == "gte":
+                    elif field == "vendor":
                         return 3
-                    elif field == "runDate" and op == "lte":
+                    elif field == "runDate" and op == "gte":
                         return 4
-                    elif field == "routeCategory":
+                    elif field == "runDate" and op == "lte":
                         return 5
-                    elif field == "shipmentMethod":
+                    elif field == "routeCategory":
                         return 6
+                    elif field == "shipmentMethod":
+                        return 7
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
