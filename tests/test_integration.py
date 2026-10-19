@@ -2185,14 +2185,131 @@ async def test_trip_report_aug_1_2026_fallback_flow():
         assert entities == expected_entities
 
 
+@pytest.mark.asyncio
+async def test_daily_report_05_08_2026_flow():
+    user_query = "Get the daily report for 05-08-2026"
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-05 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-05 23:59:59"
+            }
+        ],
+        "select": []
+    })
+
+    llm_natural_response = "Total 15 trips found for 05-08-2026."
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, llm_natural_response]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 15}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-05-08-2026-llm",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        res_data = response.json()
+        assert res_data["reply"] != "Please provide the date range (start date and end date) for the trips."
+        entities = res_data["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-05 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-05 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
 
 
+@pytest.mark.asyncio
+async def test_daily_report_05_08_2026_fallback_flow():
+    user_query = "Get the daily report for 05-08-2026"
 
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Groq 413 Payload Too Large")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 15}
+        mock_post.return_value = mock_api_res
 
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-05-08-2026-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
 
+        assert response.status_code == 200
+        res_data = response.json()
+        assert res_data["reply"] != "Please provide the date range (start date and end date) for the trips."
+        entities = res_data["entities"]
 
-
-
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-05 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-05 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
 
 @pytest.mark.asyncio
 async def test_gps_trip_counts_empty_feeder_flow():

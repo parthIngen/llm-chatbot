@@ -178,6 +178,7 @@ CRITICAL RULES:
    - NOTE: "Fixed GPS", "GPS device", or similar GPS mentions do NOT create a separate filter field in device combos.
        GPS presence is implied by the device combo. Do NOT add a fixed-gps status filter.
 5. If a date range, specific month, or duration is specified, extract the start and end dates as `runDate` filters with `gte` (start date) and `lte` (end date) operators. The values for `runDate` MUST be formatted as `"YYYY-MM-DD HH:MM:SS"`. For example:
+   - '05-08-2026', '05/08/2026', or '5-8-2026' -> DD-MM-YYYY format: runDate gte '2026-08-05 00:00:00', runDate lte '2026-08-05 23:59:59'
    - 'August 1, 2026', 'Aug 1, 2026', '1 Aug 2026', or '2026-08-01' -> single specific day: runDate gte '2026-08-01 00:00:00', runDate lte '2026-08-01 23:59:59' (do NOT expand to the whole month)
    - 'January 2026' -> runDate gte '2026-01-01 00:00:00', runDate lte '2026-01-31 23:59:59'
    - 'from 2026-01-01 to 2026-01-31' -> runDate gte '2026-01-01 00:00:00', runDate lte '2026-01-31 23:59:59'
@@ -206,6 +207,8 @@ CRITICAL RULES:
 - "Generate the <Vendor> device report" or "<Vendor> device report" -> tripStatus eq "valid", vendor contains "<Vendor>"
 
 Reference Examples:
+- "Get the daily report for 05-08-2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-05 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-05 23:59:59"}], "select": []}
 - "show the count of the trip report for Aug 1, 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-01 23:59:59"}], "select": []}
 - "Download all 3rd party device data for April 2026" ->
