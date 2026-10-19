@@ -514,7 +514,7 @@ class IntentDetector:
                 status_override = "running"
             elif (
                 word_in_text(["valid"], msg_lower)
-                or re.search(r'\bdevice\s+(?:report|data)\b', msg_lower)
+                or (re.search(r'\bdevice\s+(?:report|data)\b', msg_lower) and not re.search(r'\b(secutrak|icici)\b', msg_lower))
                 or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
                 or (re.search(r'\btransporters?\b', msg_lower) and word_in_text(["used"], msg_lower))
             ):
@@ -567,11 +567,17 @@ class IntentDetector:
 
             if re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 target_vendor = "ThirdParty"
+            elif re.search(r'\b(secutrak|icici)\b', msg_lower):
+                target_vendor = "Secutrak"
+            elif re.search(r'\bwheelseye\b', msg_lower):
+                target_vendor = "Wheelseye"
             else:
-                dev_vendor_match = re.search(r'\b([A-Za-z0-9_-]+)\s+device\s+(?:report|data)\b', msg_lower)
+                dev_vendor_match = re.search(r'\b([A-Za-z0-9_-]+)\s+devices?\s+(?:report|data)\b', msg_lower)
+                if not dev_vendor_match:
+                    dev_vendor_match = re.search(r'\breport\s+(?:for\s+)?(?:all\s+)?([A-Za-z0-9_-]+)\s+devices?\b', msg_lower)
                 if dev_vendor_match:
                     candidate = dev_vendor_match.group(1)
-                    if candidate.lower() not in ["the", "a", "an", "generate", "download", "get", "show", "fetch", "all", "party"]:
+                    if candidate.lower() not in ["the", "a", "an", "generate", "download", "get", "show", "fetch", "all", "party", "gps", "elock", "e-lock"]:
                         target_vendor = candidate
                     else:
                         dev_vendor_match = None
@@ -580,6 +586,12 @@ class IntentDetector:
                     v_match = re.search(r'\b(wheelseye|secutrak|icici)\b', msg_lower)
                     if v_match:
                         target_vendor = v_match.group(1)
+
+                if not target_vendor:
+                    for f in query_payload.get("filters", []):
+                        if isinstance(f, dict) and f.get("field") == "vendor":
+                            target_vendor = f.get("value")
+                            break
 
             if target_vendor:
                 if target_vendor.lower() == "wheelseye":
@@ -591,7 +603,7 @@ class IntentDetector:
                 else:
                     canonical_vendor = target_vendor.capitalize()
 
-                op = "eq" if canonical_vendor == "ThirdParty" else ("contains" if dev_vendor_match or canonical_vendor == "Wheelseye" else "eq")
+                op = "contains" if (canonical_vendor == "Wheelseye" or (dev_vendor_match and canonical_vendor not in ["Secutrak", "ThirdParty"])) else "eq"
 
                 if canonical_vendor == "ThirdParty":
                     query_payload["filters"] = [
@@ -949,6 +961,27 @@ class IntentDetector:
                     return 10
 
                 query_payload["filters"].sort(key=_gps_trip_sort_key)
+            elif target_vendor and not _is_devices_together:
+                def _vendor_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "vendor":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "routeCategory":
+                        return 5
+                    elif field == "shipmentMethod":
+                        return 6
+                    return 10
+
+                query_payload["filters"].sort(key=_vendor_sort_key)
 
             log_intent_detected(session_id, "trip_report")
             log_entities_extracted(session_id, query_payload)
@@ -1300,6 +1333,57 @@ class IntentDetector:
                         {"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
                     ]
 
+            # Apply Vendor post-processing to fallback
+            fb_target_vendor = None
+            fb_dev_vendor_match = None
+
+            if re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
+                fb_target_vendor = "ThirdParty"
+            elif re.search(r'\b(secutrak|icici)\b', msg_lower):
+                fb_target_vendor = "Secutrak"
+            elif re.search(r'\bwheelseye\b', msg_lower):
+                fb_target_vendor = "Wheelseye"
+            else:
+                fb_dev_vendor_match = re.search(r'\b([A-Za-z0-9_-]+)\s+devices?\s+(?:report|data)\b', msg_lower)
+                if not fb_dev_vendor_match:
+                    fb_dev_vendor_match = re.search(r'\breport\s+(?:for\s+)?(?:all\s+)?([A-Za-z0-9_-]+)\s+devices?\b', msg_lower)
+                if fb_dev_vendor_match:
+                    candidate = fb_dev_vendor_match.group(1)
+                    if candidate.lower() not in ["the", "a", "an", "generate", "download", "get", "show", "fetch", "all", "party", "gps", "elock", "e-lock"]:
+                        fb_target_vendor = candidate
+
+            if fb_target_vendor:
+                if fb_target_vendor.lower() == "wheelseye":
+                    fb_canonical_vendor = "Wheelseye"
+                elif fb_target_vendor.lower() in ["secutrak", "icici"]:
+                    fb_canonical_vendor = "Secutrak"
+                elif fb_target_vendor == "ThirdParty" or fb_target_vendor.lower() in ["3rdparty", "thirdparty", "3rd-party"]:
+                    fb_canonical_vendor = "ThirdParty"
+                else:
+                    fb_canonical_vendor = fb_target_vendor.capitalize()
+
+                fb_op = "contains" if (fb_canonical_vendor == "Wheelseye" or (fb_dev_vendor_match and fb_canonical_vendor not in ["Secutrak", "ThirdParty"])) else "eq"
+
+                if fb_canonical_vendor == "ThirdParty":
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") == "portableelock")
+                    ]
+
+                fb_has_vendor = False
+                for f in fallback_payload["filters"]:
+                    if isinstance(f, dict) and f.get("field") == "vendor":
+                        fb_has_vendor = True
+                        f["value"] = fb_canonical_vendor
+                        f["operator"] = fb_op
+                        break
+                if not fb_has_vendor:
+                    fallback_payload["filters"].append({
+                        "field": "vendor",
+                        "operator": fb_op,
+                        "value": fb_canonical_vendor
+                    })
+
             if fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only:
                 def _fb_single_device_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -1344,6 +1428,27 @@ class IntentDetector:
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_gps_trip_sort_key)
+            elif fb_target_vendor and not fb_is_devices_together:
+                def _fb_vendor_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "vendor":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "routeCategory":
+                        return 5
+                    elif field == "shipmentMethod":
+                        return 6
+                    return 10
+
+                fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
 
             return {
                 "intent": "trip_report",

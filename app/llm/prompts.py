@@ -98,7 +98,7 @@ CRITICAL RULES:
 4. Use exact field mappings:
    - "<Region> region" -> region eq "<Region>" (e.g. "East region" -> region: "East")
    - "West and South region" -> region in ["West", "South"]
-   - "ICICI device trips" -> vendor eq "Secutrak"
+   - "ICICI device trips", "Secutrak devices", "all Secutrak devices", "report for Secutrak devices", "report for all Secutrak devices", "Secutrak device report", "Secutrak vendor" -> vendor eq "Secutrak" (do not add tripStatus filter unless explicitly mentioned)
    - "3rd-party device trips" or "portable device trips" or "portable lock device trips" -> portableelock eq ""
    - "Fixed E-Lock device trips" or "fixed lock device trips" or "elock device trips" -> fixedelock eq ""
    - "Fixed GPS inactive/nogps/gpsInactive/NA" -> FixedGPS eq "inactive"/"nogps"/"gpsInactive"/"NA"
@@ -237,6 +237,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "network"}, {"field": "FixedGPS", "operator": "eq", "value": "nogps"}], "select": []}
 - "Show all Secutrak vendor intercity trips" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
+- "Generate the July 2026 report for all Secutrak devices" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "runDate", "operator": "gte", "value": "2026-07-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-07-31 23:59:59"}], "select": []}
 - "Show the total count of vehicles using both Fixed E-Lock and Portable E-Lock for January 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "fixed-e-lock status", "operator": "eq", "value": "existing"}, {"field": "portable-e-lock status", "operator": "eq", "value": "existing"}], "groupBy": ["fixed-e-lock status", "portable-e-lock status"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}], "select": []}
 - "How many intracity trips were completed using Fixed E-Lock and Portable E-Lock for January 2026?" ->
