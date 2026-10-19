@@ -98,7 +98,8 @@ CRITICAL RULES:
 4. Use exact field mappings:
    - "<Region> region" -> region eq "<Region>" (e.g. "East region" -> region: "East")
    - "West and South region" -> region in ["West", "South"]
-   - "ICICI device trips", "Secutrak devices", "all Secutrak devices", "report for Secutrak devices", "report for all Secutrak devices", "Secutrak device report", "Secutrak vendor" -> vendor eq "Secutrak" (do not add tripStatus filter unless explicitly mentioned)
+   - "ICICI device trips", "Secutrak devices", "all Secutrak devices", "Secutrak vendor" -> vendor eq "Secutrak"
+   - "report for Secutrak devices", "report for all Secutrak devices", "Secutrak device report", "Generate the <Month> report for all Secutrak devices" -> tripStatus eq "valid", vendor eq "Secutrak"
    - "3rd-party device trips" or "portable device trips" or "portable lock device trips" -> portableelock eq ""
    - "Fixed E-Lock device trips" or "fixed lock device trips" or "elock device trips" -> fixedelock eq ""
    - "Fixed GPS inactive/nogps/gpsInactive/NA" -> FixedGPS eq "inactive"/"nogps"/"gpsInactive"/"NA"
@@ -210,6 +211,8 @@ CRITICAL RULES:
 - "Generate the <Vendor> device report" or "<Vendor> device report" -> tripStatus eq "valid", vendor contains "<Vendor>"
 
 Reference Examples:
+- "Generate the July 2026 report for all Secutrak devices" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "runDate", "operator": "gte", "value": "2026-07-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-07-31 23:59:59"}], "select": []}
 - "how many active trips of Delivery with pick & delivery" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "shipmentMethod", "operator": "in", "value": ["Delivery", "Pick Up and Delivery"]}], "select": []}
 - "Get the daily report for 05-08-2026" ->

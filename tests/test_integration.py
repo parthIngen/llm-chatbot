@@ -2427,6 +2427,11 @@ async def test_secutrak_devices_july_2026_report_flow():
                     "value": "0041"
                 },
                 {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
                     "field": "vendor",
                     "operator": "eq",
                     "value": "Secutrak"
@@ -2480,6 +2485,11 @@ async def test_secutrak_devices_july_2026_report_fallback_flow():
                     "field": "groupId",
                     "operator": "eq",
                     "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
                 },
                 {
                     "field": "vendor",

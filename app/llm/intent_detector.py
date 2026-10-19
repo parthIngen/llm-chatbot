@@ -641,7 +641,7 @@ class IntentDetector:
                 status_override = "running"
             elif (
                 word_in_text(["valid"], msg_lower)
-                or (re.search(r'\bdevice\s+(?:report|data)\b', msg_lower) and not re.search(r'\b(secutrak|icici)\b', msg_lower))
+                or re.search(r'\bdevice\s+(?:report|data)\b|\breport\s+for\s+(?:all\s+)?(?:\w+\s+)?devices?\b|\bdevices?\s+report\b', msg_lower)
                 or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
                 or (re.search(r'\btransporters?\b', msg_lower) and word_in_text(["used"], msg_lower))
             ):
@@ -1176,7 +1176,7 @@ class IntentDetector:
                     })
                 elif (
                     any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["valid"])
-                    or (re.search(r'\bdevice\s+(?:report|data)\b', msg_lower) and not re.search(r'\b(secutrak|icici)\b', msg_lower))
+                    or re.search(r'\bdevice\s+(?:report|data)\b|\breport\s+for\s+(?:all\s+)?(?:\w+\s+)?devices?\b|\bdevices?\s+report\b', msg_lower)
                     or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
                     or (re.search(r'\btransporters?\b', msg_lower) and any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["used"]))
                 ):
