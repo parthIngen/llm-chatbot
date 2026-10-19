@@ -176,7 +176,15 @@ class IntentDetector:
             _msg_is_date_ref = any(re.search(p, _msg_lower_tmp) for p in _DATE_REF_PATTERNS)
             _msg_is_short = len(message.strip().split()) <= 8
 
-            if _msg_is_date_ref and _msg_is_short:
+            # Ensure this is truly a follow-up date refinement and not a standalone query
+            _is_standalone_query = bool(re.search(
+                r'\b(?:generate|download|show|count|get|fetch)\b'
+                r'|\b(?:trips?|devices?|report|data|wheelseye|secutrak|icici|thirdparty|3rd[\s-]party)\b'
+                r'|\b(?:intracity|intercity|feeder|air|surface|speed|sfc|delivery|pickup|pick\s+up)\b',
+                _msg_lower_tmp
+            ))
+
+            if not _is_standalone_query and _msg_is_date_ref and _msg_is_short:
                 # Find the last substantive user query in history (more than 3 words)
                 for _item in reversed(history):
                     if _item.get("role") == "user":
@@ -1032,7 +1040,12 @@ class IntentDetector:
                         "operator": "eq",
                         "value": "cancelled"
                     })
-                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["valid"]):
+                elif (
+                    any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["valid"])
+                    or (re.search(r'\bdevice\s+(?:report|data)\b', msg_lower) and not re.search(r'\b(secutrak|icici)\b', msg_lower))
+                    or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
+                    or (re.search(r'\btransporters?\b', msg_lower) and any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["used"]))
+                ):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
                         "operator": "eq",

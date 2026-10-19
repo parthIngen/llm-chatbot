@@ -208,7 +208,7 @@ Reference Examples:
 - "Download all 3rd party device data for April 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-04-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-04-30 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "vendor", "operator": "eq", "value": "ThirdParty"}], "select": []}
 - "Generate the Wheelseye device report for April 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-04-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-04-30 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "vendor", "operator": "contains", "value": "Wheelseye"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "vendor", "operator": "contains", "value": "Wheelseye"}, {"field": "runDate", "operator": "gte", "value": "2026-04-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-04-30 23:59:59"}], "select": []}
 - "Download all trips for the North region." ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "region", "operator": "eq", "value": "North"}], "select": []}
 - "all trips for the East region" ->

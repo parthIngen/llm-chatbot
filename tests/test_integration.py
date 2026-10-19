@@ -2455,3 +2455,137 @@ async def test_secutrak_devices_completed_trips_flow():
         assert entities == expected_entities
 
 
+@pytest.mark.asyncio
+async def test_wheelseye_device_report_april_2026_flow():
+    user_query = "Generate the Wheelseye device report for April 2026"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "vendor", "operator": "contains", "value": "Wheelseye"},
+            {"field": "runDate", "operator": "gte", "value": "2026-04-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-04-30 23:59:59"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-wheelseye-april",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "vendor",
+                    "operator": "contains",
+                    "value": "Wheelseye"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-04-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-04-30 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_wheelseye_device_report_april_2026_fallback_with_history_flow():
+    user_query = "Generate the Wheelseye device report for April 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Groq 413 Payload Too Large")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [
+                {"role": "user", "content": "Show all completed trips using Secutrak devices for July 2026"},
+                {"role": "assistant", "content": "Total 50 trips found."}
+            ],
+            "session_id": "test-session-wheelseye-history",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "vendor",
+                    "operator": "contains",
+                    "value": "Wheelseye"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-04-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-04-30 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+
