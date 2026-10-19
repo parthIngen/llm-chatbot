@@ -161,43 +161,79 @@ def extract_date_range(text: str, reference_now: datetime.datetime | None = None
 
     return None, None
 
-def detect_shipment_method(msg_lower: str) -> str | None:
-    """Detect and normalize shipment method names to canonical values:
-    feeder, empty, surface, sfc, speed, air, network, delivery, Pick Up, Pick Up and Delivery, Comm/BZ-Out, Comm/BZ-In.
+def detect_shipment_methods(text: str) -> list[str]:
+    """Detect and normalize all shipment method names present in text, returned in order of appearance.
+    Canonical values:
+    feeder, empty, surface, sfc, speed, air, network, delivery / Delivery, Pick Up, Pick Up and Delivery, Comm/BZ-Out, Comm/BZ-In.
     """
-    if re.search(r'\b(?:pick[\s-]?up|pickup)\s*(?:and|&|\+)\s*delivery\b', msg_lower):
-        return "Pick Up and Delivery"
-    if re.search(r'\b(?:pick[\s-]?up|pickup)\b', msg_lower):
-        return "Pick Up"
-    if re.search(r'\bcomm[\s/_-]*bz[\s/_-]*out\b', msg_lower):
-        return "Comm/BZ-Out"
-    if re.search(r'\bcomm[\s/_-]*bz[\s/_-]*in\b', msg_lower):
-        return "Comm/BZ-In"
-    if re.search(r'\bcustomer[\s_-]+delivery\b|\bcustomer[\s_-]+del\b', msg_lower):
-        return "delivery"
-    if re.search(r'\bair[\s_-]+(?:network|truck)\b', msg_lower):
-        return "air"
-    if re.search(r'\bsfc[\s_-]+(?:network|truck|schedule)\b', msg_lower):
-        return "sfc"
-    if re.search(r'\bspeed[\s_-]+(?:truck|network)\b', msg_lower):
-        return "speed"
-    if re.search(r'\bfeeder[\s_-]+(?:truck|network)\b', msg_lower):
-        return "feeder"
-    if re.search(r'\bempty[\s_-]+(?:truck|network)\b', msg_lower):
-        return "empty"
-    if re.search(r'\bsurface[\s_-]+(?:network|truck)\b', msg_lower):
-        return "surface"
-    
-    # Standalone keywords
-    m = re.search(
-        r'\b(feeder|empty|surface|sfc|speed|air|delivery)\b',
-        msg_lower
-    )
-    if m:
-        return m.group(1)
-    if re.search(r'\bnetwork\b', msg_lower):
-        return "network"
-    return None
+    msg_lower = text.lower()
+    methods: list[tuple[str, int]] = []
+
+    # 1. Pick Up and Delivery (e.g. 'pick & delivery', 'pick up and delivery', 'pickup and delivery')
+    pud_pat = r'\b(?:pick[\s-]?up|pick)\s*(?:and|&|\+)\s*(?:delivery|del)\b'
+    for m in re.finditer(pud_pat, msg_lower):
+        methods.append(('Pick Up and Delivery', m.start()))
+    # Mask out matches so 'delivery' and 'pick up' don't re-match the same span
+    msg_masked = re.sub(pud_pat, lambda m: ' ' * len(m.group(0)), msg_lower)
+
+    # 2. Comm/BZ-Out and In
+    for m in re.finditer(r'\bcomm[\s/_-]*bz[\s/_-]*out\b', msg_masked):
+        methods.append(('Comm/BZ-Out', m.start()))
+    msg_masked = re.sub(r'\bcomm[\s/_-]*bz[\s/_-]*out\b', lambda m: ' ' * len(m.group(0)), msg_masked)
+
+    for m in re.finditer(r'\bcomm[\s/_-]*bz[\s/_-]*in\b', msg_masked):
+        methods.append(('Comm/BZ-In', m.start()))
+    msg_masked = re.sub(r'\bcomm[\s/_-]*bz[\s/_-]*in\b', lambda m: ' ' * len(m.group(0)), msg_masked)
+
+    # 3. Pick Up (standalone)
+    for m in re.finditer(r'\b(?:pick[\s-]?up|pickup)\b', msg_masked):
+        methods.append(('Pick Up', m.start()))
+    msg_masked = re.sub(r'\b(?:pick[\s-]?up|pickup)\b', lambda m: ' ' * len(m.group(0)), msg_masked)
+
+    # 4. Delivery
+    del_pat = r'\b(?:customer[\s_-]+delivery|customer[\s_-]+del|delivery)\b'
+    has_pud = any(name == 'Pick Up and Delivery' for name, _ in methods)
+    for m in re.finditer(del_pat, msg_masked):
+        orig_match = text[m.start():m.end()]
+        # If accompanied by Pick Up and Delivery or capitalized in original text, use 'Delivery'
+        if has_pud or (orig_match and orig_match[0].isupper()):
+            methods.append(('Delivery', m.start()))
+        else:
+            methods.append(('delivery', m.start()))
+    msg_masked = re.sub(del_pat, lambda m: ' ' * len(m.group(0)), msg_masked)
+
+    # 5. Network compound keywords
+    for sm, pat in [
+        ('air', r'\bair[\s_-]+(?:network|truck)\b'),
+        ('sfc', r'\bsfc[\s_-]+(?:network|truck|schedule)\b'),
+        ('speed', r'\bspeed[\s_-]+(?:truck|network)\b'),
+        ('feeder', r'\bfeeder[\s_-]+(?:truck|network)\b'),
+        ('empty', r'\bempty[\s_-]+(?:truck|network)\b'),
+        ('surface', r'\bsurface[\s_-]+(?:network|truck)\b'),
+    ]:
+        for m in re.finditer(pat, msg_masked):
+            methods.append((sm, m.start()))
+        msg_masked = re.sub(pat, lambda m: ' ' * len(m.group(0)), msg_masked)
+
+    # 6. Standalone keywords
+    for sm in ['feeder', 'empty', 'surface', 'sfc', 'speed', 'air']:
+        for m in re.finditer(r'\b' + sm + r'\b', msg_masked):
+            if sm not in [name for name, _ in methods]:
+                methods.append((sm, m.start()))
+        msg_masked = re.sub(r'\b' + sm + r'\b', lambda m: ' ' * len(m.group(0)), msg_masked)
+
+    for m in re.finditer(r'\bnetwork\b', msg_masked):
+        if 'network' not in [name for name, _ in methods]:
+            methods.append(('network', m.start()))
+        msg_masked = re.sub(r'\bnetwork\b', lambda m: ' ' * len(m.group(0)), msg_masked)
+
+    # Sort methods by appearance index in original text
+    methods.sort(key=lambda x: x[1])
+    return [name for name, _ in methods]
+
+def detect_shipment_method(msg_lower: str) -> str | None:
+    methods = detect_shipment_methods(msg_lower)
+    return methods[0] if methods else None
 
 class IntentDetector:
     def __init__(self, llm_client: LLMClient = None):
@@ -536,7 +572,8 @@ class IntentDetector:
                 
             # Determine if a status was requested based on keywords in user message
             msg_lower = message.lower()
-            detected_sm = detect_shipment_method(msg_lower)
+            detected_sms = detect_shipment_methods(message)
+            detected_sm = detected_sms[0] if detected_sms else None
             has_status_keyword = False
             status_override = None
 
@@ -595,7 +632,10 @@ class IntentDetector:
                 
                 if is_active_for_trip:
                     has_status_keyword = True
-                    status_override = "active"
+                    if len(detected_sms) > 1 or re.search(r'\bdelivery\s+with\s+pick\b', msg_lower):
+                        status_override = "running"
+                    else:
+                        status_override = "active"
             elif word_in_text(["running", "scheduled", "sceduled", "transit", "ongoing", "moving", "intransit", "live"], msg_lower) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                 has_status_keyword = True
                 status_override = "running"
@@ -637,16 +677,23 @@ class IntentDetector:
                 ]
 
             # --- ShipmentMethod Injection ---
-            if detected_sm:
+            if detected_sms:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
                 ]
-                query_payload["filters"].append({
-                    "field": "shipmentMethod",
-                    "operator": "eq",
-                    "value": detected_sm
-                })
+                if len(detected_sms) > 1:
+                    query_payload["filters"].append({
+                        "field": "shipmentMethod",
+                        "operator": "in",
+                        "value": detected_sms
+                    })
+                else:
+                    query_payload["filters"].append({
+                        "field": "shipmentMethod",
+                        "operator": "eq",
+                        "value": detected_sms[0]
+                    })
 
             # --- Vendor Post-Processing ---
             target_vendor = None
@@ -974,16 +1021,23 @@ class IntentDetector:
 
             # --- ShipmentMethod Post-Processing ---
             # Full list of recognized shipmentMethod values.
-            if detected_sm:
+            if detected_sms:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
                 ]
-                query_payload["filters"].append({
-                    "field": "shipmentMethod",
-                    "operator": "eq",
-                    "value": detected_sm
-                })
+                if len(detected_sms) > 1:
+                    query_payload["filters"].append({
+                        "field": "shipmentMethod",
+                        "operator": "in",
+                        "value": detected_sms
+                    })
+                else:
+                    query_payload["filters"].append({
+                        "field": "shipmentMethod",
+                        "operator": "eq",
+                        "value": detected_sms[0]
+                    })
 
             # --- Transporter & Vehicle Metrics Post-Processing ---
             has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
@@ -1106,7 +1160,8 @@ class IntentDetector:
             else:
                 # Basic keyword check for fallback — only inject tripStatus when
                 # the user explicitly mentioned a status term or a shipmentMethod. Never default otherwise.
-                fb_detected_sm = detect_shipment_method(msg_lower)
+                fb_detected_sms = detect_shipment_methods(message)
+                fb_detected_sm = fb_detected_sms[0] if fb_detected_sms else None
                 if any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["completed", "finish", "finished", "closed", "inactive"]):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
@@ -1131,10 +1186,11 @@ class IntentDetector:
                         "value": "valid"
                     })
                 elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["active", "open"]):
+                    status_val = "running" if (len(fb_detected_sms) > 1 or re.search(r'\bdelivery\s+with\s+pick\b', msg_lower)) else "active"
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
                         "operator": "eq",
-                        "value": "active"
+                        "value": status_val
                     })
                 elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["running", "scheduled", "sceduled", "transit", "ongoing", "moving", "intransit", "live"]) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                     fallback_payload["filters"].append({
@@ -1394,15 +1450,20 @@ class IntentDetector:
                     {"field": "routeCategory", "operator": "eq", "value": fb_route_category}
                 )
 
-            fb_sm_val = detect_shipment_method(msg_lower)
-            if fb_sm_val:
+            fb_sms = detect_shipment_methods(message)
+            if fb_sms:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
                 ]
-                fallback_payload["filters"].append(
-                    {"field": "shipmentMethod", "operator": "eq", "value": fb_sm_val}
-                )
+                if len(fb_sms) > 1:
+                    fallback_payload["filters"].append(
+                        {"field": "shipmentMethod", "operator": "in", "value": fb_sms}
+                    )
+                else:
+                    fallback_payload["filters"].append(
+                        {"field": "shipmentMethod", "operator": "eq", "value": fb_sms[0]}
+                    )
                 fb_has_date = any(isinstance(f, dict) and f.get("field") == "runDate" for f in fallback_payload["filters"])
                 if not fb_has_date and not has_status_keyword:
                     has_fb_trip_status = any(

@@ -2824,4 +2824,127 @@ async def test_wheelseye_device_report_april_2026_fallback_with_history_flow():
         assert entities == expected_entities
 
 
+@pytest.mark.asyncio
+async def test_active_delivery_with_pick_and_delivery_flow():
+    user_query = "how many active trips of Delivery with pick & delivery"
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "running"
+            },
+            {
+                "field": "shipmentMethod",
+                "operator": "in",
+                "value": ["Delivery", "Pick Up and Delivery"]
+            }
+        ],
+        "select": []
+    })
+
+    llm_natural_response = "Total 28 trips found."
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, llm_natural_response]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 28}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-delivery-pud-llm",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "running"
+                },
+                {
+                    "field": "shipmentMethod",
+                    "operator": "in",
+                    "value": ["Delivery", "Pick Up and Delivery"]
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_active_delivery_with_pick_and_delivery_fallback_flow():
+    user_query = "how many active trips of Delivery with pick & delivery"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Groq 413 Payload Too Large")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 28}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-delivery-pud-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "running"
+                },
+                {
+                    "field": "shipmentMethod",
+                    "operator": "in",
+                    "value": ["Delivery", "Pick Up and Delivery"]
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
 

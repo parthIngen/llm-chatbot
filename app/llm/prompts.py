@@ -143,7 +143,10 @@ CRITICAL RULES:
        * "Surface", "surface network", "surface truck", "surface trips", "surface" -> shipmentMethod eq "surface"
        * "Network", "network trips", "network" -> shipmentMethod eq "network"
        * "Pick Up", "pickup trips", "pick up" -> shipmentMethod eq "Pick Up"
-       * "Pick Up and Delivery", "pickup and delivery" -> shipmentMethod eq "Pick Up and Delivery"
+       * "Pick Up and Delivery", "pickup and delivery", "pick & delivery" -> shipmentMethod eq "Pick Up and Delivery"
+       * Multiple shipment methods: When a query mentions multiple shipment methods (e.g. "Delivery with pick & delivery"), use operator "in" with the list of methods:
+         {"field": "shipmentMethod", "operator": "in", "value": ["Delivery", "Pick Up and Delivery"]}
+         For "Delivery with pick & delivery" (or active trips of multiple shipment methods), tripStatus is "running".
        * NOTE: tripStatus eq "running" should ONLY be passed when NO date is given, OR when the query explicitly mentions "running", "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" (or "active" -> tripStatus eq "active"). If a date range is given and no status is mentioned, do NOT add tripStatus.
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
@@ -207,6 +210,8 @@ CRITICAL RULES:
 - "Generate the <Vendor> device report" or "<Vendor> device report" -> tripStatus eq "valid", vendor contains "<Vendor>"
 
 Reference Examples:
+- "how many active trips of Delivery with pick & delivery" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "shipmentMethod", "operator": "in", "value": ["Delivery", "Pick Up and Delivery"]}], "select": []}
 - "Get the daily report for 05-08-2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-05 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-05 23:59:59"}], "select": []}
 - "show the count of the trip report for Aug 1, 2026" ->
