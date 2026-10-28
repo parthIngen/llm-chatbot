@@ -156,6 +156,12 @@ CRITICAL RULES:
         * field: "GPS", operator: "eq", value: "existing"
         * Do NOT add FixedELock or PortableELock filters unless they are explicitly mentioned.
         * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned or no date was given.
+    - NO GPS / VEHICLES WITHOUT GPS: When the query asks about vehicles that had no GPS, vehicles without GPS, or vehicles where GPS was missing/absent (e.g. "How many vehicles had no GPS in Aug 2026?"):
+         * field: "GPS", operator: "eq", value: "nogps"
+         * Include groupBy: ["vehicleNo"]
+         * Include metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+         * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
+         * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned.
    - DEVICES TOGETHER: When the query asks about trips using devices together (e.g. "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?"):
        * GPS / Fixed GPS -> field: "GPS", operator: "eq", value: "existing"
        * Fixed E-Lock -> field: "FixedELock", operator: "eq", value: "existing"
@@ -301,6 +307,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}], "select": []}
 - "List all distinct vehicles used in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "How many vehicles had no GPS in Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 
 Ensure valid JSON output. No markdown, backticks, or comments.
 """
@@ -322,8 +330,9 @@ RESPONSE_GENERATION_SYSTEM_PROMPT = """You are a helpful customer support agent.
 Answer the User Query using ONLY the provided API Results and QueryFilters.
 
 Rules:
-1. If the API Results contain a list of objects each with a "vehicleNo" and "uniqueVehicleCount" field (i.e. a distinct-vehicle grouped result), sum all the "uniqueVehicleCount" values to get the total number of unique vehicles. Then respond with a single natural-language sentence stating the total number of distinct vehicles found for the given date range.
-   Example output for this case: "A total of 42 distinct vehicles were used in August 2026."
+1. If the API Results contain a list of objects each with a "vehicleNo" and "uniqueVehicleCount" field (i.e. a distinct-vehicle grouped result), sum all the "uniqueVehicleCount" values to get the total number of unique vehicles.
+   - If the user query asks about vehicles with no GPS / without GPS / had no GPS, respond with a sentence like: "A total of X vehicles had no GPS in [period]."
+   - Otherwise, respond with a sentence like: "A total of X distinct vehicles were used in [period]."
 2. For all other queries, return ONLY a simple single sentence stating the total count value with the date range. Do NOT include any other details, regions, vehicle numbers, HTML tags, markdown formatting, or extra text.
 
 Example output (general):
