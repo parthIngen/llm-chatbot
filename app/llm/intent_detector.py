@@ -1359,16 +1359,18 @@ class IntentDetector:
                     op = flt.get("operator")
                     if field == "groupId":
                         return 1
-                    elif field == "GPS":
+                    elif field == "tripStatus":
                         return 2
-                    elif field == "runDate" and op == "gte":
+                    elif field == "GPS":
                         return 3
-                    elif field == "runDate" and op == "lte":
+                    elif field == "runDate" and op == "gte":
                         return 4
-                    elif field == "shipmentMethod":
+                    elif field == "runDate" and op == "lte":
                         return 5
-                    elif field == "routeCategory":
+                    elif field == "shipmentMethod":
                         return 6
+                    elif field == "routeCategory":
+                        return 7
                     return 10
 
                 query_payload["filters"].sort(key=_gps_trip_sort_key)
@@ -1481,18 +1483,24 @@ class IntentDetector:
                         "operator": "eq",
                         "value": status_val
                     })
+                    has_status_keyword = True
+                    status_override = status_val
                 elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["running", "scheduled", "sceduled", "transit", "ongoing", "moving", "intransit", "live"]) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
                         "operator": "eq",
                         "value": "running"
                     })
+                    has_status_keyword = True
+                    status_override = "running"
                 elif fb_detected_sm and not (bool(extracted_start and extracted_end) or bool(re.search(r'\b(today|yesterday|last\s+week|last\s+month)\b', msg_lower)) or bool(_resolve_month_range(msg_lower, now)[0])):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
                         "operator": "eq",
                         "value": "running"
                     })
+                    has_status_keyword = True
+                    status_override = "running"
                 # else: no status keyword → do NOT inject a default tripStatus
             if extracted_start and extracted_end:
                 fallback_payload["filters"].append({
@@ -2121,16 +2129,18 @@ class IntentDetector:
                     op = flt.get("operator")
                     if field == "groupId":
                         return 1
-                    elif field == "GPS":
+                    elif field == "tripStatus":
                         return 2
-                    elif field == "runDate" and op == "gte":
+                    elif field == "GPS":
                         return 3
-                    elif field == "runDate" and op == "lte":
+                    elif field == "runDate" and op == "gte":
                         return 4
-                    elif field == "shipmentMethod":
+                    elif field == "runDate" and op == "lte":
                         return 5
-                    elif field == "routeCategory":
+                    elif field == "shipmentMethod":
                         return 6
+                    elif field == "routeCategory":
+                        return 7
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_gps_trip_sort_key)

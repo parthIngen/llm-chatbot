@@ -3022,4 +3022,58 @@ async def test_active_delivery_with_pick_and_delivery_fallback_flow():
         assert entities == expected_entities
 
 
+@pytest.mark.asyncio
+async def test_intercity_trips_running_exclusively_fixed_gps_flow():
+    user_query = "Show total Intercity trips running exclusively on Fixed GPS"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Groq 413 Payload Too Large")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 15}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-intercity-running-fixed-gps",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "running"
+                },
+                {
+                    "field": "GPS",
+                    "operator": "eq",
+                    "value": "existing"
+                },
+                {
+                    "field": "routeCategory",
+                    "operator": "eq",
+                    "value": "intercity"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
 
