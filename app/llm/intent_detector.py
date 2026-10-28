@@ -808,7 +808,17 @@ class IntentDetector:
                 and not _is_gps_na
             )
 
-            # 4. GPS Trip Query (e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026")
+            # 4a. No GPS / Vehicles without GPS (e.g. "How many vehicles had no GPS in Aug 2026?")
+            _is_no_gps_vehicle_query = bool(
+                re.search(r'\bno\s+gps\b', msg_lower)
+                or re.search(r'\bwithout\s+gps\b', msg_lower)
+                or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
+                or re.search(r'\bgps\s+not\s+available\b', msg_lower)
+                or re.search(r'\bgps\s+absent\b', msg_lower)
+                or re.search(r'\blacking\s+gps\b', msg_lower)
+            )
+
+            # 4b. GPS Trip Query (e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026")
             _is_gps_exception = bool(
                 re.search(r'\b(?:fixed[\s-]gps|gps)\s+(?:as\s+)?(?:nogps|inactive|na|gpsinactive)\b', msg_lower)
                 or re.search(r'\b(?:nogps|gpsinactive)\b', msg_lower)
@@ -822,6 +832,7 @@ class IntentDetector:
                 and not _is_gps_na
                 and not _is_fixed_gps_only
                 and not _is_gps_exception
+                and not _is_no_gps_vehicle_query
             )
 
             if _is_fixed_gps_only:
@@ -881,6 +892,24 @@ class IntentDetector:
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                 ]
+            elif _is_no_gps_vehicle_query:
+                # Vehicles with no GPS: GPS eq "nogps", grouped by vehicleNo with countDistinct
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "gps", "fixedelock", "portableelock"
+                    ])
+                ]
+                query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
+                query_payload["groupBy"] = ["vehicleNo"]
+                query_payload["metrics"] = [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+                if not has_status_keyword:
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                    ]
             elif _is_gps_trip_query:
                 gps_val = _get_device_status(msg_lower, "existing")
                 query_payload["filters"] = [
@@ -1305,6 +1334,15 @@ class IntentDetector:
                 and not fb_is_gps_na
             )
 
+            fb_is_no_gps_vehicle_query = bool(
+                re.search(r'\bno\s+gps\b', msg_lower)
+                or re.search(r'\bwithout\s+gps\b', msg_lower)
+                or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
+                or re.search(r'\bgps\s+not\s+available\b', msg_lower)
+                or re.search(r'\bgps\s+absent\b', msg_lower)
+                or re.search(r'\blacking\s+gps\b', msg_lower)
+            )
+
             fb_is_gps_exception = bool(
                 re.search(r'\b(?:fixed[\s-]gps|gps)\s+(?:as\s+)?(?:nogps|inactive|na|gpsinactive)\b', msg_lower)
                 or re.search(r'\b(?:nogps|gpsinactive)\b', msg_lower)
@@ -1318,6 +1356,7 @@ class IntentDetector:
                 and not fb_is_gps_na
                 and not fb_is_fixed_gps_only
                 and not fb_is_gps_exception
+                and not fb_is_no_gps_vehicle_query
             )
 
             if fb_is_fixed_gps_only:
@@ -1377,6 +1416,24 @@ class IntentDetector:
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                 ]
+            elif fb_is_no_gps_vehicle_query:
+                # Vehicles with no GPS: GPS eq "nogps", grouped by vehicleNo with countDistinct
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "gps", "fixedelock", "portableelock"
+                    ])
+                ]
+                fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
+                fallback_payload["groupBy"] = ["vehicleNo"]
+                fallback_payload["metrics"] = [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+                if not has_status_keyword:
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                    ]
             elif fb_is_gps_trip_query:
                 fb_gps_val = _fb_get_device_status(msg_lower, "existing")
                 fallback_payload["filters"] = [
