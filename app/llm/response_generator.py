@@ -66,10 +66,23 @@ class ResponseGenerator:
                     elif f.get("operator") == "lte":
                         end_date = f.get("value")
 
+        # Detect distinct-vehicle grouped result: list of dicts each with 'uniqueVehicleCount'
+        _is_distinct_vehicle_result = (
+            isinstance(api_data, list)
+            and len(api_data) > 0
+            and all(isinstance(row, dict) and "uniqueVehicleCount" in row and "vehicleNo" in row for row in api_data)
+        )
+        if _is_distinct_vehicle_result:
+            total_trips = sum(row.get("uniqueVehicleCount", 0) for row in api_data)
+
         # Fast-path: Instant 0ms response formatting for simple count queries
         if start_date and end_date:
+            if _is_distinct_vehicle_result:
+                return f"Total {total_trips} distinct vehicles used in date range from {start_date} to {end_date}."
             return f"Total {total_trips} trips found for date range from {start_date} to {end_date}."
         elif total_trips is not None and not (isinstance(api_data, list) and len(api_data) > 0):
+            if _is_distinct_vehicle_result:
+                return f"Total {total_trips} distinct vehicles used."
             return f"Total {total_trips} trips found."
 
         # Truncate lists in API result to protect local LLM context window
@@ -110,5 +123,9 @@ class ResponseGenerator:
         except Exception as exc:
             log_error(session_id, "RESPONSE_GENERATION_FAILED", str(exc))
             if start_date and end_date:
+                if _is_distinct_vehicle_result:
+                    return f"Total {total_trips} distinct vehicles used in date range from {start_date} to {end_date}."
                 return f"Total {total_trips} trips found for date range from {start_date} to {end_date}."
+            if _is_distinct_vehicle_result:
+                return f"Total {total_trips} distinct vehicles used."
             return f"Total {total_trips} trips found."
