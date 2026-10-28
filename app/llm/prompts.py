@@ -128,11 +128,11 @@ CRITICAL RULES:
    - "destination is BIB" -> To eq "BIB"
    - "from <Location>", "origin <Location>", "start from <Location>", "departure <Location>" -> From eq "<Location>"
    - "to <Location>", "destination <Location>", "end on <Location>", "ends <Location>", "arrival <Location>" -> To eq "<Location>"
-   - "valid trips", "valid trip", or "valid" -> tripStatus eq "valid"
-   - "completed, closed, finished, or inactive trips" -> tripStatus eq "closed"
+   - "valid trips", "valid trip", "valid", "non-cancelled" / "not cancelled", or "completed and closed" / "closed and completed" -> tripStatus eq "valid"
+   - "completed, closed, finished, or inactive trips" (unless query says "completed and closed") -> tripStatus eq "closed"
    - "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" -> tripStatus eq "running"
    - "active trips" or "active" -> tripStatus eq "active"
-   - "cancelled trips" or "cancelled" -> tripStatus eq "cancelled"
+   - "cancelled trips" or "cancelled" (unless query says "non-cancelled") -> tripStatus eq "cancelled"
    - NOTE: When a query mentions trip status (e.g. "valid", "completed", "cancelled", "active", "running") alongside a vendor (e.g. "Secutrak") or any other field, always include both the tripStatus filter and the vendor / other field filters.
    - SHIPMENT METHODS:
        * "AIR_Network", "air network", "air truck", "air trips", "air" -> shipmentMethod eq "air"
@@ -175,20 +175,31 @@ CRITICAL RULES:
        * Portable E-Lock -> field: "PortableELock", operator: "eq", value: "existing"
        * Do NOT include groupBy or metrics for "together" queries.
        * Do NOT add a tripStatus filter (the word "used" is not a status keyword).
-   - SINGLE DEVICE TRIPS (Fixed GPS only / Portable E-Lock trips / Fixed E-Lock only):
+   - SINGLE DEVICE TRIPS (ONLY when "only" or "single device" is explicitly mentioned):
        * When query asks about "Fixed GPS only", "only Fixed GPS", or "Fixed GPS as the single device":
            - field: "GPS", operator: "eq", value: "existing"
            - field: "FixedELock", operator: "eq", value: "na"
            - field: "PortableELock", operator: "eq", value: "na"
-       * When query asks about "portable E-Lock trips", "portable lock trips", "portable E-Lock only", or "only portable E-Lock":
+       * When query asks about "portable E-Lock only" or "only portable E-Lock" or "portable E-Lock as the single device":
            - field: "GPS", operator: "eq", value: "na"
            - field: "FixedELock", operator: "eq", value: "na"
            - field: "PortableELock", operator: "eq", value: "existing"
-       * When query asks about "Fixed E-Lock only" or "only Fixed E-Lock":
+       * When query asks about "Fixed E-Lock only" or "only Fixed E-Lock" or "Fixed E-Lock as the single device":
            - field: "GPS", operator: "eq", value: "na"
            - field: "FixedELock", operator: "eq", value: "existing"
            - field: "PortableELock", operator: "eq", value: "na"
        * Do NOT include groupBy or metrics for single device queries.
+       * If query specifies a status like "valid" (e.g. "How many valid Trips had Fixed GPS as the single device in Aug 2026?"), "non-cancelled", or "completed and closed", include field: "tripStatus", operator: "eq", value: "valid" as the FIRST filter. Do NOT include tripStatus if no status keyword is mentioned.
+   - PORTABLE E-LOCK TRIPS (without "only"):
+       * When query asks about "portable E-Lock trips" / "total count of portable E-Lock trips" (e.g. "Show total count of portable E-Lock trips in Aug 2026"):
+           - field: "PortableELock", operator: "eq", value: "existing" (or status if mentioned)
+           - Do NOT add "GPS" or "FixedELock" filters (do NOT add value "na").
+           - Do NOT add tripStatus filter unless explicitly mentioned.
+   - FIXED E-LOCK TRIPS (without "only" and without "device count"):
+       * When query asks about "Fixed E-Lock trips" (e.g. "Show count of Fixed E-Lock trips in Aug 2026"):
+           - field: "FixedELock", operator: "eq", value: "existing" (or status if mentioned)
+           - Do NOT add "GPS" or "PortableELock" filters (do NOT add value "na").
+           - Do NOT add tripStatus filter unless explicitly mentioned.
    - ACTIVE DEVICE COUNT FOR TRIPS:
        * When query asks about "active device count" for Fixed E-Lock trips (e.g. "What was the active device count for Fixed E-Lock trips on Intercity routes in Aug 2026?"): 
            - field: "tripStatus", operator: "eq", value: "valid"
@@ -320,8 +331,10 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "existing"}, {"field": "PortableELock", "operator": "eq", "value": "existing"}], "select": []}
 - "Count Intercity trips that used Fixed GPS only in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "na"}, {"field": "PortableELock", "operator": "eq", "value": "na"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
+- "How many valid Trips had Fixed GPS as the single device in Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "na"}, {"field": "PortableELock", "operator": "eq", "value": "na"}], "select": []}
 - "Show total count of portable E-Lock trips in Aug 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "na"}, {"field": "FixedELock", "operator": "eq", "value": "na"}, {"field": "PortableELock", "operator": "eq", "value": "existing"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "PortableELock", "operator": "eq", "value": "existing"}], "select": []}
 - "What was the active device count for Fixed E-Lock trips on Intercity routes in Aug 2026?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "active"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "Show GPS trip counts for Empty feeder routes in Aug 2026" ->
