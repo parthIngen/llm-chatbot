@@ -1986,12 +1986,11 @@ async def test_active_device_fixed_elock_intercity_flow():
         "entity": "trip",
         "operation": "count",
         "filters": [
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
             {"field": "groupId", "operator": "eq", "value": "0041"},
             {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
             {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-            {"field": "GPS", "operator": "eq", "value": "na"},
             {"field": "FixedELock", "operator": "eq", "value": "active"},
-            {"field": "PortableELock", "operator": "eq", "value": "na"},
             {"field": "routeCategory", "operator": "eq", "value": "intercity"}
         ],
         "select": []
@@ -2022,6 +2021,11 @@ async def test_active_device_fixed_elock_intercity_flow():
             "operation": "count",
             "filters": [
                 {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
                     "field": "groupId",
                     "operator": "eq",
                     "value": "0041"
@@ -2037,19 +2041,9 @@ async def test_active_device_fixed_elock_intercity_flow():
                     "value": "2026-08-31 23:59:59"
                 },
                 {
-                    "field": "GPS",
-                    "operator": "eq",
-                    "value": "na"
-                },
-                {
                     "field": "FixedELock",
                     "operator": "eq",
                     "value": "active"
-                },
-                {
-                    "field": "PortableELock",
-                    "operator": "eq",
-                    "value": "na"
                 },
                 {
                     "field": "routeCategory",
