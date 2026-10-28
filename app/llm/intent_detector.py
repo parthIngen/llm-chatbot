@@ -644,6 +644,11 @@ class IntentDetector:
                 or re.search(r'\bdevice\s+(?:report|data)\b|\breport\s+for\s+(?:all\s+)?(?:\w+\s+)?devices?\b|\bdevices?\s+report\b', msg_lower)
                 or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
                 or (re.search(r'\btransporters?\b', msg_lower) and word_in_text(["used"], msg_lower))
+                or (
+                    re.search(r'\bvehicles?\b', msg_lower)
+                    and word_in_text(["used"], msg_lower)
+                    and re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower)
+                )
             ):
                 has_status_keyword = True
                 status_override = "valid"
@@ -1043,8 +1048,22 @@ class IntentDetector:
             has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
             has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
+            _is_distinct_vehicle_query = (
+                has_vehicle_mention
+                and has_count_unique_distinct
+                and not has_transporter_mention
+                and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
+            )
 
-            if ("groupBy" not in query_payload or not query_payload["groupBy"]) and has_transporter_mention and has_count_unique_distinct:
+            if _is_distinct_vehicle_query:
+                # Query asks to list / count distinct vehicles (grouped by vehicleNo)
+                query_payload["groupBy"] = ["vehicleNo"]
+                query_payload["metrics"] = [
+                    {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
+                ]
+                # Remove select key — not needed for grouped vehicle queries
+                query_payload.pop("select", None)
+            elif ("groupBy" not in query_payload or not query_payload["groupBy"]) and has_transporter_mention and has_count_unique_distinct:
                 if has_vehicle_mention:
                     # Query asks for unique vehicles per transporter / breakdown
                     query_payload["groupBy"] = ["Transporter"]
@@ -1179,6 +1198,11 @@ class IntentDetector:
                     or re.search(r'\bdevice\s+(?:report|data)\b|\breport\s+for\s+(?:all\s+)?(?:\w+\s+)?devices?\b|\bdevices?\s+report\b', msg_lower)
                     or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
                     or (re.search(r'\btransporters?\b', msg_lower) and any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["used"]))
+                    or (
+                        re.search(r'\bvehicles?\b', msg_lower)
+                        and re.search(r'\bused\b', msg_lower)
+                        and re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower)
+                    )
                 ):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
@@ -1481,8 +1505,20 @@ class IntentDetector:
             fb_has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
             fb_has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             fb_has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
+            fb_is_distinct_vehicle_query = (
+                fb_has_vehicle_mention
+                and fb_has_count_unique_distinct
+                and not fb_has_transporter_mention
+                and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
+            )
 
-            if ("groupBy" not in fallback_payload or not fallback_payload["groupBy"]) and fb_has_transporter_mention and fb_has_count_unique_distinct:
+            if fb_is_distinct_vehicle_query:
+                fallback_payload["groupBy"] = ["vehicleNo"]
+                fallback_payload["metrics"] = [
+                    {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
+                ]
+                fallback_payload.pop("select", None)
+            elif ("groupBy" not in fallback_payload or not fallback_payload["groupBy"]) and fb_has_transporter_mention and fb_has_count_unique_distinct:
                 if fb_has_vehicle_mention:
                     fallback_payload["groupBy"] = ["Transporter"]
                     fallback_payload["metrics"] = [
