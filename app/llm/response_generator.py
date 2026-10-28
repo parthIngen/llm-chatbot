@@ -75,7 +75,31 @@ class ResponseGenerator:
         if _is_distinct_vehicle_result:
             total_trips = sum(row.get("uniqueVehicleCount", 0) for row in api_data)
 
+        # Detect distinct-transporter grouped result: list of dicts each with 'uniqueTransporterCount'
+        _is_distinct_transporter_result = (
+            isinstance(api_data, list)
+            and len(api_data) > 0
+            and all(isinstance(row, dict) and "uniqueTransporterCount" in row for row in api_data)
+        )
+        if _is_distinct_transporter_result:
+            total_trips = sum(row.get("uniqueTransporterCount", 0) for row in api_data)
+
+        if not (start_date and end_date) and message:
+            try:
+                from app.llm.intent_detector import extract_date_range_from_message
+                s_d, e_d = extract_date_range_from_message(message)
+                if s_d and e_d:
+                    start_date = start_date or s_d
+                    end_date = end_date or e_d
+            except Exception:
+                pass
+
         # Fast-path: Instant 0ms response formatting for simple count queries
+        if _is_distinct_transporter_result:
+            if start_date and end_date:
+                return f"Total {total_trips}  unique Transporter in date range from {start_date} to {end_date}."
+            return f"Total {total_trips}  unique Transporter."
+
         if start_date and end_date:
             if _is_distinct_vehicle_result:
                 return f"Total {total_trips} distinct vehicles used in date range from {start_date} to {end_date}."
@@ -122,6 +146,10 @@ class ResponseGenerator:
             raise rle
         except Exception as exc:
             log_error(session_id, "RESPONSE_GENERATION_FAILED", str(exc))
+            if _is_distinct_transporter_result:
+                if start_date and end_date:
+                    return f"Total {total_trips}  unique Transporter in date range from {start_date} to {end_date}."
+                return f"Total {total_trips}  unique Transporter."
             if start_date and end_date:
                 if _is_distinct_vehicle_result:
                     return f"Total {total_trips} distinct vehicles used in date range from {start_date} to {end_date}."

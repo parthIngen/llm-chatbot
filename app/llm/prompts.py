@@ -206,7 +206,15 @@ CRITICAL RULES:
 8. Never map date, time, or temporal terms (such as "today", "yesterday", "last month", "last week", "January 2026", etc.) to the "region" field. The "region" field must only contain actual geographic regions (e.g., "North", "South", "East", "West").
 9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed"), include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed" or "arrivalDelayed" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
 10. NEVER add a "tripStatus" filter unless the user's query explicitly mentions trip status words such as "active", "running", "closed", "completed", "finished", "scheduled", "live", "transit", "in transit", "en route", "cancelled", or "valid". Do NOT default or assume any tripStatus when the query does not mention it.
-11. When the query asks to count total unique vehicles and distinct transporters (or vehicle counts per transporter), include "groupBy": ["Transporter"] and "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]. However, when the query asks ONLY for the total number of unique or distinct transporters (without asking for vehicles), do NOT include "groupBy", and set "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}].
+11. When the query asks to count total unique vehicles and distinct transporters (or vehicle counts per transporter), include "groupBy": ["Transporter"] and "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}].
+    - DISTINCT TRANSPORTERS: When the query asks for the total number of unique or distinct transporters (e.g. "Show total number of unique transporters used in Aug 2026"):
+        * Include filter: tripStatus eq "valid"
+        * Include runDate gte/lte filters for the specified period
+        * Include groupId eq "0041"
+        * Include "groupBy": ["transporter"]
+        * Include "metrics": [{"field": "transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]
+        * Do NOT include "select"
+        * Filter order: tripStatus first, then runDate gte, then runDate lte, then groupId
     - DISTINCT VEHICLES: When the query asks to "list all distinct vehicles", "list unique vehicles", "show all distinct vehicles", "list vehicles used", or any variation asking for individual vehicles grouped by vehicle number (for a date range), generate the payload as follows:
         * Include filter: tripStatus eq "valid"
         * Include runDate gte/lte filters for the specified period
@@ -306,7 +314,7 @@ Reference Examples:
 - "Show GPS trip counts for Empty feeder routes in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "shipmentMethod", "operator": "eq", "value": "empty"}], "select": []}
 - "Show total number of unique transporters used in Aug 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["transporter"], "metrics": [{"field": "transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]}
 - "List all distinct vehicles used in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "How many vehicles had no GPS in Aug 2026?" ->
@@ -335,7 +343,8 @@ Rules:
 1. If the API Results contain a list of objects each with a "vehicleNo" and "uniqueVehicleCount" field (i.e. a distinct-vehicle grouped result), sum all the "uniqueVehicleCount" values to get the total number of unique vehicles.
    - If the user query asks about vehicles with no GPS / without GPS / had no GPS, respond with a sentence like: "A total of X vehicles had no GPS in [period]."
    - Otherwise, respond with a sentence like: "A total of X distinct vehicles were used in [period]."
-2. For all other queries, return ONLY a simple single sentence stating the total count value with the date range. Do NOT include any other details, regions, vehicle numbers, HTML tags, markdown formatting, or extra text.
+2. If the API Results contain a list of objects each with a "transporter" and "uniqueTransporterCount" field (i.e. a distinct-transporter grouped result), sum all the "uniqueTransporterCount" values to get the total number of unique transporters and respond like: "Total X  unique Transporter in date range from [start_date] to [end_date]."
+3. For all other queries, return ONLY a simple single sentence stating the total count value with the date range. Do NOT include any other details, regions, vehicle numbers, HTML tags, markdown formatting, or extra text.
 
 Example output (general):
 Total 150 trips found for date range from 2026-09-08 00:00:00 to 2026-09-08 23:59:59.

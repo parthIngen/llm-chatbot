@@ -1079,6 +1079,11 @@ class IntentDetector:
                 and not has_transporter_mention
                 and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
             )
+            _is_distinct_transporter_query = (
+                has_transporter_mention
+                and has_count_unique_distinct
+                and not has_vehicle_mention
+            )
 
             if _is_distinct_vehicle_query:
                 # Query asks to list / count distinct vehicles (grouped by vehicleNo)
@@ -1088,6 +1093,24 @@ class IntentDetector:
                 ]
                 # Remove select key — not needed for grouped vehicle queries
                 query_payload.pop("select", None)
+            elif _is_distinct_transporter_query:
+                # Query asks for total number of unique/distinct transporters
+                query_payload["groupBy"] = ["transporter"]
+                query_payload["metrics"] = [
+                    {"field": "transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
+                ]
+                query_payload.pop("select", None)
+                has_trip_status = False
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") == "tripStatus":
+                        f["operator"] = "eq"
+                        f["value"] = "valid"
+                        has_trip_status = True
+                        break
+                if not has_trip_status:
+                    if "filters" not in query_payload:
+                        query_payload["filters"] = []
+                    query_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
             elif ("groupBy" not in query_payload or not query_payload["groupBy"]) and has_transporter_mention and has_count_unique_distinct:
                 if has_vehicle_mention:
                     # Query asks for unique vehicles per transporter / breakdown
@@ -1095,14 +1118,25 @@ class IntentDetector:
                     query_payload["metrics"] = [
                         {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
                     ]
-                else:
-                    # Query asks ONLY for total number of unique/distinct transporters
-                    query_payload.pop("groupBy", None)
-                    query_payload["metrics"] = [
-                        {"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
-                    ]
 
-            if _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only:
+            if _is_distinct_transporter_query:
+                def _transporter_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "tripStatus":
+                        return 1
+                    elif field == "runDate" and op == "gte":
+                        return 2
+                    elif field == "runDate" and op == "lte":
+                        return 3
+                    elif field == "groupId":
+                        return 4
+                    return 10
+
+                query_payload["filters"].sort(key=_transporter_sort_key)
+            elif _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only:
                 def _single_device_sort_key(flt):
                     if not isinstance(flt, dict):
                         return 99
@@ -1579,6 +1613,11 @@ class IntentDetector:
                 and not fb_has_transporter_mention
                 and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
             )
+            fb_is_distinct_transporter_query = (
+                fb_has_transporter_mention
+                and fb_has_count_unique_distinct
+                and not fb_has_vehicle_mention
+            )
 
             if fb_is_distinct_vehicle_query:
                 fallback_payload["groupBy"] = ["vehicleNo"]
@@ -1586,16 +1625,28 @@ class IntentDetector:
                     {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
                 ]
                 fallback_payload.pop("select", None)
+            elif fb_is_distinct_transporter_query:
+                fallback_payload["groupBy"] = ["transporter"]
+                fallback_payload["metrics"] = [
+                    {"field": "transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
+                ]
+                fallback_payload.pop("select", None)
+                fb_has_trip_status = False
+                for f in fallback_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") == "tripStatus":
+                        f["operator"] = "eq"
+                        f["value"] = "valid"
+                        fb_has_trip_status = True
+                        break
+                if not fb_has_trip_status:
+                    if "filters" not in fallback_payload:
+                        fallback_payload["filters"] = []
+                    fallback_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
             elif ("groupBy" not in fallback_payload or not fallback_payload["groupBy"]) and fb_has_transporter_mention and fb_has_count_unique_distinct:
                 if fb_has_vehicle_mention:
                     fallback_payload["groupBy"] = ["Transporter"]
                     fallback_payload["metrics"] = [
                         {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
-                    ]
-                else:
-                    fallback_payload.pop("groupBy", None)
-                    fallback_payload["metrics"] = [
-                        {"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
                     ]
 
             # Apply Vendor post-processing to fallback
@@ -1649,7 +1700,24 @@ class IntentDetector:
                         "value": fb_canonical_vendor
                     })
 
-            if fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only:
+            if fb_is_distinct_transporter_query:
+                def _fb_transporter_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "tripStatus":
+                        return 1
+                    elif field == "runDate" and op == "gte":
+                        return 2
+                    elif field == "runDate" and op == "lte":
+                        return 3
+                    elif field == "groupId":
+                        return 4
+                    return 10
+
+                fallback_payload["filters"].sort(key=_fb_transporter_sort_key)
+            elif fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only:
                 def _fb_single_device_sort_key(flt):
                     if not isinstance(flt, dict):
                         return 99
