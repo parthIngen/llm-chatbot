@@ -152,15 +152,20 @@ CRITICAL RULES:
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
-    - NO GPS / VEHICLES WITHOUT GPS (CHECK FIRST - HIGHEST PRIORITY): When the query uses phrases like "no GPS", "without GPS", "had no GPS", "no gps vehicle", "vehicles without GPS", "GPS not available", or counts vehicles lacking GPS (e.g. "How many vehicles had no GPS in Aug 2026?", "vehicles without GPS in August"):
+    - VEHICLES WITHOUT GPS: When the query counts vehicles lacking GPS or uses phrases like "no GPS", "without GPS", "had no GPS" with vehicles (e.g. "How many vehicles had no GPS in Aug 2026?", "vehicles without GPS in August", "no gps vehicle"):
          * field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
          * Include groupBy: ["vehicleNo"]
          * Include metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
          * Do NOT use value "existing" here.
          * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
          * Include filter: field: "tripStatus", operator: "eq", value: "valid"
+    - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS: When the query asks about trips without GPS (e.g. "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
+         * field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
+         * Do NOT include groupBy or metrics unless explicitly requested.
+         * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned.
+         * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
     - GPS TRIPS: When query asks about trips WITH GPS / "GPS trips" / "GPS trip counts" (positive sense, e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026"):
-         NOTE: SKIP this rule if the query contains "no GPS", "without GPS", "had no GPS" -- use NO GPS rule above.
+         NOTE: SKIP this rule if the query contains "no GPS", "non-GPS", "without GPS", "had no GPS" -- use NO GPS rules above.
          * field: "GPS", operator: "eq", value: "existing"
          * Do NOT add FixedELock or PortableELock filters unless they are explicitly mentioned.
          * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned or no date was given.
@@ -319,6 +324,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "How many vehicles had no GPS in Aug 2026?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "shipmentMethod", "operator": "eq", "value": "network"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 
 Ensure valid JSON output. No markdown, backticks, or comments.
 """

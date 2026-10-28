@@ -772,12 +772,12 @@ class IntentDetector:
             _is_gps_na = bool(re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower))
 
             def _get_device_status(msg: str, default: str = "existing") -> str:
-                if re.search(r'\bactive\b', msg):
+                if re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+gps|had\s+no\s+gps|nogps)\b', msg):
+                    return "nogps"
+                elif re.search(r'\bactive\b', msg):
                     return "active"
                 elif re.search(r'\binactive\b', msg):
                     return "inactive"
-                elif re.search(r'\bnogps\b', msg):
-                    return "nogps"
                 return default
 
             # 1. Fixed GPS Only / Single Device
@@ -810,18 +810,23 @@ class IntentDetector:
 
             # 4a. No GPS / Vehicles without GPS (e.g. "How many vehicles had no GPS in Aug 2026?")
             _is_no_gps_vehicle_query = bool(
-                re.search(r'\bno\s+gps\b', msg_lower)
-                or re.search(r'\bwithout\s+gps\b', msg_lower)
-                or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
-                or re.search(r'\bgps\s+not\s+available\b', msg_lower)
-                or re.search(r'\bgps\s+absent\b', msg_lower)
-                or re.search(r'\blacking\s+gps\b', msg_lower)
+                (
+                    re.search(r'\bno\s+gps\b', msg_lower)
+                    or re.search(r'\bwithout\s+gps\b', msg_lower)
+                    or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
+                    or re.search(r'\bgps\s+not\s+available\b', msg_lower)
+                    or re.search(r'\bgps\s+absent\b', msg_lower)
+                    or re.search(r'\blacking\s+gps\b', msg_lower)
+                    or re.search(r'\bnon[\s-]?gps\b', msg_lower)
+                )
+                and re.search(r'\bvehicles?\b', msg_lower)
             )
 
             # 4b. GPS Trip Query (e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026")
             _is_gps_exception = bool(
-                re.search(r'\b(?:fixed[\s-]gps|gps)\s+(?:as\s+)?(?:nogps|inactive|na|gpsinactive)\b', msg_lower)
-                or re.search(r'\b(?:nogps|gpsinactive)\b', msg_lower)
+                re.search(r'\bfixed[\s-]gps\s+(?:as\s+)?(?:nogps|inactive|na|gpsinactive)\b', msg_lower)
+                or re.search(r'\bgps\s+as\s+(?:nogps|inactive|na|gpsinactive)\b', msg_lower)
+                or re.search(r'\bgpsinactive\b', msg_lower)
             )
             _is_gps_trip_query = (
                 bool(re.search(r'\bgps\b', msg_lower))
@@ -1095,9 +1100,9 @@ class IntentDetector:
                 query_payload.pop("select", None)
             elif _is_distinct_transporter_query:
                 # Query asks for total number of unique/distinct transporters
-                query_payload["groupBy"] = ["transporter"]
+                query_payload.pop("groupBy", None)
                 query_payload["metrics"] = [
-                    {"field": "transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
+                    {"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
                 ]
                 query_payload.pop("select", None)
                 has_trip_status = False
@@ -1350,12 +1355,12 @@ class IntentDetector:
             fb_is_gps_na = bool(re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower))
 
             def _fb_get_device_status(msg: str, default: str = "existing") -> str:
-                if re.search(r'\bactive\b', msg):
+                if re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+gps|had\s+no\s+gps|nogps)\b', msg):
+                    return "nogps"
+                elif re.search(r'\bactive\b', msg):
                     return "active"
                 elif re.search(r'\binactive\b', msg):
                     return "inactive"
-                elif re.search(r'\bnogps\b', msg):
-                    return "nogps"
                 return default
 
             fb_is_fixed_gps_only = bool(
@@ -1384,17 +1389,22 @@ class IntentDetector:
             )
 
             fb_is_no_gps_vehicle_query = bool(
-                re.search(r'\bno\s+gps\b', msg_lower)
-                or re.search(r'\bwithout\s+gps\b', msg_lower)
-                or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
-                or re.search(r'\bgps\s+not\s+available\b', msg_lower)
-                or re.search(r'\bgps\s+absent\b', msg_lower)
-                or re.search(r'\blacking\s+gps\b', msg_lower)
+                (
+                    re.search(r'\bno\s+gps\b', msg_lower)
+                    or re.search(r'\bwithout\s+gps\b', msg_lower)
+                    or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
+                    or re.search(r'\bgps\s+not\s+available\b', msg_lower)
+                    or re.search(r'\bgps\s+absent\b', msg_lower)
+                    or re.search(r'\blacking\s+gps\b', msg_lower)
+                    or re.search(r'\bnon[\s-]?gps\b', msg_lower)
+                )
+                and re.search(r'\bvehicles?\b', msg_lower)
             )
 
             fb_is_gps_exception = bool(
-                re.search(r'\b(?:fixed[\s-]gps|gps)\s+(?:as\s+)?(?:nogps|inactive|na|gpsinactive)\b', msg_lower)
-                or re.search(r'\b(?:nogps|gpsinactive)\b', msg_lower)
+                re.search(r'\bfixed[\s-]gps\s+(?:as\s+)?(?:nogps|inactive|na|gpsinactive)\b', msg_lower)
+                or re.search(r'\bgps\s+as\s+(?:nogps|inactive|na|gpsinactive)\b', msg_lower)
+                or re.search(r'\bgpsinactive\b', msg_lower)
             )
             fb_is_gps_trip_query = (
                 bool(re.search(r'\bgps\b', msg_lower))
@@ -1626,9 +1636,9 @@ class IntentDetector:
                 ]
                 fallback_payload.pop("select", None)
             elif fb_is_distinct_transporter_query:
-                fallback_payload["groupBy"] = ["transporter"]
+                fallback_payload.pop("groupBy", None)
                 fallback_payload["metrics"] = [
-                    {"field": "transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
+                    {"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
                 ]
                 fallback_payload.pop("select", None)
                 fb_has_trip_status = False
