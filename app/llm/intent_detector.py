@@ -893,23 +893,19 @@ class IntentDetector:
                     if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                 ]
             elif _is_no_gps_vehicle_query:
-                # Vehicles with no GPS: GPS eq "nogps", grouped by vehicleNo with countDistinct
+                # Vehicles with no GPS: tripStatus eq "valid", GPS eq "nogps", grouped by vehicleNo with countDistinct
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
                         "GPS", "FixedGPS", "FixedELock", "PortableELock",
                         "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
-                        "gps", "fixedelock", "portableelock"
+                        "gps", "fixedelock", "portableelock", "tripStatus"
                     ])
                 ]
+                query_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
                 query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
                 query_payload["groupBy"] = ["vehicleNo"]
                 query_payload["metrics"] = [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
-                if not has_status_keyword:
-                    query_payload["filters"] = [
-                        f for f in query_payload["filters"]
-                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
-                    ]
             elif _is_gps_trip_query:
                 gps_val = _get_device_status(msg_lower, "existing")
                 query_payload["filters"] = [
@@ -1129,6 +1125,25 @@ class IntentDetector:
                     return 10
 
                 query_payload["filters"].sort(key=_single_device_sort_key)
+            elif _is_no_gps_vehicle_query:
+                def _no_gps_vehicle_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "tripStatus":
+                        return 1
+                    elif field == "groupId":
+                        return 2
+                    elif field == "GPS":
+                        return 3
+                    elif field == "runDate" and op == "gte":
+                        return 4
+                    elif field == "runDate" and op == "lte":
+                        return 5
+                    return 10
+
+                query_payload["filters"].sort(key=_no_gps_vehicle_sort_key)
             elif _is_gps_trip_query:
                 def _gps_trip_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -1417,23 +1432,19 @@ class IntentDetector:
                     if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                 ]
             elif fb_is_no_gps_vehicle_query:
-                # Vehicles with no GPS: GPS eq "nogps", grouped by vehicleNo with countDistinct
+                # Vehicles with no GPS: tripStatus eq "valid", GPS eq "nogps", grouped by vehicleNo with countDistinct
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
                         "GPS", "FixedGPS", "FixedELock", "PortableELock",
                         "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
-                        "gps", "fixedelock", "portableelock"
+                        "gps", "fixedelock", "portableelock", "tripStatus"
                     ])
                 ]
+                fallback_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
                 fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
                 fallback_payload["groupBy"] = ["vehicleNo"]
                 fallback_payload["metrics"] = [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
-                if not has_status_keyword:
-                    fallback_payload["filters"] = [
-                        f for f in fallback_payload["filters"]
-                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
-                    ]
             elif fb_is_gps_trip_query:
                 fb_gps_val = _fb_get_device_status(msg_lower, "existing")
                 fallback_payload["filters"] = [
@@ -1661,6 +1672,25 @@ class IntentDetector:
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_single_device_sort_key)
+            elif fb_is_no_gps_vehicle_query:
+                def _fb_no_gps_vehicle_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "tripStatus":
+                        return 1
+                    elif field == "groupId":
+                        return 2
+                    elif field == "GPS":
+                        return 3
+                    elif field == "runDate" and op == "gte":
+                        return 4
+                    elif field == "runDate" and op == "lte":
+                        return 5
+                    return 10
+
+                fallback_payload["filters"].sort(key=_fb_no_gps_vehicle_sort_key)
             elif fb_is_gps_trip_query:
                 def _fb_gps_trip_sort_key(flt):
                     if not isinstance(flt, dict):
