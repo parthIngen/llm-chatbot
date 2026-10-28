@@ -152,16 +152,18 @@ CRITICAL RULES:
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
-    - GPS TRIPS: When query asks about GPS trips or GPS trip counts without other device combo / only keywords (e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026"):
-        * field: "GPS", operator: "eq", value: "existing"
-        * Do NOT add FixedELock or PortableELock filters unless they are explicitly mentioned.
-        * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned or no date was given.
-    - NO GPS / VEHICLES WITHOUT GPS: When the query asks about vehicles that had no GPS, vehicles without GPS, or vehicles where GPS was missing/absent (e.g. "How many vehicles had no GPS in Aug 2026?"):
-         * field: "GPS", operator: "eq", value: "nogps"
+    - NO GPS / VEHICLES WITHOUT GPS (CHECK FIRST - HIGHEST PRIORITY): When the query uses phrases like "no GPS", "without GPS", "had no GPS", "no gps vehicle", "vehicles without GPS", "GPS not available", or counts vehicles lacking GPS (e.g. "How many vehicles had no GPS in Aug 2026?", "vehicles without GPS in August"):
+         * field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
          * Include groupBy: ["vehicleNo"]
          * Include metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+         * Do NOT use value "existing" here.
          * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
          * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned.
+    - GPS TRIPS: When query asks about trips WITH GPS / "GPS trips" / "GPS trip counts" (positive sense, e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026"):
+         NOTE: SKIP this rule if the query contains "no GPS", "without GPS", "had no GPS" -- use NO GPS rule above.
+         * field: "GPS", operator: "eq", value: "existing"
+         * Do NOT add FixedELock or PortableELock filters unless they are explicitly mentioned.
+         * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned or no date was given.
    - DEVICES TOGETHER: When the query asks about trips using devices together (e.g. "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?"):
        * GPS / Fixed GPS -> field: "GPS", operator: "eq", value: "existing"
        * Fixed E-Lock -> field: "FixedELock", operator: "eq", value: "existing"
