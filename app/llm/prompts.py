@@ -199,6 +199,14 @@ CRITICAL RULES:
 9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed"), include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed" or "arrivalDelayed" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
 10. NEVER add a "tripStatus" filter unless the user's query explicitly mentions trip status words such as "active", "running", "closed", "completed", "finished", "scheduled", "live", "transit", "in transit", "en route", "cancelled", or "valid". Do NOT default or assume any tripStatus when the query does not mention it.
 11. When the query asks to count total unique vehicles and distinct transporters (or vehicle counts per transporter), include "groupBy": ["Transporter"] and "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]. However, when the query asks ONLY for the total number of unique or distinct transporters (without asking for vehicles), do NOT include "groupBy", and set "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}].
+    - DISTINCT VEHICLES: When the query asks to "list all distinct vehicles", "list unique vehicles", "show all distinct vehicles", "list vehicles used", or any variation asking for individual vehicles grouped by vehicle number (for a date range), generate the payload as follows:
+        * Include filter: tripStatus eq "valid"
+        * Include runDate gte/lte filters for the specified period
+        * Include groupId eq "0041"
+        * Include "groupBy": ["vehicleNo"]
+        * Include "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        * Do NOT include "select"
+        * Filter order: tripStatus first, then runDate gte, then runDate lte, then groupId
 12. For ATD / ATA queries: use field "ATD" / "ATA" (uppercase). Map natural language as follows:
     - "not captured" / "notcaptured" -> value: "notcaptured"
     - "captured" -> value: "Captured"
@@ -291,6 +299,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "shipmentMethod", "operator": "eq", "value": "empty"}], "select": []}
 - "Show total number of unique transporters used in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}], "select": []}
+- "List all distinct vehicles used in Aug 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 
 Ensure valid JSON output. No markdown, backticks, or comments.
 """
@@ -310,9 +320,13 @@ Parse this query and output the correct query JSON:"""
 
 RESPONSE_GENERATION_SYSTEM_PROMPT = """You are a helpful customer support agent.
 Answer the User Query using ONLY the provided API Results and QueryFilters.
-Return ONLY a simple single sentence stating the total count value with the date range. Do NOT include any other details, regions, vehicle numbers, HTML tags, markdown formatting, or extra text.
 
-Example output:
+Rules:
+1. If the API Results contain a list of objects each with a "vehicleNo" and "uniqueVehicleCount" field (i.e. a distinct-vehicle grouped result), sum all the "uniqueVehicleCount" values to get the total number of unique vehicles. Then respond with a single natural-language sentence stating the total number of distinct vehicles found for the given date range.
+   Example output for this case: "A total of 42 distinct vehicles were used in August 2026."
+2. For all other queries, return ONLY a simple single sentence stating the total count value with the date range. Do NOT include any other details, regions, vehicle numbers, HTML tags, markdown formatting, or extra text.
+
+Example output (general):
 Total 150 trips found for date range from 2026-09-08 00:00:00 to 2026-09-08 23:59:59.
 """
 
