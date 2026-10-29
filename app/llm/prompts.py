@@ -52,7 +52,7 @@ FIELD REFERENCE (use these exact API field names and allowed values):
                             "active" (= running — treat running and active as equivalent),
                             "closed" (= completed/finished/inactive),
                             "cancelled",
-                            "valid" (used for device-report / 3rd-party data queries)
+                            "valid" (used for device-report / 3rd-party data queries, and active vehicles operating in past periods/months)
 
   Region        -> field: "region"   (e.g. "North", "South", "East", "West")
 
@@ -131,7 +131,7 @@ CRITICAL RULES:
    - "valid trips", "valid trip", "valid", "non-cancelled" / "not cancelled", or "completed and closed" / "closed and completed" -> tripStatus eq "valid"
    - "completed, closed, finished, or inactive trips" (unless query says "completed and closed") -> tripStatus eq "closed"
    - "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" -> tripStatus eq "running"
-   - "active trips" or "active" -> tripStatus eq "active"
+   - "active trips" or "active" -> tripStatus eq "active" (NOTE: does NOT apply to "active vehicles"; see ACTIVE VEHICLES below)
    - "cancelled trips" or "cancelled" (unless query says "non-cancelled") -> tripStatus eq "cancelled"
    - NOTE: When a query mentions trip status (e.g. "valid", "completed", "cancelled", "active", "running") alongside a vendor (e.g. "Secutrak") or any other field, always include both the tripStatus filter and the vendor / other field filters.
    - SHIPMENT METHODS:
@@ -159,13 +159,14 @@ CRITICAL RULES:
          * Do NOT use value "existing" here.
          * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
          * Include filter: field: "tripStatus", operator: "eq", value: "valid"
-    - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS: When the query asks about trips without GPS (e.g. "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
-         * field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
+    - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS / NO ANY GPS: When the query asks about trips without GPS or "No Any GPS" (e.g. "Count total trips listed under No Any GPS device in Aug 2026", "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
+         * For "No Any GPS" / "No Any GPS device" queries: field: "GPS", operator: "eq", value: "nogps "
+         * For other non-GPS queries: field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
          * Do NOT include groupBy or metrics unless explicitly requested.
          * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned.
          * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
     - GPS TRIPS: When query asks about trips WITH GPS / "GPS trips" / "GPS trip counts" (positive sense, e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026"):
-         NOTE: SKIP this rule if the query contains "no GPS", "non-GPS", "without GPS", "had no GPS" -- use NO GPS rules above.
+         NOTE: SKIP this rule if the query contains "no GPS", "no any GPS", "non-GPS", "without GPS", "had no GPS" -- use NO GPS rules above.
          * field: "GPS", operator: "eq", value: "existing"
          * Do NOT add FixedELock or PortableELock filters unless they are explicitly mentioned.
          * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned or no date was given.
@@ -190,16 +191,18 @@ CRITICAL RULES:
            - field: "PortableELock", operator: "eq", value: "na"
        * Do NOT include groupBy or metrics for single device queries.
        * If query specifies a status like "valid" (e.g. "How many valid Trips had Fixed GPS as the single device in Aug 2026?"), "non-cancelled", or "completed and closed", include field: "tripStatus", operator: "eq", value: "valid" as the FIRST filter. Do NOT include tripStatus if no status keyword is mentioned.
-   - PORTABLE E-LOCK TRIPS (without "only"):
-       * When query asks about "portable E-Lock trips" / "total count of portable E-Lock trips" (e.g. "Show total count of portable E-Lock trips in Aug 2026"):
+   - PORTABLE E-LOCK TRIPS / VEHICLES (without "only"):
+       * When query asks about "portable E-Lock trips" / "total count of portable E-Lock trips" / "vehicles equipped with Portable E-Locks" (e.g. "Show total count of portable E-Lock trips in Aug 2026", "How many unique Intercity vehicles were equipped with Portable E-Locks In Aug 2026"):
            - field: "PortableELock", operator: "eq", value: "existing" (or status if mentioned)
            - Do NOT add "GPS" or "FixedELock" filters (do NOT add value "na").
            - Do NOT add tripStatus filter unless explicitly mentioned.
-   - FIXED E-LOCK TRIPS (without "only" and without "device count"):
-       * When query asks about "Fixed E-Lock trips" (e.g. "Show count of Fixed E-Lock trips in Aug 2026"):
+           - If unique / distinct vehicles are asked, include groupBy: ["vehicleNo"] and metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}], without select.
+   - FIXED E-LOCK TRIPS / VEHICLES (without "only" and without "device count"):
+       * When query asks about "Fixed E-Lock trips" / "vehicles equipped with Fixed E-Locks" (e.g. "Show count of Fixed E-Lock trips in Aug 2026"):
            - field: "FixedELock", operator: "eq", value: "existing" (or status if mentioned)
            - Do NOT add "GPS" or "PortableELock" filters (do NOT add value "na").
            - Do NOT add tripStatus filter unless explicitly mentioned.
+           - If unique / distinct vehicles are asked, include groupBy: ["vehicleNo"] and metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}], without select.
    - ACTIVE DEVICE COUNT FOR TRIPS:
        * When query asks about "active device count" for Fixed E-Lock trips (e.g. "What was the active device count for Fixed E-Lock trips on Intercity routes in Aug 2026?"): 
            - field: "tripStatus", operator: "eq", value: "valid"
@@ -209,6 +212,12 @@ CRITICAL RULES:
            - field: "tripStatus", operator: "eq", value: "valid"
            - field: "PortableELock", operator: "eq", value: "active"
            - Do NOT add "GPS" or "FixedELock" filters (do NOT add value "na").
+   - FIXED GPS + FIXED/PORTABLE E-LOCK COMBINATION:
+       When the query asks about a combination of Fixed GPS and Fixed/Portable E-Lock (e.g. "Fixed GPS + Fixed E-Lock combination"):
+       * Include field: "FixedELock", operator: "eq", value: "existing" (if Fixed E-Lock mentioned)
+       * Include field: "PortableELock", operator: "eq", value: "existing" (if Portable E-Lock mentioned)
+       * Include field: "GPS", operator: "eq", value: "existing"
+       * If unique vehicles are requested, include groupBy: ["vehicleNo"] and metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}], without select.
    - DEVICE COMBO: When query mentions BOTH "Fixed E-Lock" AND "Portable E-Lock" as a device combo (e.g. "using both Fixed E-Lock and Portable E-Lock"):
        filter: fixed-e-lock status eq "existing", portable-e-lock status eq "existing", include in groupBy: ["fixed-e-lock status", "portable-e-lock status"], add metrics block
    - NOTE: "Fixed GPS", "GPS device", or similar GPS mentions do NOT create a separate filter field in device combos.
@@ -247,6 +256,26 @@ CRITICAL RULES:
         * Include "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
         * Do NOT include "select"
         * Filter order: tripStatus first, then runDate gte, then runDate lte, then groupId
+    - ACTIVE VEHICLES: When the query asks for "active vehicles" (e.g. "Count all active vehicles operating on the field during Aug 2026", "active vehicles operating on the field", "active vehicles in Aug 2026"):
+        * The user is asking for active vehicles operating on the field, NOT active trips.
+        * For a past month or date range, tripStatus MUST be "valid" (NOT "active", as active trips only describe currently live/ongoing trips).
+        * Include filter: groupId eq "0041"
+        * Include filter: tripStatus eq "valid"
+        * Include runDate gte/lte filters for the specified period
+        * Include "groupBy": ["vehicleNo"]
+        * Include "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        * Do NOT include "select"
+        * Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte
+    - UNIQUE VEHICLES USED BY A SPECIFIC TRANSPORTER:
+      When the query asks to list or count unique or distinct vehicles used by a specific transporter (e.g. "List all unique vehicles used by transporter PRADEESH N V in August 2026", "unique vehicles for transporter <Name> in <Period>"):
+        * Include filter: groupId eq "0041"
+        * Include filter: transporter eq "<TransporterName>" (exact name from query, field is lowercase "transporter")
+        * Include runDate gte/lte filters for the specified period
+        * Do NOT include tripStatus filter
+        * Do NOT include "select"
+        * Include "groupBy": ["transporter"]
+        * Include "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}]
+        * Filter order: groupId first, then transporter, then runDate gte, then runDate lte
 12. For ATD / ATA queries: use field "ATD" / "ATA" (uppercase). Map natural language as follows:
     - "not captured" / "notcaptured" -> value: "notcaptured"
     - "captured" -> value: "Captured"
@@ -349,6 +378,18 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "shipmentMethod", "operator": "eq", "value": "network"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "Show total Intercity trips running exclusively on Fixed GPS" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
+- "Count total trips listed under No Any GPS device in Aug 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps "}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Show total count of trips without any GPS devices attached" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps "}], "select": []}
+- "What is the total unique vehicle count for the Fixed GPS + Fixed E-Lock combination Aug 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "existing"}, {"field": "GPS", "operator": "eq", "value": "existing"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "How many unique Intercity vehicles were equipped with Portable E-Locks In Aug 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "PortableELock", "operator": "eq", "value": "existing"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "Count all active vehicles operating on the field during Aug 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "List all unique vehicles used by transporter PRADEESH N V in August 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "transporter", "operator": "eq", "value": "PRADEESH N V"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["transporter"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}]}
 
 Ensure valid JSON output. No markdown, backticks, or comments.
 """
@@ -367,17 +408,39 @@ Parse this query and output the correct query JSON:"""
 
 
 RESPONSE_GENERATION_SYSTEM_PROMPT = """You are a helpful customer support agent.
-Answer the User Query using ONLY the provided API Results and QueryFilters.
+Answer the User Query using the provided API Results, TotalTripsCount, and QueryFilters.
+
+CRITICAL INSTRUCTION:
+In your response, you MUST convert all active query filter fields (transporter, region, shipmentMethod, routeCategory, tripStatus, vendor, GPS/device conditions, remarks, ATD/ATA, date range) into clear natural language.
+Never output internal system fields such as "groupId" or "0041".
 
 Rules:
-1. If the API Results contain a list of objects each with a "vehicleNo" and "uniqueVehicleCount" field (i.e. a distinct-vehicle grouped result), sum all the "uniqueVehicleCount" values to get the total number of unique vehicles.
-   - If the user query asks about vehicles with no GPS / without GPS / had no GPS, respond with a sentence like: "A total of X vehicles had no GPS in [period]."
-   - Otherwise, respond with a sentence like: "A total of X distinct vehicles were used in [period]."
-2. If the API Results contain a list of objects each with a "transporter" and "uniqueTransporterCount" field (i.e. a distinct-transporter grouped result), sum all the "uniqueTransporterCount" values to get the total number of unique transporters and respond like: "Total X  unique Transporter in date range from [start_date] to [end_date]."
-3. For all other queries, return ONLY a simple single sentence stating the total count value with the date range. Do NOT include any other details, regions, vehicle numbers, HTML tags, markdown formatting, or extra text.
+1. Distinct Vehicle Results (API Results have "uniqueVehicleCount" or "totalUniqueVehicleCount"):
+   - Sum all "uniqueVehicleCount" / "totalUniqueVehicleCount" values to determine the total count.
+   - If the query/filters specify a transporter (e.g. "PRADEESH N V"):
+     "Total X distinct vehicles used by transporter <transporter> in date range from <start_date> to <end_date>."
+   - If the query asks for active vehicles operating on the field (tripStatus: "valid"):
+     "Total X active vehicles operating on the field in date range from <start_date> to <end_date>."
+   - If vehicles with no GPS / without GPS:
+     "Total X vehicles without GPS in date range from <start_date> to <end_date>."
+   - If equipped with Portable E-Lock / Fixed E-Lock / Intercity / Intracity:
+     "Total X distinct <intercity/intracity> vehicles equipped with <Portable E-Lock / Fixed E-Lock> in date range from <start_date> to <end_date>."
+   - General distinct vehicles:
+     "Total X distinct vehicles used in date range from <start_date> to <end_date>."
+2. Distinct Transporter Results (API Results have "uniqueTransporterCount"):
+   - Sum all "uniqueTransporterCount" values:
+     "Total X  unique Transporter in date range from <start_date> to <end_date>."
+3. Trip Count Results:
+   - State the total count and convert all filters into natural language:
+     e.g., status ("running", "active", "closed", "cancelled"), routeCategory ("intercity", "intracity"), shipmentMethod ("air", "feeder", "empty", "delivery", "sfc", "speed"), region ("in the <region> region"), vendor ("using Secutrak devices", "using 3rd-party devices"), device conditions ("without GPS", "with GPS", "with inactive Fixed GPS", "equipped with Fixed E-Lock", "equipped with Portable E-Lock"), remarks ("closed forcefully", "closed manually"), ATD/ATA ("where ATD was not captured/missing"), locations ("from <From> to <To>"), and date range ("in date range from <start_date> to <end_date>").
+   - Output ONLY a single concise, clean sentence. Do NOT include markdown, backticks, bullet points, or HTML tags.
 
-Example output (general):
-Total 150 trips found for date range from 2026-09-08 00:00:00 to 2026-09-08 23:59:59.
+Example outputs:
+- "Total 1 distinct vehicles used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+- "Total 25 active vehicles operating on the field in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+- "Total 1138 running trips found in the North region in date range from 2026-01-01 00:00:00 to 2026-01-31 23:59:59."
+- "Total 50 trips without GPS found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+- "Total 150 trips found for date range from 2026-09-08 00:00:00 to 2026-09-08 23:59:59."
 """
 
 RESPONSE_GENERATION_USER_PROMPT_TEMPLATE = """API Results:
