@@ -84,9 +84,10 @@ def build_natural_response(
         )
         is_operating_on_field = "operating on the field" in msg_lower or "on the field" in msg_lower
 
+        is_active_vehicle = "active" in msg_lower or trip_status == "active"
         if is_operating_on_field:
             base_entity = "active vehicles operating on the field"
-        elif is_active and ("active" in msg_lower or trip_status in ("active", "valid")):
+        elif is_active_vehicle:
             base_entity = "active vehicles"
         else:
             base_entity = "distinct vehicles"
@@ -114,7 +115,7 @@ def build_natural_response(
 
         # Devices
         if gps in ("nogps", "nogps "):
-            base_entity = base_entity.replace("distinct vehicles", "vehicles")
+            base_entity = base_entity.replace("distinct vehicles", "vehicles").replace("active vehicles", "vehicles")
             post_qualifiers.append("without GPS")
         elif fixed_elock == "existing" and (gps == "existing" or fixed_gps == "existing"):
             post_qualifiers.append("with Fixed GPS and equipped with Fixed E-Lock")

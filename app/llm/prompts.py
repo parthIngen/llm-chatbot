@@ -63,6 +63,8 @@ FIELD REFERENCE (use these exact API field names and allowed values):
 
   Route         -> field: "Route"    (route name/code)
 
+  Transporter   -> field: "transporter" (e.g. "PRADEESH N V")
+
   GPS Vendor    -> field: "vendor"
                    values: "ICICI" maps to "Secutrak",
                             "Secutrak",
@@ -276,6 +278,17 @@ CRITICAL RULES:
         * Include "groupBy": ["transporter"]
         * Include "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}]
         * Filter order: groupId first, then transporter, then runDate gte, then runDate lte
+    - VEHICLES WITHOUT GPS / WITH DEVICE EXCEPTIONS FOR A SPECIFIC TRANSPORTER:
+      When the query asks to list or count vehicles used by a specific transporter that have no GPS or device exceptions (e.g. "List vehicles used by transporter PRADEESH N V in August 2026 that have no GPS device"):
+        * Include filter: tripStatus eq "valid"
+        * Include filter: groupId eq "0041"
+        * Include filter: transporter eq "<TransporterName>" (exact name from query, field is lowercase "transporter")
+        * Include filter: GPS eq "nogps"
+        * Include runDate gte/lte filters for the specified period
+        * Include select: []
+        * Include groupBy: ["vehicleNo"]
+        * Include metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        * Filter order: tripStatus first, then groupId, then transporter, then GPS, then runDate gte, then runDate lte
 12. For ATD / ATA queries: use field "ATD" / "ATA" (uppercase). Map natural language as follows:
     - "not captured" / "notcaptured" -> value: "notcaptured"
     - "captured" -> value: "Captured"
@@ -390,6 +403,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "List all unique vehicles used by transporter PRADEESH N V in August 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "transporter", "operator": "eq", "value": "PRADEESH N V"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["transporter"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}]}
+- "List vehicles used by transporter PRADEESH N V in August 2026 that have no GPS device" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "transporter", "operator": "eq", "value": "PRADEESH N V"}, {"field": "GPS", "operator": "eq", "value": "nogps"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 
 Ensure valid JSON output. No markdown, backticks, or comments.
 """

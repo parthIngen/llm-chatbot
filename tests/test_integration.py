@@ -3641,8 +3641,189 @@ async def test_unique_vehicles_used_by_transporter_fallback_flow():
         assert response.json()["reply"] == "Total 1 distinct vehicles used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
 
 
+@pytest.mark.asyncio
+async def test_vehicles_used_by_transporter_no_gps_flow():
+    user_query = "List vehicles used by transporter PRADEESH N V in August 2026 that have no GPS device"
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "GPS",
+                "operator": "eq",
+                "value": "nogps"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-31 23:59:59"
+            }
+        ],
+        "select": [],
+        "groupBy": [
+            "vehicleNo"
+        ],
+        "metrics": [
+            {
+                "field": "vehicleNo",
+                "function": "countDistinct",
+                "alias": "uniqueVehicleCount"
+            }
+        ]
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload, "Total 1 vehicles without GPS used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"vehicleNo": "DL01AB1234", "uniqueVehicleCount": 1}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-transporter-vehicles-no-gps",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "transporter",
+                    "operator": "eq",
+                    "value": "PRADEESH N V"
+                },
+                {
+                    "field": "GPS",
+                    "operator": "eq",
+                    "value": "nogps"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 1 vehicles without GPS used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
 
 
+@pytest.mark.asyncio
+async def test_vehicles_used_by_transporter_no_gps_fallback_flow():
+    user_query = "List vehicles used by transporter PRADEESH N V in August 2026 that have no GPS device"
 
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"vehicleNo": "DL01AB1234", "uniqueVehicleCount": 1}]}
+        mock_post.return_value = mock_api_res
 
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-transporter-vehicles-no-gps-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
 
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "transporter",
+                    "operator": "eq",
+                    "value": "PRADEESH N V"
+                },
+                {
+                    "field": "GPS",
+                    "operator": "eq",
+                    "value": "nogps"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 1 vehicles without GPS used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
