@@ -4542,3 +4542,282 @@ async def test_breakdown_non_gps_across_network_or_intercity_fallback_flow():
         }
         assert entities == expected_entities
         assert response.json()["reply"] == "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120."
+
+
+
+@pytest.mark.asyncio
+async def test_device_analytics_total_gps_device_flow():
+    user_query = "Total gps device in august 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 135869}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-dev-gps-1",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gps"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_device_analytics_gps_with_inactive_flow():
+    user_query = "GPS with No Connectivity or Inactive GPS August 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 17804}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-dev-gps-inactive",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gps"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "GPS", "operator": "eq", "value": "inactive"}
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_device_analytics_gps_only_flow():
+    user_query = "Trip with Only with single GPS or Fixed GPS only August 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 111447}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-dev-gps-only",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsonly"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_device_analytics_fixed_elock_active_flow():
+    user_query = "Fixed Elock with active GPS August 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 16299}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-dev-felock-act",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "fixedlock"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "FixedELock", "operator": "eq", "value": "active"}
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_device_analytics_portable_elock_single_active_flow():
+    user_query = "Trip with Only with Active single Portbale Elock August 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 805}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-dev-pelock-act-only",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "portableelockonly"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "PortableELock", "operator": "eq", "value": "active"}
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_device_analytics_without_any_device_flow():
+    user_query = "Trip without any Device or GPS and Fixed Elock and Portable Elock August 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 38456}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-dev-without-any",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "withoutanygps"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_device_analytics_combo_without_fixed_elock_flow():
+    user_query = "Trip with not Fixed Elock but having GPS and Portable Elock only August 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 3305}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-dev-combo-not-felock",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "withoutorgps"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
+                {"field": "fixed-elock-status", "operator": "eq", "value": "na"},
+                {"field": "portable-elock-status", "operator": "eq", "value": "existing"}
+            ],
+            "select": []
+        }
+        # Verify without strict ordering of the 3 device status filters among themselves
+        assert entities["entity"] == expected_entities["entity"]
+        assert entities["operation"] == expected_entities["operation"]
+        assert entities["analytics"] == expected_entities["analytics"]
+        assert entities["select"] == expected_entities["select"]
+        assert entities["filters"][:3] == expected_entities["filters"][:3]
+        assert set(f["field"] for f in entities["filters"][3:]) == {"fixed-gps-status", "portable-elock-status", "fixed-elock-status"}

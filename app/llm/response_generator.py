@@ -270,6 +270,50 @@ def build_natural_response(
         device_qualifiers.append("where departure was delayed")
     if filter_map.get("arrivalDelayed"):
         device_qualifiers.append("where arrival was delayed")
+    if filter_map.get("withoutanygps"):
+        device_qualifiers.append("without any device")
+    elif filter_map.get("withoutorgps"):
+        device_qualifiers.append("matching device combination")
+    elif filter_map.get("gpsonly"):
+        device_qualifiers.append("with single Fixed GPS only")
+    elif filter_map.get("fixedgpsonly"):
+        if gps == "active":
+            device_qualifiers.append("with active single Fixed GPS only")
+        elif gps == "inactive":
+            device_qualifiers.append("with inactive single Fixed GPS only")
+        else:
+            device_qualifiers.append("with single Fixed GPS only")
+    elif filter_map.get("fixedlockonly"):
+        device_qualifiers.append("with single Fixed E-Lock only")
+    elif filter_map.get("fixedelockonly"):
+        if fixed_elock == "active":
+            device_qualifiers.append("with active single Fixed E-Lock only")
+        elif fixed_elock == "inactive":
+            device_qualifiers.append("with inactive single Fixed E-Lock only")
+        else:
+            device_qualifiers.append("with single Fixed E-Lock only")
+    elif filter_map.get("fixedlockna"):
+        device_qualifiers.append("where Fixed E-Lock is not available")
+    elif filter_map.get("portablelockonly"):
+        device_qualifiers.append("with single Portable E-Lock only")
+    elif filter_map.get("portableelockonly"):
+        if portable_elock == "active":
+            device_qualifiers.append("with active single Portable E-Lock only")
+        elif portable_elock == "inactive":
+            device_qualifiers.append("with inactive single Portable E-Lock only")
+        else:
+            device_qualifiers.append("with single Portable E-Lock only")
+    elif filter_map.get("portablelockna"):
+        device_qualifiers.append("where Portable E-Lock is not available")
+    elif filter_map.get("fixedlock"):
+        if fixed_elock not in ("active", "inactive"):
+            device_qualifiers.append("equipped with Fixed E-Lock")
+    elif filter_map.get("portablelock"):
+        if portable_elock not in ("active", "inactive"):
+            device_qualifiers.append("equipped with Portable E-Lock")
+    elif filter_map.get("gps"):
+        if gps not in ("active", "inactive"):
+            device_qualifiers.append("with Fixed GPS")
 
     # Contextual qualifiers (Locations, route, vehicle, transporter, region, vendor)
     context_qualifiers = []

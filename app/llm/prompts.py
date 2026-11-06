@@ -8,7 +8,7 @@ The output JSON MUST follow this format exactly:
   "operation": "count",
   "analytics": [
     {
-      "type": "departureDelayed" | "arrivalDelayed" | "gpsna"
+      "type": "departureDelayed" | "arrivalDelayed" | "gps" | "gpsna" | "gpsonly" | "fixedgpsonly" | "fixedlock" | "fixedlockna" | "fixedlockonly" | "fixedelockonly" | "portablelock" | "portablelockna" | "portablelockonly" | "portableelockonly" | "withoutanygps" | "withoutorgps"
     }
   ],
   "filters": [
@@ -29,7 +29,7 @@ The output JSON MUST follow this format exactly:
   "select": []
 }
 
-Note: "analytics" is optional. Only include it when the query specifically asks about delayed departures or arrivals, or vehicles/trips without GPS / no GPS.
+Note: "analytics" is optional. Include it when the query asks about device analytics (gps, gpsna, gpsonly, fixedgpsonly, fixedlock, fixedlockna, fixedlockonly, fixedelockonly, portablelock, portablelockna, portablelockonly, portableelockonly, withoutanygps, withoutorgps) or delayed departures/arrivals. Do NOT add unnecessary filters when an analytics type already captures the criteria.
 Note: "groupBy" and "metrics" are optional. Include them for device-combo queries, transporter/unique-vehicle count queries, or trip type comparison queries (such as Network vs Local trip counts).
 
 FIELD REFERENCE (use these exact API field names and allowed values):
@@ -317,7 +317,44 @@ CRITICAL RULES:
     - "missing" -> value: "missing"
     - "not missing" / "notmissing" -> value: "NotMissing"
 13. For Remarks queries: use field "closeRemarks". Valid values are: "manual", "forcefully", "geofence", "api", "backend", "web".
-14. For GPS / ELock exception queries: use fields "FixedGPS", "FixedELock", "PortableELock" (PascalCase). Valid values: "inactive", "nogps", "gpsInactive", "NA", "Active".
+14. DEVICE / GPS / ELOCK ANALYTICS PAYLOAD RULES (BASIC Question availability/na/inactive/active/only):
+   When querying counts/trips related to GPS, Fixed E-Lock, or Portable E-Lock:
+   A. FIXED GPS / GPS:
+      - "Total gps device in <period>" (refer to fixed device) -> analytics: [{"type": "gps"}], select: [] (no GPS filter)
+      - "Total gps NA or not available device in <period>" -> analytics: [{"type": "gpsna"}], select: [] (no GPS filter)
+      - "GPS with No Connectivity or Inactive GPS in <period>" -> analytics: [{"type": "gps"}], filter: GPS eq "inactive", select: []
+      - "GPS with active GPS in <period>" -> analytics: [{"type": "gps"}], filter: GPS eq "active", select: []
+      - "Trip with Only with single GPS or Fixed GPS only in <period>" -> analytics: [{"type": "gpsonly"}], select: []
+      - "Trip with Only with Inactive single GPS or Inactive Fixed GPS only in <period>" -> analytics: [{"type": "fixedgpsonly"}], filter: GPS eq "inactive", select: []
+      - "Trip with Only with Active single GPS or Active Fixed GPS only in <period>" -> analytics: [{"type": "fixedgpsonly"}], filter: GPS eq "active", select: []
+
+   B. FIXED ELOCK:
+      - "Total fixed elock device in <period>" (refer to fixed e lock) -> analytics: [{"type": "fixedlock"}], select: []
+      - "Total elock NA or not available device in <period>" -> analytics: [{"type": "fixedlockna"}], select: []
+      - "Fixed lock with No Connectivity or Inactive GPS/Fixed ELock in <period>" -> analytics: [{"type": "fixedlock"}], filter: FixedELock eq "inactive", select: []
+      - "Fixed Elock with active GPS/Fixed ELock in <period>" -> analytics: [{"type": "fixedlock"}], filter: FixedELock eq "active", select: []
+      - "Trip with Only with single Fixed Elock in <period>" -> analytics: [{"type": "fixedlockonly"}], select: []
+      - "Trip with Only with Inactive single Fixed ELOCK only in <period>" -> analytics: [{"type": "fixedelockonly"}], filter: FixedELock eq "inactive", select: []
+      - "Trip with Only with Active single Elock in <period>" -> analytics: [{"type": "fixedelockonly"}], filter: FixedELock eq "active", select: []
+
+   C. PORTABLE E LOCK:
+      - "Total portable elock device in <period>" (refer to portable e lock) -> analytics: [{"type": "portablelock"}], select: []
+      - "Total portable elock NA or not available device in <period>" -> analytics: [{"type": "portablelockna"}], select: []
+      - "Fixed lock with No Connectivity or Inactive Portable GPS/Portable ELock in <period>" -> analytics: [{"type": "portablelock"}], filter: PortableELock eq "inactive", select: []
+      - "Portable Elock with active GPS/Portable ELock in <period>" -> analytics: [{"type": "portablelock"}], filter: PortableELock eq "active", select: []
+      - "Trip with Only with single Portable Elock in <period>" -> analytics: [{"type": "portablelockonly"}], select: []
+      - "Trip with Only with Inactive single Portable ELOCK only in <period>" -> analytics: [{"type": "portableelockonly"}], filter: PortableELock eq "inactive", select: []
+      - "Trip with Only with Active single Portbale Elock in <period>" -> analytics: [{"type": "portableelockonly"}], filter: PortableELock eq "active", select: []
+
+   D. MISCELLANEOUS (Combinations & Without Any Device):
+      - "Trip without any Device or GPS and Fixed Elock and Portable Elock in <period>" -> analytics: [{"type": "withoutanygps"}], select: []
+      - "Trip with not Fixed Elock but having GPS and Portable Elock only in <period>" -> analytics: [{"type": "withoutorgps"}], filters: fixed-gps-status eq "existing", portable-elock-status eq "existing", fixed-elock-status eq "na", select: []
+      - "Trip with not Portable Elock but having GPS and Fixed Elock only in <period>" -> analytics: [{"type": "withoutorgps"}], filters: fixed-gps-status eq "existing", fixed-elock-status eq "existing", portable-elock-status eq "na", select: []
+      - "Trip with not Fixed GPS but having Portable Elock and Fixed Elock only in <period>" -> analytics: [{"type": "withoutorgps"}], filters: fixed-gps-status eq "na", portable-elock-status eq "existing", fixed-elock-status eq "existing", select: []
+      - "Trip with not Portable Elock but having GPS and Fixed Elock only and both are active in <period>" -> analytics: [{"type": "withoutorgps"}], filters: fixed-gps-status eq "existing", GPS eq "active", fixed-elock-status eq "existing", FixedELock eq "active", select: []
+      - "Trip with not GPS or Fixed GPS but having Portable Elock and Fixed Elock only and both are active in <period>" -> analytics: [{"type": "withoutorgps"}], filters: portable-elock-status eq "existing", PortableELock eq "active", fixed-elock-status eq "existing", FixedELock eq "active", select: []
+      - "Trip with not Fixed Elock but Portable Elock and Fixed GPS only and both are active in <period>" -> analytics: [{"type": "withoutorgps"}], filters: portable-elock-status eq "existing", PortableELock eq "active", fixed-gps-status eq "existing", GPS eq "active", select: []
+      - "Trip with not Fixed Elock but Portable Elock and Fixed GPS only and both are inactive or no connectivity in <period>" -> analytics: [{"type": "withoutorgps"}], filters: portable-elock-status eq "existing", PortableELock eq "inactive", fixed-gps-status eq "existing", GPS eq "inactive", select: []
 
 - "3rd party device data" or "3rd-party device data" or "3rd party device" or "3rd-party device" -> tripStatus eq "valid", vendor eq "ThirdParty"
 - "Generate the <Vendor> device report" or "<Vendor> device report" -> tripStatus eq "valid", vendor contains "<Vendor>"
@@ -429,6 +466,64 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "List all unique vehicles used by transporter PRADEESH N V in August 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "transporter", "operator": "eq", "value": "PRADEESH N V"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["transporter"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}]}
+- "Total gps device in august 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Total gps NA or not available device in august 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "GPS with No Connectivity or Inactive GPS August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "inactive"}], "select": []}
+- "GPS with active GPS August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}], "select": []}
+- "Trip with Only with single GPS or Fixed GPS only August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Trip with Only with Inactive single GPS or Inactive Fixed GPS only August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedgpsonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "inactive"}], "select": []}
+- "Trip with Only with Active single GPS or Active Fixed GPS only August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedgpsonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}], "select": []}
+- "Total fixed elock device in august 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedlock"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Total elock NA or not available device in august 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedlockna"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Fixed lock with No Connectivity or Inactive GPS August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedlock"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "inactive"}], "select": []}
+- "Fixed Elock with active GPS August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedlock"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "active"}], "select": []}
+- "Trip with Only with single Fixed Elock August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedlockonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Trip with Only with Inactive single Fixed ELOCK only August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedelockonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "inactive"}], "select": []}
+- "Trip with Only with Active single Elock August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedelockonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "active"}], "select": []}
+- "Total portable elock device in august 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "portablelock"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Total portable elock NA or not available device in august 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "portablelockna"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Fixed lock with No Connectivity or Inactive Portable GPS August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "portablelock"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "PortableELock", "operator": "eq", "value": "inactive"}], "select": []}
+- "Portable Elock with active GPS August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "portablelock"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "PortableELock", "operator": "eq", "value": "active"}], "select": []}
+- "Trip with Only with single Portble Elock August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "portablelockonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Trip with Only with Inactive single Portable ELOCK only August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "portableelockonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "PortableELock", "operator": "eq", "value": "inactive"}], "select": []}
+- "Trip with Only with Active single Portbale Elock August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "portableelockonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "PortableELock", "operator": "eq", "value": "active"}], "select": []}
+- "Trip without any Device or GPS and Fixed Elock and Portable Elock August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutanygps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Trip with not Fixed Elock but having GPS and Portable Elock only August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutorgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fixed-gps-status", "operator": "eq", "value": "existing"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "fixed-elock-status", "operator": "eq", "value": "na"}], "select": []}
+- "Trip with not Portable Elock but having GPS and Fixed Elock only August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutorgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fixed-gps-status", "operator": "eq", "value": "existing"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}, {"field": "portable-elock-status", "operator": "eq", "value": "na"}], "select": []}
+- "Trip with not Fixed GPS but having Portable Elock and Fixed Elock only August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutorgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fixed-gps-status", "operator": "eq", "value": "na"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}], "select": []}
+- "Trip with not Portable Elock but having GPS and Fixed Elock only and both are active August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutorgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fixed-gps-status", "operator": "eq", "value": "existing"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "active"}], "select": []}
+- "Trip with with not GPS or Fixed GPS but having Portbale Elock and Fixed Elock only and both are active August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutorgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "PortableELock", "operator": "eq", "value": "active"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "active"}], "select": []}
+- "Trip with with not Portable Elock but Portbale Elock and Fixed GPS only and both are active August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutorgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "PortableELock", "operator": "eq", "value": "active"}, {"field": "fixed-gps-status", "operator": "eq", "value": "existing"}, {"field": "GPS", "operator": "eq", "value": "active"}], "select": []}
+- "Trip with with not Portable Elock but Portbale Elock and Fixed GPS only and both are inactive or no connectivity August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutorgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "PortableELock", "operator": "eq", "value": "inactive"}, {"field": "fixed-gps-status", "operator": "eq", "value": "existing"}, {"field": "GPS", "operator": "eq", "value": "inactive"}], "select": []}
 - "List vehicles used by transporter PRADEESH N V in August 2026 that have no GPS device" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "transporter", "operator": "eq", "value": "PRADEESH N V"}, {"field": "GPS", "operator": "eq", "value": "nogps"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 

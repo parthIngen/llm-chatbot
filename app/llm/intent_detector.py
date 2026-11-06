@@ -2,7 +2,7 @@ import json
 import datetime
 import calendar
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.llm.client import LLMClient, LLMRateLimitError
 from app.llm.prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_PROMPT_TEMPLATE
 from app.utils.logger import log_intent_detected, log_entities_extracted, log_error
@@ -269,6 +269,222 @@ def extract_specific_transporter(text: str) -> str | None:
             return None
         if candidate.lower() not in _TRANSPORTER_STOP_WORDS and len(candidate) > 1:
             return candidate
+    return None
+
+def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
+    """
+    Detects Device/GPS Related Analytics queries (BASIC Question availability/na/inactive/active/only)
+    and returns a dict with:
+      - 'analytics_type': e.g. 'gps', 'gpsna', 'gpsonly', 'fixedgpsonly', 'fixedlock', 'fixedlockna',
+                          'fixedlockonly', 'fixedelockonly', 'portablelock', 'portablelockna',
+                          'portablelockonly', 'portableelockonly', 'withoutanygps', 'withoutorgps'
+      - 'device_filters': list of specific device filter dicts to inject into filters
+    or None if this is not a device analytics query.
+    """
+    msg_l = message.lower()
+
+    # Do not intercept vehicle unique/distinct count queries, transporter queries,
+    # or Network vs Local / route breakdown queries.
+    if bool(re.search(r'\b(?:unique|distinct|how\s+many)\s+vehicles?\b', msg_l)):
+        return None
+    if bool(re.search(r'\bvehicles?\b', msg_l) and re.search(r'\b(?:count|number)\b', msg_l) and re.search(r'\bno\s+gps\b', msg_l)):
+        return None
+    if bool(re.search(r'\btransporters?\b', msg_l)):
+        return None
+    if bool(
+        re.search(r'\b(?:network\s+(?:vs\.?|versus|and|or|to)\s+local|local\s+(?:vs\.?|versus|and|or|to)\s+network)\b', msg_l)
+        or (re.search(r'\bbreakdown\b', msg_l) and re.search(r'\b(?:network|intercity|local|intracity)\b', msg_l))
+    ):
+        return None
+
+    # Check for withoutanygps:
+    # "Trip without any Device or GPS and Fixed Elock and Portable Elock August 2026", "without any device", "trips without any device"
+    if bool(
+        re.search(r'\bwithout\s+any\s+(?:device|gps\s+and\s+fixed\s+e?lock\s+and\s+portable\s+e?lock)\b', msg_l)
+        or re.search(r'\bwithout\s+(?:any\s+)?devices?\b', msg_l)
+        or re.search(r'\bno\s+(?:any\s+)?devices?\b', msg_l)
+    ):
+        return {
+            "analytics_type": "withoutanygps",
+            "device_filters": []
+        }
+
+    # Check for withoutorgps combinations:
+    # Patterns: having X and Y (only) but not Z / with not X but having Y and Z
+    has_combo_marker = bool(
+        re.search(r'\bnot\s+(?:fixed|portable|portbale|gps)\b', msg_l)
+        and re.search(r'\bhaving\b|\bwith\b|\bbut\b', msg_l)
+    ) or bool(
+        re.search(r'\b(?:without\s+fixed|without\s+portable|without\s+portbale|without\s+gps)\b', msg_l)
+        and re.search(r'\bhaving\b|\bwith\b|\bbut\b', msg_l)
+    )
+
+    if has_combo_marker:
+        is_both_active = bool(re.search(r'\bboth\s+(?:are\s+)?active\b', msg_l))
+        is_both_inactive = bool(re.search(r'\bboth\s+(?:are\s+)?(?:inactive|no\s+connectivity)\b', msg_l))
+
+        has_gps_mention = bool(re.search(r'\bgps\b', msg_l))
+        has_fixed_elock_mention = bool(re.search(r'\bfixed[\s-]e?locks?\b|\bfixed[\s-]locks?\b', msg_l))
+        has_portable_mention = bool(re.search(r'\bportab?le[\s-]e?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\b', msg_l))
+
+        not_fixed_elock = bool(re.search(r'\bnot\s+fixed\s+e?locks?\b|\bwithout\s+fixed\s+e?locks?\b', msg_l))
+        not_portable_elock = bool(re.search(r'\bnot\s+portab?le\s+e?locks?\b|\bwithout\s+portab?le\s+e?locks?\b', msg_l))
+        not_gps = bool(re.search(r'\bnot\s+(?:fixed\s+)?gps\b|\bwithout\s+(?:fixed\s+)?gps\b', msg_l))
+
+        # 1. Not Fixed Elock but having GPS and Portable Elock only
+        if not_fixed_elock and has_gps_mention and has_portable_mention and not not_portable_elock:
+            return {
+                "analytics_type": "withoutorgps",
+                "device_filters": [
+                    {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
+                    {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
+                    {"field": "fixed-elock-status", "operator": "eq", "value": "na"}
+                ]
+            }
+
+        # 2. Not Portable Elock but having GPS and Fixed Elock only
+        if not_portable_elock and has_gps_mention and has_fixed_elock_mention and not not_fixed_elock:
+            if is_both_active:
+                return {
+                    "analytics_type": "withoutorgps",
+                    "device_filters": [
+                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
+                        {"field": "GPS", "operator": "eq", "value": "active"},
+                        {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+                        {"field": "FixedELock", "operator": "eq", "value": "active"}
+                    ]
+                }
+            else:
+                return {
+                    "analytics_type": "withoutorgps",
+                    "device_filters": [
+                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
+                        {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+                        {"field": "portable-elock-status", "operator": "eq", "value": "na"}
+                    ]
+                }
+
+        # 3. Not Fixed GPS but having Portable Elock and Fixed Elock only
+        if not_gps and has_portable_mention and has_fixed_elock_mention:
+            if is_both_active:
+                return {
+                    "analytics_type": "withoutorgps",
+                    "device_filters": [
+                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
+                        {"field": "PortableELock", "operator": "eq", "value": "active"},
+                        {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+                        {"field": "FixedELock", "operator": "eq", "value": "active"}
+                    ]
+                }
+            else:
+                return {
+                    "analytics_type": "withoutorgps",
+                    "device_filters": [
+                        {"field": "fixed-gps-status", "operator": "eq", "value": "na"},
+                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
+                        {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}
+                    ]
+                }
+
+        # 4. Portable Elock and Fixed GPS only (e.g. "not Fixed Elock but Portable Elock and Fixed GPS only" or user's typo "with not Portable Elock but Portable Elock and Fixed GPS only")
+        if has_portable_mention and has_gps_mention:
+            if is_both_active:
+                return {
+                    "analytics_type": "withoutorgps",
+                    "device_filters": [
+                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
+                        {"field": "PortableELock", "operator": "eq", "value": "active"},
+                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
+                        {"field": "GPS", "operator": "eq", "value": "active"}
+                    ]
+                }
+            elif is_both_inactive:
+                return {
+                    "analytics_type": "withoutorgps",
+                    "device_filters": [
+                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
+                        {"field": "PortableELock", "operator": "eq", "value": "inactive"},
+                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
+                        {"field": "GPS", "operator": "eq", "value": "inactive"}
+                    ]
+                }
+            else:
+                return {
+                    "analytics_type": "withoutorgps",
+                    "device_filters": [
+                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
+                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
+                        {"field": "fixed-elock-status", "operator": "eq", "value": "na"}
+                    ]
+                }
+
+    # Single device categories
+    has_portable = bool(re.search(r'\bportab?le[\s-]e?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\s+gps\b|\bportab?le\b', msg_l))
+    has_fixed_elock = (bool(re.search(r'\bfixed[\s-]e?locks?\b|\bfixed[\s-]locks?\b', msg_l)) or (bool(re.search(r'\be?locks?\b', msg_l)) and not has_portable)) and not has_portable
+    has_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps|fixed\s+device)\b', msg_l)) and not has_portable and not has_fixed_elock
+
+    is_na = bool(re.search(r'\b(?:na|not\s+available|notavailable)\b', msg_l) or re.search(r'\b(?:no|without)\s+gps\b', msg_l))
+    is_inactive = bool(re.search(r'\b(?:inactive|no\s+connectivity|connectivity)\b', msg_l))
+    is_active = bool(re.search(r'\bactive\b', msg_l)) and not bool(re.search(r'\bactive\s+trips?\b', msg_l))
+    is_only_or_single = bool(re.search(r'\b(?:single|only|sole|alone)\b', msg_l))
+
+    # --- PORTABLE E-LOCK ---
+    if has_portable:
+        if is_na:
+            return {"analytics_type": "portablelockna", "device_filters": []}
+        if is_only_or_single:
+            if is_inactive:
+                return {"analytics_type": "portableelockonly", "device_filters": [{"field": "PortableELock", "operator": "eq", "value": "inactive"}]}
+            elif is_active:
+                return {"analytics_type": "portableelockonly", "device_filters": [{"field": "PortableELock", "operator": "eq", "value": "active"}]}
+            else:
+                return {"analytics_type": "portablelockonly", "device_filters": []}
+        else:
+            if is_inactive:
+                return {"analytics_type": "portablelock", "device_filters": [{"field": "PortableELock", "operator": "eq", "value": "inactive"}]}
+            elif is_active:
+                return {"analytics_type": "portablelock", "device_filters": [{"field": "PortableELock", "operator": "eq", "value": "active"}]}
+            else:
+                return {"analytics_type": "portablelock", "device_filters": []}
+
+    # --- FIXED E-LOCK ---
+    if has_fixed_elock:
+        if is_na:
+            return {"analytics_type": "fixedlockna", "device_filters": []}
+        if is_only_or_single:
+            if is_inactive:
+                return {"analytics_type": "fixedelockonly", "device_filters": [{"field": "FixedELock", "operator": "eq", "value": "inactive"}]}
+            elif is_active:
+                return {"analytics_type": "fixedelockonly", "device_filters": [{"field": "FixedELock", "operator": "eq", "value": "active"}]}
+            else:
+                return {"analytics_type": "fixedlockonly", "device_filters": []}
+        else:
+            if is_inactive:
+                return {"analytics_type": "fixedlock", "device_filters": [{"field": "FixedELock", "operator": "eq", "value": "inactive"}]}
+            elif is_active:
+                return {"analytics_type": "fixedlock", "device_filters": [{"field": "FixedELock", "operator": "eq", "value": "active"}]}
+            else:
+                return {"analytics_type": "fixedlock", "device_filters": []}
+
+    # --- GPS / FIXED GPS ---
+    if has_gps:
+        if is_na:
+            return {"analytics_type": "gpsna", "device_filters": []}
+        if is_only_or_single:
+            if is_inactive:
+                return {"analytics_type": "fixedgpsonly", "device_filters": [{"field": "GPS", "operator": "eq", "value": "inactive"}]}
+            elif is_active:
+                return {"analytics_type": "fixedgpsonly", "device_filters": [{"field": "GPS", "operator": "eq", "value": "active"}]}
+            else:
+                return {"analytics_type": "gpsonly", "device_filters": []}
+        else:
+            if is_inactive:
+                return {"analytics_type": "gps", "device_filters": [{"field": "GPS", "operator": "eq", "value": "inactive"}]}
+            elif is_active:
+                return {"analytics_type": "gps", "device_filters": [{"field": "GPS", "operator": "eq", "value": "active"}]}
+            else:
+                return {"analytics_type": "gps", "device_filters": []}
+
     return None
 
 class IntentDetector:
@@ -1110,6 +1326,59 @@ class IntentDetector:
                         "alias": "count"
                     }
                 ]
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                    if k in query_payload:
+                        reordered[k] = query_payload[k]
+                for k, v in query_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                query_payload.clear()
+                query_payload.update(reordered)
+            elif detect_device_analytics(message):
+                _device_analytics = detect_device_analytics(message)
+                query_payload["analytics"] = [{"type": _device_analytics["analytics_type"]}]
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "fixed-gps-status", "fixed-elock-status", "portable-elock-status",
+                        "gps", "fixedelock", "portableelock"
+                    ])
+                ]
+                has_explicit_trip_status = bool(
+                    re.search(r'\b(?:valid\s+trips?|active\s+trips?|running\s+trips?|closed\s+trips?|completed\s+trips?|cancelled\s+trips?)\b', msg_lower)
+                    or re.search(r'\btrip\s+status\b', msg_lower)
+                )
+                if not has_explicit_trip_status:
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                    ]
+                for df in _device_analytics["device_filters"]:
+                    query_payload["filters"].append(df)
+                query_payload["select"] = []
+                query_payload.pop("groupBy", None)
+                query_payload.pop("metrics", None)
+
+                def _device_analytics_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    fld = flt.get("field")
+                    if fld == "groupId":
+                        return 1
+                    if fld == "runDate":
+                        return 2 if flt.get("operator") == "gte" else 3
+                    if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                        return 4
+                    if fld == "tripStatus":
+                        return 5
+                    if fld == "shipmentMethod":
+                        return 6
+                    return 7
+
+                query_payload["filters"].sort(key=_device_analytics_sort_key)
                 reordered = {}
                 for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
                     if k in query_payload:
@@ -2189,6 +2458,59 @@ class IntentDetector:
                         "alias": "count"
                     }
                 ]
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                    if k in fallback_payload:
+                        reordered[k] = fallback_payload[k]
+                for k, v in fallback_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                fallback_payload.clear()
+                fallback_payload.update(reordered)
+            elif detect_device_analytics(message):
+                fb_device_analytics = detect_device_analytics(message)
+                fallback_payload["analytics"] = [{"type": fb_device_analytics["analytics_type"]}]
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "fixed-gps-status", "fixed-elock-status", "portable-elock-status",
+                        "gps", "fixedelock", "portableelock"
+                    ])
+                ]
+                has_explicit_trip_status = bool(
+                    re.search(r'\b(?:valid\s+trips?|active\s+trips?|running\s+trips?|closed\s+trips?|completed\s+trips?|cancelled\s+trips?)\b', msg_lower)
+                    or re.search(r'\btrip\s+status\b', msg_lower)
+                )
+                if not has_explicit_trip_status:
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                    ]
+                for df in fb_device_analytics["device_filters"]:
+                    fallback_payload["filters"].append(df)
+                fallback_payload["select"] = []
+                fallback_payload.pop("groupBy", None)
+                fallback_payload.pop("metrics", None)
+
+                def _fb_device_analytics_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    fld = flt.get("field")
+                    if fld == "groupId":
+                        return 1
+                    if fld == "runDate":
+                        return 2 if flt.get("operator") == "gte" else 3
+                    if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                        return 4
+                    if fld == "tripStatus":
+                        return 5
+                    if fld == "shipmentMethod":
+                        return 6
+                    return 7
+
+                fallback_payload["filters"].sort(key=_fb_device_analytics_sort_key)
                 reordered = {}
                 for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
                     if k in fallback_payload:
