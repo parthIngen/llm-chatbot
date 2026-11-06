@@ -182,6 +182,14 @@ CRITICAL RULES:
         - Filter order: tripStatus first, then groupId, then runDate gte, then runDate lte, then tripType
       * When the query asks to compare Network vs Local trip counts (e.g. "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026", "Compare Network vs Local trip counts"):
         - Same as above, but without a specific tripType filter (so both trip types are grouped).
+      * When the query asks for device count across Intercity and Intracity trips (e.g. "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026"):
+        - Include top-level: "analytics": [{"type": "gps"}]
+        - Include filters: groupId eq "0041", GPS eq "active", runDate gte, runDate lte
+        - Do NOT include select.
+        - Include groupBy: ["tripType"]
+        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
+        - Filter order: groupId first, then GPS, then runDate gte, then runDate lte
+        - Do NOT include a routeCategory, routeType, tripType, or shipmentMethod filter.
     - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS / NO ANY GPS: When the query asks about trips without GPS or "No Any GPS" (e.g. "Count total trips listed under No Any GPS device in Aug 2026", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
          * For "No Any GPS" / "No Any GPS device" queries: field: "GPS", operator: "eq", value: "nogps "
          * For other non-GPS queries: field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
@@ -474,6 +482,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "inactive"}], "select": []}
 - "GPS with active GPS August 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}], "select": []}
+- "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "Trip with Only with single GPS or Fixed GPS only August 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
 - "Trip with Only with Inactive single GPS or Inactive Fixed GPS only August 2026" ->

@@ -4821,3 +4821,103 @@ async def test_device_analytics_combo_without_fixed_elock_flow():
         assert entities["select"] == expected_entities["select"]
         assert entities["filters"][:3] == expected_entities["filters"][:3]
         assert set(f["field"] for f in entities["filters"][3:]) == {"fixed-gps-status", "portable-elock-status", "fixed-elock-status"}
+
+
+@pytest.mark.asyncio
+async def test_active_fixed_gps_across_intercity_and_intracity_flow():
+    user_query = "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        # LLM response (even if raw output contains select or intracity routeCategory, post-processing cleans it)
+        mock_generate.return_value = json.dumps({
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gps"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "GPS", "operator": "eq", "value": "active"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "routeCategory", "operator": "eq", "value": "intracity"}
+            ],
+            "select": []
+        })
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-active-gps-across-trip-types",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gps"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "GPS", "operator": "eq", "value": "active"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+            ],
+            "groupBy": ["tripType"],
+            "metrics": [
+                {"field": "shipmentNo", "function": "count", "alias": "count"}
+            ]
+        }
+        assert entities == expected_entities
+        assert "select" not in entities
+
+
+@pytest.mark.asyncio
+async def test_active_fixed_gps_across_intercity_and_intracity_fallback_flow():
+    user_query = "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-active-gps-across-trip-types-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gps"}],
+            "filters": [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "GPS", "operator": "eq", "value": "active"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+            ],
+            "groupBy": ["tripType"],
+            "metrics": [
+                {"field": "shipmentNo", "function": "count", "alias": "count"}
+            ]
+        }
+        assert entities == expected_entities
+        assert "select" not in entities
+
