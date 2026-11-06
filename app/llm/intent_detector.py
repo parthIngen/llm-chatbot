@@ -391,6 +391,28 @@ class IntentDetector:
         has_status_keyword = False
         status_override = None
 
+        _is_network_vs_local_query = bool(
+            re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
+            or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
+            or (
+                re.search(r'\b(?:compare|comparison|versus|vs\.?|difference|ratio)\b', msg_lower)
+                and re.search(r'\bnetwork\b', msg_lower)
+                and re.search(r'\blocal\b', msg_lower)
+            )
+        )
+        _is_trip_type_breakdown_query = bool(
+            re.search(r'\bbreakdown\b', msg_lower)
+            and (
+                re.search(r'\b(?:network\s+or\s+intercity|intercity\s+or\s+network)\b', msg_lower)
+                or re.search(r'\bintercity\s+routes?\b', msg_lower)
+                or re.search(r'\bnetwork\s+routes?\b', msg_lower)
+                or re.search(r'\b(?:local\s+or\s+intracity|intracity\s+or\s+local)\b', msg_lower)
+                or re.search(r'\bintracity\s+routes?\b', msg_lower)
+                or re.search(r'\blocal\s+routes?\b', msg_lower)
+                or (re.search(r'\b(?:intercity|network)\b', msg_lower) and re.search(r'\broutes?\b', msg_lower))
+            )
+        )
+
         # Format user prompt
         prompt = INTENT_EXTRACTION_USER_PROMPT_TEMPLATE.format(message=message, date_context=date_context)
         
@@ -1787,8 +1809,27 @@ class IntentDetector:
                 ],
                 "select": []
             }
-            fb_is_network_vs_local_query = _is_network_vs_local_query
-            fb_is_trip_type_breakdown_query = _is_trip_type_breakdown_query
+            fb_is_network_vs_local_query = bool(
+                re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
+                or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
+                or (
+                    re.search(r'\b(?:compare|comparison|versus|vs\.?|difference|ratio)\b', msg_lower)
+                    and re.search(r'\bnetwork\b', msg_lower)
+                    and re.search(r'\blocal\b', msg_lower)
+                )
+            )
+            fb_is_trip_type_breakdown_query = bool(
+                re.search(r'\bbreakdown\b', msg_lower)
+                and (
+                    re.search(r'\b(?:network\s+or\s+intercity|intercity\s+or\s+network)\b', msg_lower)
+                    or re.search(r'\bintercity\s+routes?\b', msg_lower)
+                    or re.search(r'\bnetwork\s+routes?\b', msg_lower)
+                    or re.search(r'\b(?:local\s+or\s+intracity|intracity\s+or\s+local)\b', msg_lower)
+                    or re.search(r'\bintracity\s+routes?\b', msg_lower)
+                    or re.search(r'\blocal\s+routes?\b', msg_lower)
+                    or (re.search(r'\b(?:intercity|network)\b', msg_lower) and re.search(r'\broutes?\b', msg_lower))
+                )
+            )
             fb_specific_transporter = extract_specific_transporter(message)
             fb_is_no_gps_vehicle_query = bool(
                 (
@@ -1867,6 +1908,8 @@ class IntentDetector:
                     )
                     or fb_is_active_vehicle_query
                     or fb_is_no_gps_vehicle_query
+                    or fb_is_network_vs_local_query
+                    or fb_is_trip_type_breakdown_query
                 ):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
