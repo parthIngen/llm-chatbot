@@ -635,7 +635,11 @@ class IntentDetector:
             or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
             or re.search(r'\bintercity\s+(?:vs\.?|versus|and|or|to)\s+intracity\b', msg_lower)
             or re.search(r'\bintracity\s+(?:vs\.?|versus|and|or|to)\s+intercity\b', msg_lower)
-            or (re.search(r'\bacross\b', msg_lower) and (re.search(r'\bintercity\b', msg_lower) or re.search(r'\bintracity\b', msg_lower)))
+            or re.search(r'\bacross\s+(?:both\s+)?trip\s+types\b', msg_lower)
+            or (re.search(r'\bacross\b', msg_lower) and (
+                (re.search(r'\bintercity\b', msg_lower) and re.search(r'\bintracity\b', msg_lower))
+                or (re.search(r'\bnetwork\b', msg_lower) and re.search(r'\blocal\b', msg_lower))
+            ))
         )
 
         # Format user prompt
@@ -1369,6 +1373,9 @@ class IntentDetector:
                     ]
                 for df in _device_analytics["device_filters"]:
                     query_payload["filters"].append(df)
+
+                dev_single_route_category = "intracity" if re.search(r'\bintracity\b', msg_lower) and not re.search(r'\bintercity\b', msg_lower) else ("intercity" if re.search(r'\bintercity\b', msg_lower) and not re.search(r'\bintracity\b', msg_lower) else None)
+
                 if _is_across_trip_types:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
@@ -1383,6 +1390,19 @@ class IntentDetector:
                             "alias": "count"
                         }
                     ]
+                elif dev_single_route_category:
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"])
+                    ]
+                    query_payload["filters"].append({
+                        "field": "routeCategory",
+                        "operator": "eq",
+                        "value": dev_single_route_category
+                    })
+                    query_payload.pop("select", None)
+                    query_payload.pop("groupBy", None)
+                    query_payload.pop("metrics", None)
                 else:
                     query_payload["select"] = []
                     query_payload.pop("groupBy", None)
@@ -1399,20 +1419,27 @@ class IntentDetector:
                             return 2
                         if fld == "runDate":
                             return 3 if flt.get("operator") == "gte" else 4
+                    elif dev_single_route_category:
+                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                            return 2
+                        if fld == "runDate":
+                            return 3 if flt.get("operator") == "gte" else 4
+                        if fld == "routeCategory":
+                            return 5
                     else:
                         if fld == "runDate":
                             return 2 if flt.get("operator") == "gte" else 3
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
                             return 4
                     if fld == "tripStatus":
-                        return 5
-                    if fld == "shipmentMethod":
                         return 6
-                    return 7
+                    if fld == "shipmentMethod":
+                        return 7
+                    return 8
 
                 query_payload["filters"].sort(key=_device_analytics_sort_key)
                 reordered = {}
-                key_order = ["entity", "operation", "analytics", "filters", "groupBy", "metrics"] if _is_across_trip_types else ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]
+                key_order = ["entity", "operation", "analytics", "filters", "groupBy", "metrics"] if _is_across_trip_types else (["entity", "operation", "analytics", "filters"] if dev_single_route_category else ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"])
                 for k in key_order:
                     if k in query_payload:
                         reordered[k] = query_payload[k]
@@ -1692,7 +1719,7 @@ class IntentDetector:
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
                 ]
-            elif route_category_value and not _is_network_vs_local_query and not _is_trip_type_breakdown_query:
+            elif route_category_value and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and not bool(detect_device_analytics(message)):
                 # Remove any routeType, routeCategory, or tripType filter the LLM may have generated
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -1746,7 +1773,7 @@ class IntentDetector:
 
             # --- ShipmentMethod Post-Processing ---
             # Full list of recognized shipmentMethod values.
-            if detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and not _is_across_trip_types:
+            if detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and not _is_across_trip_types and not bool(detect_device_analytics(message)):
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -2151,7 +2178,11 @@ class IntentDetector:
                 or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
                 or re.search(r'\bintercity\s+(?:vs\.?|versus|and|or|to)\s+intracity\b', msg_lower)
                 or re.search(r'\bintracity\s+(?:vs\.?|versus|and|or|to)\s+intercity\b', msg_lower)
-                or (re.search(r'\bacross\b', msg_lower) and (re.search(r'\bintercity\b', msg_lower) or re.search(r'\bintracity\b', msg_lower)))
+                or re.search(r'\bacross\s+(?:both\s+)?trip\s+types\b', msg_lower)
+            or (re.search(r'\bacross\b', msg_lower) and (
+                (re.search(r'\bintercity\b', msg_lower) and re.search(r'\bintracity\b', msg_lower))
+                or (re.search(r'\bnetwork\b', msg_lower) and re.search(r'\blocal\b', msg_lower))
+            ))
             )
             fb_specific_transporter = extract_specific_transporter(message)
             fb_is_no_gps_vehicle_query = bool(
@@ -2548,6 +2579,9 @@ class IntentDetector:
                     ]
                 for df in fb_device_analytics["device_filters"]:
                     fallback_payload["filters"].append(df)
+
+                fb_single_route_category = "intracity" if re.search(r'\bintracity\b', msg_lower) and not re.search(r'\bintercity\b', msg_lower) else ("intercity" if re.search(r'\bintercity\b', msg_lower) and not re.search(r'\bintracity\b', msg_lower) else None)
+
                 if fb_is_across_trip_types:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
@@ -2562,6 +2596,19 @@ class IntentDetector:
                             "alias": "count"
                         }
                     ]
+                elif fb_single_route_category:
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"])
+                    ]
+                    fallback_payload["filters"].append({
+                        "field": "routeCategory",
+                        "operator": "eq",
+                        "value": fb_single_route_category
+                    })
+                    fallback_payload.pop("select", None)
+                    fallback_payload.pop("groupBy", None)
+                    fallback_payload.pop("metrics", None)
                 else:
                     fallback_payload["select"] = []
                     fallback_payload.pop("groupBy", None)
@@ -2578,20 +2625,27 @@ class IntentDetector:
                             return 2
                         if fld == "runDate":
                             return 3 if flt.get("operator") == "gte" else 4
+                    elif fb_single_route_category:
+                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                            return 2
+                        if fld == "runDate":
+                            return 3 if flt.get("operator") == "gte" else 4
+                        if fld == "routeCategory":
+                            return 5
                     else:
                         if fld == "runDate":
                             return 2 if flt.get("operator") == "gte" else 3
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
                             return 4
                     if fld == "tripStatus":
-                        return 5
-                    if fld == "shipmentMethod":
                         return 6
-                    return 7
+                    if fld == "shipmentMethod":
+                        return 7
+                    return 8
 
                 fallback_payload["filters"].sort(key=_fb_device_analytics_sort_key)
                 reordered = {}
-                key_order = ["entity", "operation", "analytics", "filters", "groupBy", "metrics"] if fb_is_across_trip_types else ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]
+                key_order = ["entity", "operation", "analytics", "filters", "groupBy", "metrics"] if fb_is_across_trip_types else (["entity", "operation", "analytics", "filters"] if fb_single_route_category else ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"])
                 for k in key_order:
                     if k in fallback_payload:
                         reordered[k] = fallback_payload[k]
@@ -2868,7 +2922,7 @@ class IntentDetector:
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
                 ]
-            elif fb_route_category and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query:
+            elif fb_route_category and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and not bool(detect_device_analytics(message)):
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
@@ -2880,7 +2934,7 @@ class IntentDetector:
             fb_sms = detect_shipment_methods(message)
             if fb_is_across_trip_types:
                 fb_sms = [sm for sm in fb_sms if sm != 'network']
-            if fb_sms and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and not fb_is_across_trip_types:
+            if fb_sms and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and not fb_is_across_trip_types and not bool(detect_device_analytics(message)):
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")

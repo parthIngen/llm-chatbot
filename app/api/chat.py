@@ -199,12 +199,15 @@ async def chat_endpoint(
         download_url: Optional[str] = None
         records = []
         if isinstance(api_data, dict):
-            if isinstance(api_data.get("data"), list):
-                records = api_data["data"]
-            elif isinstance(api_data.get("Report"), list):
-                records = api_data["Report"]
-            elif isinstance(api_data.get("trips"), list):
-                records = api_data["trips"]
+            curr_data = api_data
+            while isinstance(curr_data, dict) and "data" in curr_data and isinstance(curr_data["data"], dict) and "data" in curr_data["data"]:
+                curr_data = curr_data["data"]
+            if isinstance(curr_data.get("data"), list):
+                records = curr_data["data"]
+            elif isinstance(curr_data.get("Report"), list):
+                records = curr_data["Report"]
+            elif isinstance(curr_data.get("trips"), list):
+                records = curr_data["trips"]
         elif isinstance(api_data, list):
             records = api_data
 
@@ -226,7 +229,15 @@ async def chat_endpoint(
             )
         except Exception as exc:
             log_error(session_id, "RESPONSE_GEN_ERROR", str(exc))
-            reply = f"I found {len(records)} trip details matching your query."
+            if isinstance(records, list) and any(isinstance(r, dict) and ("tripTypeName" in r or "tripType" in r) for r in records):
+                net_cnt = sum(r.get("count", 0) for r in records if "intercity" in str(r.get("tripTypeName", "")).lower() or str(r.get("tripType")) == "1")
+                loc_cnt = sum(r.get("count", 0) for r in records if "intracity" in str(r.get("tripTypeName", "")).lower() or str(r.get("tripType")) == "2")
+                reply = f"Trip counts: Network (Intercity Trip) count is {net_cnt} and Local (Intracity Trip) count is {loc_cnt}."
+            elif isinstance(records, list) and any(isinstance(r, dict) and "uniqueVehicleCount" in r for r in records):
+                total_veh = sum(r.get("uniqueVehicleCount", 0) for r in records)
+                reply = f"Total {total_veh} distinct vehicles found."
+            else:
+                reply = f"I found {len(records)} trip details matching your query."
 
         # Append plain text download link if download was requested and link isn't already included
         is_download_request = any(w in request.message.lower() for w in ["download", "export", "excel", "sheet", "csv", "xlsx", "file"])

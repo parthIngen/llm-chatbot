@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Dict, List
 from app.llm.client import LLMClient, LLMRateLimitError
 from app.llm.prompts import RESPONSE_GENERATION_SYSTEM_PROMPT, RESPONSE_GENERATION_USER_PROMPT_TEMPLATE
@@ -217,9 +218,9 @@ def build_natural_response(
     # Devices
     if gps in ("nogps", "nogps ") or filter_map.get("gpsna"):
         device_qualifiers.append("without GPS")
-    elif fixed_gps == "inactive":
+    elif fixed_gps == "inactive" or gps == "inactive":
         device_qualifiers.append("with inactive Fixed GPS")
-    elif fixed_gps in ("active", "existing"):
+    elif fixed_gps in ("active", "existing") or gps == "active":
         device_qualifiers.append("with active Fixed GPS")
     elif fixed_gps == "gpsinactive":
         device_qualifiers.append("with Fixed GPS inactive")
@@ -386,9 +387,13 @@ class ResponseGenerator:
         api_data = None
         
         if isinstance(api_result, dict):
+            curr = api_result
+            while isinstance(curr, dict) and "data" in curr and isinstance(curr["data"], dict) and "data" in curr["data"]:
+                curr = curr["data"]
+
             # Check for the new format {"success": True/False, "data": ...}
-            if "data" in api_result:
-                data_val = api_result["data"]
+            if "data" in curr:
+                data_val = curr["data"]
                 if isinstance(data_val, int):
                     total_trips = data_val
                     api_data = data_val
@@ -399,10 +404,10 @@ class ResponseGenerator:
                     api_data = data_val
             else:
                 # Fallback to old format
-                report_list = api_result.get("Report") or api_result.get("trips") or []
+                report_list = curr.get("Report") or curr.get("trips") or []
                 if isinstance(report_list, list):
                     total_trips = len(report_list)
-                api_data = api_result
+                api_data = curr
         elif isinstance(api_result, list):
             total_trips = len(api_result)
             api_data = api_result
@@ -418,6 +423,16 @@ class ResponseGenerator:
                         start_date = f.get("value")
                     elif f.get("operator") == "lte":
                         end_date = f.get("value")
+
+        if not (start_date and end_date) and message:
+            try:
+                from app.llm.intent_detector import extract_date_range_from_message
+                s_d, e_d = extract_date_range_from_message(message)
+                if s_d and e_d:
+                    start_date = start_date or s_d
+                    end_date = end_date or e_d
+            except Exception:
+                pass
 
         # Detect distinct-vehicle grouped result: list of dicts each with 'uniqueVehicleCount' or 'totalUniqueVehicleCount'
         _is_distinct_vehicle_result = (
@@ -437,7 +452,7 @@ class ResponseGenerator:
         if _is_distinct_transporter_result:
             total_trips = sum(row.get("uniqueTransporterCount", 0) for row in api_data)
 
-        # Detect tripType comparison grouped result (e.g. Compare Network vs Local):
+        # Detect tripType comparison grouped result (e.g. Compare Network vs Local / Intercity vs Intracity):
         _is_trip_type_result = (
             isinstance(api_data, list)
             and len(api_data) > 0
@@ -449,40 +464,84 @@ class ResponseGenerator:
             for row in api_data:
                 tt_name = str(row.get("tripTypeName") or row.get("tripType") or "").lower()
                 cnt = row.get("count", 0) or row.get("trip_count", 0) or row.get("total_count", 0) or 0
-                if "intercity" in tt_name or "network" in tt_name:
+                if "intercity" in tt_name or "network" in tt_name or str(row.get("tripType")) == "1":
                     network_count += cnt
-                elif "intracity" in tt_name or "local" in tt_name:
+                elif "intracity" in tt_name or "local" in tt_name or str(row.get("tripType")) == "2":
                     local_count += cnt
-            is_non_gps = False
+
+            msg_l = message.lower() if message else ""
+            analytics_types = []
             if entities and "analytics" in entities:
                 for a in entities["analytics"]:
-                    if isinstance(a, dict) and a.get("type") == "gpsna":
-                        is_non_gps = True
-                        break
-            if not is_non_gps and message:
-                is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', message.lower()))
+                    if isinstance(a, dict) and "type" in a:
+                        analytics_types.append(str(a["type"]).lower())
 
-            non_gps_prefix = "Non-GPS trip counts" if is_non_gps else "Trip counts"
-            date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
-            msg_l = message.lower() if message else ""
-            if local_count > 0 and network_count > 0:
-                return f"{non_gps_prefix}{date_clause}: Network (Intercity Trip) count is {network_count} and Local (Intracity Trip) count is {local_count}."
-            elif network_count > 0 and not ("local" in msg_l and "network" in msg_l):
-                return f"{non_gps_prefix}{date_clause}: Network (Intercity Trip) count is {network_count}."
-            elif local_count > 0 and not ("local" in msg_l and "network" in msg_l):
-                return f"{non_gps_prefix}{date_clause}: Local (Intracity Trip) count is {local_count}."
+            filter_fields = {}
+            if entities and "filters" in entities:
+                for f in entities["filters"]:
+                    if isinstance(f, dict) and "field" in f:
+                        filter_fields[f["field"]] = str(f.get("value", "")).lower()
+
+            is_non_gps = (
+                "gpsna" in analytics_types
+                or filter_fields.get("GPS") in ("nogps", "nogps ")
+                or bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_l))
+            )
+
+            if is_non_gps:
+                prefix = "Non-GPS trip counts"
+            elif (
+                "gps" in analytics_types or "fixedgpsonly" in analytics_types or "gpsonly" in analytics_types
+                or filter_fields.get("GPS") == "active"
+                or (re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l) and re.search(r'\bactive\b', msg_l))
+            ) and (filter_fields.get("GPS") == "active" or re.search(r'\bactive\b', msg_l)):
+                prefix = "Active Fixed GPS device counts"
+            elif (
+                "gps" in analytics_types or "fixedgpsonly" in analytics_types or "gpsonly" in analytics_types
+                or filter_fields.get("GPS") == "inactive"
+                or (re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l) and re.search(r'\binactive\b', msg_l))
+            ) and (filter_fields.get("GPS") == "inactive" or re.search(r'\binactive\b', msg_l)):
+                prefix = "Inactive Fixed GPS device counts"
+            elif (
+                "gps" in analytics_types or "fixedgpsonly" in analytics_types or "gpsonly" in analytics_types
+                or filter_fields.get("GPS") == "existing"
+                or re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)
+            ):
+                prefix = "Fixed GPS device counts"
+            elif (
+                "fixedlock" in analytics_types or "fixedlockonly" in analytics_types or "fixedelockonly" in analytics_types
+                or re.search(r'\bfixed[\s-]e[\s-]?lock\b', msg_l)
+            ):
+                if filter_fields.get("FixedELock") == "active" or re.search(r'\bactive\b', msg_l):
+                    prefix = "Active Fixed E-Lock device counts"
+                elif filter_fields.get("FixedELock") == "inactive" or re.search(r'\binactive\b', msg_l):
+                    prefix = "Inactive Fixed E-Lock device counts"
+                else:
+                    prefix = "Fixed E-Lock device counts"
+            elif (
+                "portablelock" in analytics_types or "portablelockonly" in analytics_types or "portableelockonly" in analytics_types
+                or re.search(r'\bportable[\s-]e[\s-]?lock\b', msg_l)
+            ):
+                if filter_fields.get("PortableELock") == "active" or re.search(r'\bactive\b', msg_l):
+                    prefix = "Active Portable E-Lock device counts"
+                elif filter_fields.get("PortableELock") == "inactive" or re.search(r'\binactive\b', msg_l):
+                    prefix = "Inactive Portable E-Lock device counts"
+                else:
+                    prefix = "Portable E-Lock device counts"
+            elif "withoutanygps" in analytics_types or re.search(r'\bwithout\s+any\s+device\b', msg_l):
+                prefix = "Trips without any device counts"
             else:
-                return f"{non_gps_prefix}{date_clause}: Network (Intercity Trip) count is {network_count} and Local (Intracity Trip) count is {local_count}."
+                prefix = "Trip counts"
 
-        if not (start_date and end_date) and message:
-            try:
-                from app.llm.intent_detector import extract_date_range_from_message
-                s_d, e_d = extract_date_range_from_message(message)
-                if s_d and e_d:
-                    start_date = start_date or s_d
-                    end_date = end_date or e_d
-            except Exception:
-                pass
+            date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+            if local_count > 0 and network_count > 0:
+                return f"{prefix}{date_clause}: Network (Intercity Trip) count is {network_count} and Local (Intracity Trip) count is {local_count}."
+            elif network_count > 0 and not ("local" in msg_l and "network" in msg_l):
+                return f"{prefix}{date_clause}: Network (Intercity Trip) count is {network_count}."
+            elif local_count > 0 and not ("local" in msg_l and "network" in msg_l):
+                return f"{prefix}{date_clause}: Local (Intracity Trip) count is {local_count}."
+            else:
+                return f"{prefix}{date_clause}: Network (Intercity Trip) count is {network_count} and Local (Intracity Trip) count is {local_count}."
 
         # Format natural language response converting all filter fields
         natural_formatted_response = build_natural_response(
