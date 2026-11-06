@@ -608,7 +608,30 @@ class IntentDetector:
                 
             # Determine if a status was requested based on keywords in user message
             msg_lower = message.lower()
+            _is_network_vs_local_query = bool(
+                re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
+                or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
+                or (
+                    re.search(r'\b(?:compare|comparison|versus|vs\.?|difference|ratio)\b', msg_lower)
+                    and re.search(r'\bnetwork\b', msg_lower)
+                    and re.search(r'\blocal\b', msg_lower)
+                )
+            )
+            _is_trip_type_breakdown_query = bool(
+                re.search(r'\bbreakdown\b', msg_lower)
+                and (
+                    re.search(r'\b(?:network\s+or\s+intercity|intercity\s+or\s+network)\b', msg_lower)
+                    or re.search(r'\bintercity\s+routes?\b', msg_lower)
+                    or re.search(r'\bnetwork\s+routes?\b', msg_lower)
+                    or re.search(r'\b(?:local\s+or\s+intracity|intracity\s+or\s+local)\b', msg_lower)
+                    or re.search(r'\bintracity\s+routes?\b', msg_lower)
+                    or re.search(r'\blocal\s+routes?\b', msg_lower)
+                    or (re.search(r'\b(?:intercity|network)\b', msg_lower) and re.search(r'\broutes?\b', msg_lower))
+                )
+            )
             detected_sms = detect_shipment_methods(message)
+            if _is_network_vs_local_query or _is_trip_type_breakdown_query:
+                detected_sms = [sm for sm in detected_sms if sm != 'network']
             detected_sm = detected_sms[0] if detected_sms else None
             has_status_keyword = False
             status_override = None
@@ -693,6 +716,8 @@ class IntentDetector:
                 )
                 or _is_active_vehicle_query
                 or _is_no_gps_vehicle_query
+                or _is_network_vs_local_query
+                or _is_trip_type_breakdown_query
             ):
                 has_status_keyword = True
                 status_override = "valid"
@@ -785,7 +810,7 @@ class IntentDetector:
                 ]
 
             # --- ShipmentMethod Injection ---
-            if detected_sms:
+            if detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -1002,9 +1027,77 @@ class IntentDetector:
                 and not _is_fixed_gps_only
                 and not _is_gps_exception
                 and not _is_no_gps_vehicle_query
+                and not _is_network_vs_local_query
+                and not _is_trip_type_breakdown_query
             )
 
-            if _is_active_device_elock_query:
+            if _is_trip_type_breakdown_query:
+                is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
+                target_trip_type = "intracity" if re.search(r'\b(?:intracity|local)\b', msg_lower) and not re.search(r'\b(?:intercity|network)\b', msg_lower) else "intercity"
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "gps", "fixedelock", "portableelock", "tripStatus",
+                        "shipmentMethod", "routeCategory", "routeType", "tripType"
+                    ])
+                ]
+                query_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
+                query_payload["filters"].append({"field": "tripType", "operator": "eq", "value": target_trip_type})
+                if is_non_gps:
+                    query_payload["analytics"] = [{"type": "gpsna"}]
+                query_payload["select"] = []
+                query_payload["groupBy"] = ["tripType"]
+                query_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "count"
+                    }
+                ]
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                    if k in query_payload:
+                        reordered[k] = query_payload[k]
+                for k, v in query_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                query_payload.clear()
+                query_payload.update(reordered)
+            elif _is_network_vs_local_query:
+                is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "gps", "fixedelock", "portableelock", "tripStatus",
+                        "shipmentMethod", "routeCategory", "routeType", "tripType"
+                    ])
+                ]
+                query_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
+                if is_non_gps:
+                    query_payload["analytics"] = [{"type": "gpsna"}]
+                query_payload["select"] = []
+                query_payload["groupBy"] = ["tripType"]
+                query_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "count"
+                    }
+                ]
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                    if k in query_payload:
+                        reordered[k] = query_payload[k]
+                for k, v in query_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                query_payload.clear()
+                query_payload.update(reordered)
+            elif _is_active_device_elock_query:
                 fixed_val = _get_device_status(msg_lower, "active")
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -1148,7 +1241,7 @@ class IntentDetector:
                     query_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
                 query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
             elif _is_no_gps_vehicle_query:
-                # Vehicles with no GPS: tripStatus eq "valid", GPS eq "nogps", grouped by vehicleNo with countDistinct
+                # Vehicles with no GPS: tripStatus eq "valid", analytics: [{"type": "gpsna"}], grouped by vehicleNo with countDistinct
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -1158,7 +1251,21 @@ class IntentDetector:
                     ])
                 ]
                 query_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
-                query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
+                if specific_transporter:
+                    query_payload.pop("analytics", None)
+                    query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
+                else:
+                    query_payload["analytics"] = [{"type": "gpsna"}]
+                    # Reorder keys to place analytics before filters
+                    reordered = {}
+                    for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                        if k in query_payload:
+                            reordered[k] = query_payload[k]
+                    for k, v in query_payload.items():
+                        if k not in reordered:
+                            reordered[k] = v
+                    query_payload.clear()
+                    query_payload.update(reordered)
                 if "select" not in query_payload:
                     query_payload["select"] = []
                 query_payload["groupBy"] = ["vehicleNo"]
@@ -1254,7 +1361,7 @@ class IntentDetector:
             elif re.search(r'\bintercity\b', msg_lower):
                 route_category_value = "intercity"
 
-            if route_category_value:
+            if route_category_value and not _is_network_vs_local_query and not _is_trip_type_breakdown_query:
                 # Remove any routeType, routeCategory, or tripType filter the LLM may have generated
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -1308,7 +1415,7 @@ class IntentDetector:
 
             # --- ShipmentMethod Post-Processing ---
             # Full list of recognized shipmentMethod values.
-            if detected_sms:
+            if detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -1551,6 +1658,42 @@ class IntentDetector:
                     return 10
 
                 query_payload["filters"].sort(key=_single_device_sort_key)
+            elif _is_trip_type_breakdown_query:
+                def _trip_type_breakdown_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "tripStatus":
+                        return 1
+                    elif field == "groupId":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "tripType":
+                        return 5
+                    return 10
+
+                query_payload["filters"].sort(key=_trip_type_breakdown_sort_key)
+            elif _is_network_vs_local_query:
+                def _network_vs_local_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "tripStatus":
+                        return 1
+                    elif field == "groupId":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    return 10
+
+                query_payload["filters"].sort(key=_network_vs_local_sort_key)
             elif _is_no_gps_vehicle_query:
                 def _no_gps_vehicle_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -1644,6 +1787,8 @@ class IntentDetector:
                 ],
                 "select": []
             }
+            fb_is_network_vs_local_query = _is_network_vs_local_query
+            fb_is_trip_type_breakdown_query = _is_trip_type_breakdown_query
             fb_specific_transporter = extract_specific_transporter(message)
             fb_is_no_gps_vehicle_query = bool(
                 (
@@ -1940,9 +2085,77 @@ class IntentDetector:
                 and not fb_is_fixed_gps_only
                 and not fb_is_gps_exception
                 and not fb_is_no_gps_vehicle_query
+                and not fb_is_network_vs_local_query
+                and not fb_is_trip_type_breakdown_query
             )
 
-            if fb_is_active_device_elock_query:
+            if fb_is_trip_type_breakdown_query:
+                fb_is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
+                target_trip_type = "intracity" if re.search(r'\b(?:intracity|local)\b', msg_lower) and not re.search(r'\b(?:intercity|network)\b', msg_lower) else "intercity"
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "gps", "fixedelock", "portableelock", "tripStatus",
+                        "shipmentMethod", "routeCategory", "routeType", "tripType"
+                    ])
+                ]
+                fallback_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
+                fallback_payload["filters"].append({"field": "tripType", "operator": "eq", "value": target_trip_type})
+                if fb_is_non_gps:
+                    fallback_payload["analytics"] = [{"type": "gpsna"}]
+                fallback_payload["select"] = []
+                fallback_payload["groupBy"] = ["tripType"]
+                fallback_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "count"
+                    }
+                ]
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                    if k in fallback_payload:
+                        reordered[k] = fallback_payload[k]
+                for k, v in fallback_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                fallback_payload.clear()
+                fallback_payload.update(reordered)
+            elif fb_is_network_vs_local_query:
+                fb_is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "gps", "fixedelock", "portableelock", "tripStatus",
+                        "shipmentMethod", "routeCategory", "routeType", "tripType"
+                    ])
+                ]
+                fallback_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
+                if fb_is_non_gps:
+                    fallback_payload["analytics"] = [{"type": "gpsna"}]
+                fallback_payload["select"] = []
+                fallback_payload["groupBy"] = ["tripType"]
+                fallback_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "count"
+                    }
+                ]
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                    if k in fallback_payload:
+                        reordered[k] = fallback_payload[k]
+                for k, v in fallback_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                fallback_payload.clear()
+                fallback_payload.update(reordered)
+            elif fb_is_active_device_elock_query:
                 fb_fixed_val = _fb_get_device_status(msg_lower, "active")
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
@@ -2086,7 +2299,7 @@ class IntentDetector:
                     fallback_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
                 fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
             elif fb_is_no_gps_vehicle_query:
-                # Vehicles with no GPS: tripStatus eq "valid", GPS eq "nogps", grouped by vehicleNo with countDistinct
+                # Vehicles with no GPS: tripStatus eq "valid", analytics: [{"type": "gpsna"}], grouped by vehicleNo with countDistinct
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -2096,7 +2309,21 @@ class IntentDetector:
                     ])
                 ]
                 fallback_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
-                fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
+                if fb_specific_transporter:
+                    fallback_payload.pop("analytics", None)
+                    fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
+                else:
+                    fallback_payload["analytics"] = [{"type": "gpsna"}]
+                    # Reorder keys to place analytics before filters
+                    reordered = {}
+                    for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                        if k in fallback_payload:
+                            reordered[k] = fallback_payload[k]
+                    for k, v in fallback_payload.items():
+                        if k not in reordered:
+                            reordered[k] = v
+                    fallback_payload.clear()
+                    fallback_payload.update(reordered)
                 if "select" not in fallback_payload:
                     fallback_payload["select"] = []
                 fallback_payload["groupBy"] = ["vehicleNo"]
@@ -2189,7 +2416,7 @@ class IntentDetector:
                 fb_route_category = "intracity"
             elif re.search(r'\bintercity\b', msg_lower):
                 fb_route_category = "intercity"
-            if fb_route_category:
+            if fb_route_category and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
@@ -2199,7 +2426,7 @@ class IntentDetector:
                 )
 
             fb_sms = detect_shipment_methods(message)
-            if fb_sms:
+            if fb_sms and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -2496,6 +2723,42 @@ class IntentDetector:
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_single_device_sort_key)
+            elif fb_is_trip_type_breakdown_query:
+                def _fb_trip_type_breakdown_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "tripStatus":
+                        return 1
+                    elif field == "groupId":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "tripType":
+                        return 5
+                    return 10
+
+                fallback_payload["filters"].sort(key=_fb_trip_type_breakdown_sort_key)
+            elif fb_is_network_vs_local_query:
+                def _fb_network_vs_local_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "tripStatus":
+                        return 1
+                    elif field == "groupId":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    return 10
+
+                fallback_payload["filters"].sort(key=_fb_network_vs_local_sort_key)
             elif fb_is_no_gps_vehicle_query:
                 def _fb_no_gps_vehicle_sort_key(flt):
                     if not isinstance(flt, dict):

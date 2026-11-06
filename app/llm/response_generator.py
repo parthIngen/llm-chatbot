@@ -114,7 +114,7 @@ def build_natural_response(
         post_qualifiers = []
 
         # Devices
-        if gps in ("nogps", "nogps "):
+        if gps in ("nogps", "nogps ") or filter_map.get("gpsna"):
             base_entity = base_entity.replace("distinct vehicles", "vehicles").replace("active vehicles", "vehicles")
             post_qualifiers.append("without GPS")
         elif fixed_elock == "existing" and (gps == "existing" or fixed_gps == "existing"):
@@ -215,7 +215,7 @@ def build_natural_response(
         device_qualifiers.append(f"closed with {close_remarks} remark")
 
     # Devices
-    if gps in ("nogps", "nogps "):
+    if gps in ("nogps", "nogps ") or filter_map.get("gpsna"):
         device_qualifiers.append("without GPS")
     elif fixed_gps == "inactive":
         device_qualifiers.append("with inactive Fixed GPS")
@@ -392,6 +392,43 @@ class ResponseGenerator:
         )
         if _is_distinct_transporter_result:
             total_trips = sum(row.get("uniqueTransporterCount", 0) for row in api_data)
+
+        # Detect tripType comparison grouped result (e.g. Compare Network vs Local):
+        _is_trip_type_result = (
+            isinstance(api_data, list)
+            and len(api_data) > 0
+            and all(isinstance(row, dict) and ("tripType" in row or "tripTypeName" in row) for row in api_data)
+        )
+        if _is_trip_type_result:
+            network_count = 0
+            local_count = 0
+            for row in api_data:
+                tt_name = str(row.get("tripTypeName") or row.get("tripType") or "").lower()
+                cnt = row.get("count", 0) or row.get("trip_count", 0) or row.get("total_count", 0) or 0
+                if "intercity" in tt_name or "network" in tt_name:
+                    network_count += cnt
+                elif "intracity" in tt_name or "local" in tt_name:
+                    local_count += cnt
+            is_non_gps = False
+            if entities and "analytics" in entities:
+                for a in entities["analytics"]:
+                    if isinstance(a, dict) and a.get("type") == "gpsna":
+                        is_non_gps = True
+                        break
+            if not is_non_gps and message:
+                is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', message.lower()))
+
+            non_gps_prefix = "Non-GPS trip counts" if is_non_gps else "Trip counts"
+            date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+            msg_l = message.lower() if message else ""
+            if local_count > 0 and network_count > 0:
+                return f"{non_gps_prefix}{date_clause}: Network (Intercity Trip) count is {network_count} and Local (Intracity Trip) count is {local_count}."
+            elif network_count > 0 and not ("local" in msg_l and "network" in msg_l):
+                return f"{non_gps_prefix}{date_clause}: Network (Intercity Trip) count is {network_count}."
+            elif local_count > 0 and not ("local" in msg_l and "network" in msg_l):
+                return f"{non_gps_prefix}{date_clause}: Local (Intracity Trip) count is {local_count}."
+            else:
+                return f"{non_gps_prefix}{date_clause}: Network (Intercity Trip) count is {network_count} and Local (Intracity Trip) count is {local_count}."
 
         if not (start_date and end_date) and message:
             try:

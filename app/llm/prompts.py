@@ -8,7 +8,7 @@ The output JSON MUST follow this format exactly:
   "operation": "count",
   "analytics": [
     {
-      "type": "departureDelayed" | "arrivalDelayed"
+      "type": "departureDelayed" | "arrivalDelayed" | "gpsna"
     }
   ],
   "filters": [
@@ -29,8 +29,8 @@ The output JSON MUST follow this format exactly:
   "select": []
 }
 
-Note: "analytics" is optional. Only include it when the query specifically asks about delayed departures or arrivals.
-Note: "groupBy" and "metrics" are optional. Include them for device-combo queries or transporter/unique-vehicle count queries (see field mappings below).
+Note: "analytics" is optional. Only include it when the query specifically asks about delayed departures or arrivals, or vehicles/trips without GPS / no GPS.
+Note: "groupBy" and "metrics" are optional. Include them for device-combo queries, transporter/unique-vehicle count queries, or trip type comparison queries (such as Network vs Local trip counts).
 
 FIELD REFERENCE (use these exact API field names and allowed values):
 
@@ -155,13 +155,34 @@ CRITICAL RULES:
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
     - VEHICLES WITHOUT GPS: When the query counts vehicles lacking GPS or uses phrases like "no GPS", "without GPS", "had no GPS" with vehicles (e.g. "How many vehicles had no GPS in Aug 2026?", "vehicles without GPS in August", "no gps vehicle"):
-         * field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
+         * Include top-level: "analytics": [{"type": "gpsna"}]
+         * Do NOT add a "GPS" filter in "filters" (do NOT use field "GPS" or value "nogps").
+         * Include filter: field: "tripStatus", operator: "eq", value: "valid"
+         * Include filter: field: "groupId", operator: "eq", value: "0041"
+         * Include runDate gte/lte filters for the specified period
+         * Include select: []
          * Include groupBy: ["vehicleNo"]
          * Include metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
          * Do NOT use value "existing" here.
          * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
-         * Include filter: field: "tripStatus", operator: "eq", value: "valid"
-    - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS / NO ANY GPS: When the query asks about trips without GPS or "No Any GPS" (e.g. "Count total trips listed under No Any GPS device in Aug 2026", "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
+         * Filter order: tripStatus first, then groupId, then runDate gte, then runDate lte
+    - NETWORK VS LOCAL / TRIP TYPE COMPARISON & BREAKDOWN:
+      * "Network" corresponds to "tripTypeName": "Intercity Trip" (tripType: "intercity") and "Local" corresponds to "tripTypeName": "Intracity Trip" (tripType: "intracity").
+      * When the query asks for breakdown or count across Network or Intercity routes (e.g. "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?"):
+        - Include top-level: "analytics": [{"type": "gpsna"}]
+        - Include filter: tripStatus eq "valid"
+        - Include filter: groupId eq "0041"
+        - Include runDate gte/lte filters for the specified period
+        - Include filter: tripType eq "intercity" (use field "tripType", NOT "routeCategory")
+        - Do NOT include shipmentMethod eq "network" or any shipmentMethod filter.
+        - Do NOT include a "GPS" filter.
+        - Include select: []
+        - Include groupBy: ["tripType"]
+        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
+        - Filter order: tripStatus first, then groupId, then runDate gte, then runDate lte, then tripType
+      * When the query asks to compare Network vs Local trip counts (e.g. "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026", "Compare Network vs Local trip counts"):
+        - Same as above, but without a specific tripType filter (so both trip types are grouped).
+    - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS / NO ANY GPS: When the query asks about trips without GPS or "No Any GPS" (e.g. "Count total trips listed under No Any GPS device in Aug 2026", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
          * For "No Any GPS" / "No Any GPS device" queries: field: "GPS", operator: "eq", value: "nogps "
          * For other non-GPS queries: field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
          * Do NOT include groupBy or metrics unless explicitly requested.
@@ -239,7 +260,7 @@ CRITICAL RULES:
 6. For fields representing status or missing elements (e.g. 'active', 'inactive', 'missing', 'notcaptured'), the operator MUST be 'eq' and the value is the exact status word. Do NOT use 'missing' or 'notcaptured' as operator names.
 7. For the fields 'FixedELock' and 'PortableELock', when the query asks about device trips (e.g. 'Fixed E-Lock device trips', '3rd-party device trips'), the value MUST be a blank string (""). The value should only be a specific status ("Active", "inactive", "nogps", "gpsInactive", "NA") if those status words are mentioned. Do NOT use "device" or "Fixed E-Lock" as a filter value.
 8. Never map date, time, or temporal terms (such as "today", "yesterday", "last month", "last week", "January 2026", etc.) to the "region" field. The "region" field must only contain actual geographic regions (e.g., "North", "South", "East", "West").
-9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed"), include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed" or "arrivalDelayed" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
+9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed") or vehicles without GPS / no GPS, include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed", "arrivalDelayed", or "gpsna" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
 10. NEVER add a "tripStatus" filter unless the user's query explicitly mentions trip status words such as "active", "running", "closed", "completed", "finished", "scheduled", "live", "transit", "in transit", "en route", "cancelled", or "valid". Do NOT default or assume any tripStatus when the query does not mention it.
 11. When the query asks to count total unique vehicles and distinct transporters (or vehicle counts per transporter), include "groupBy": ["Transporter"] and "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}].
     - DISTINCT TRANSPORTERS: When the query asks for the total number of unique or distinct transporters (e.g. "Show total number of unique transporters used in Aug 2026", "What is the count of unique transporters recorded in Aug 2026?"):
@@ -389,9 +410,11 @@ Reference Examples:
 - "List all distinct vehicles used in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "How many vehicles had no GPS in Aug 2026?" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "shipmentMethod", "operator": "eq", "value": "network"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "tripType", "operator": "eq", "value": "intercity"}], "select": [], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "Show total Intercity trips running exclusively on Fixed GPS" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "Count total trips listed under No Any GPS device in Aug 2026" ->
@@ -452,12 +475,18 @@ Rules:
    - State the total count and convert all filters into natural language:
      e.g., status ("running", "active", "closed", "cancelled"), routeCategory ("intercity", "intracity"), shipmentMethod ("air", "feeder", "empty", "delivery", "sfc", "speed"), region ("in the <region> region"), vendor ("using Secutrak devices", "using 3rd-party devices"), device conditions ("without GPS", "with GPS", "with inactive Fixed GPS", "equipped with Fixed E-Lock", "equipped with Portable E-Lock"), remarks ("closed forcefully", "closed manually"), ATD/ATA ("where ATD was not captured/missing"), locations ("from <From> to <To>"), and date range ("in date range from <start_date> to <end_date>").
    - Output ONLY a single concise, clean sentence. Do NOT include markdown, backticks, bullet points, or HTML tags.
+4. Trip Type Comparison Results (Network vs Local):
+   - "Network" corresponds to "tripTypeName": "Intercity Trip"
+   - "Local" corresponds to "tripTypeName": "Intracity Trip"
+   - Output the counts for both Network (Intercity Trip) and Local (Intracity Trip):
+     "Non-GPS trip counts in date range from <start_date> to <end_date>: Network (Intercity Trip) count is <X> and Local (Intracity Trip) count is <Y>."
 
 Example outputs:
 - "Total 1 distinct vehicles used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
 - "Total 25 active vehicles operating on the field in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
 - "Total 1138 running trips found in the North region in date range from 2026-01-01 00:00:00 to 2026-01-31 23:59:59."
 - "Total 50 trips without GPS found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+- "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120 and Local (Intracity Trip) count is 80."
 - "Total 150 trips found for date range from 2026-09-08 00:00:00 to 2026-09-08 23:59:59."
 """
 

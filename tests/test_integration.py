@@ -3989,3 +3989,556 @@ async def test_count_unique_transporters_recorded_fallback_flow():
             ]
         }
         assert entities == expected_entities
+
+
+
+@pytest.mark.asyncio
+async def test_how_many_vehicles_had_no_gps_flow():
+    user_query = "How many vehicles had no GPS in Aug 2026?"
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [{"type": "gpsna"}],
+        "filters": [
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-31 23:59:59"
+            }
+        ],
+        "select": [],
+        "groupBy": [
+            "vehicleNo"
+        ],
+        "metrics": [
+            {
+                "field": "vehicleNo",
+                "function": "countDistinct",
+                "alias": "uniqueVehicleCount"
+            }
+        ]
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload, "Total 12 vehicles without GPS in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"vehicleNo": "DL01AB1234", "uniqueVehicleCount": 12}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-vehicles-no-gps-aug-2026",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsna"}],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 12 vehicles without GPS in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
+@pytest.mark.asyncio
+async def test_how_many_vehicles_had_no_gps_fallback_flow():
+    user_query = "How many vehicles had no GPS in Aug 2026?"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"vehicleNo": "DL01AB1234", "uniqueVehicleCount": 12}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-vehicles-no-gps-aug-2026-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsna"}],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 12 vehicles without GPS in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
+
+@pytest.mark.asyncio
+async def test_compare_network_vs_local_non_gps_flow():
+    user_query = "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026"
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [{"type": "gpsna"}],
+        "filters": [
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-31 23:59:59"
+            }
+        ],
+        "select": [],
+        "groupBy": [
+            "tripType"
+        ],
+        "metrics": [
+            {
+                "field": "shipmentNo",
+                "function": "count",
+                "alias": "count"
+            }
+        ]
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload, "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120 and Local (Intracity Trip) count is 80."]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {
+            "success": True,
+            "data": [
+                {"tripType": 1, "tripTypeName": "Intercity Trip", "count": 120},
+                {"tripType": 2, "tripTypeName": "Intracity Trip", "count": 80}
+            ]
+        }
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-compare-network-local-non-gps",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsna"}],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "tripType"
+            ],
+            "metrics": [
+                {
+                    "field": "shipmentNo",
+                    "function": "count",
+                    "alias": "count"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120 and Local (Intracity Trip) count is 80."
+
+
+@pytest.mark.asyncio
+async def test_compare_network_vs_local_non_gps_fallback_flow():
+    user_query = "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {
+            "success": True,
+            "data": [
+                {"tripType": 1, "tripTypeName": "Intercity Trip", "count": 120},
+                {"tripType": 2, "tripTypeName": "Intracity Trip", "count": 80}
+            ]
+        }
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-compare-network-local-non-gps-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsna"}],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "tripType"
+            ],
+            "metrics": [
+                {
+                    "field": "shipmentNo",
+                    "function": "count",
+                    "alias": "count"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120 and Local (Intracity Trip) count is 80."
+
+
+
+@pytest.mark.asyncio
+async def test_breakdown_non_gps_across_network_or_intercity_flow():
+    user_query = "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?"
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [{"type": "gpsna"}],
+        "filters": [
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-31 23:59:59"
+            },
+            {
+                "field": "tripType",
+                "operator": "eq",
+                "value": "intercity"
+            }
+        ],
+        "select": [],
+        "groupBy": [
+            "tripType"
+        ],
+        "metrics": [
+            {
+                "field": "shipmentNo",
+                "function": "count",
+                "alias": "count"
+            }
+        ]
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload, "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120."]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {
+            "success": True,
+            "data": [
+                {"tripType": 1, "tripTypeName": "Intercity Trip", "count": 120}
+            ]
+        }
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-breakdown-network-intercity-non-gps",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsna"}],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "tripType",
+                    "operator": "eq",
+                    "value": "intercity"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "tripType"
+            ],
+            "metrics": [
+                {
+                    "field": "shipmentNo",
+                    "function": "count",
+                    "alias": "count"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120."
+
+
+@pytest.mark.asyncio
+async def test_breakdown_non_gps_across_network_or_intercity_fallback_flow():
+    user_query = "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {
+            "success": True,
+            "data": [
+                {"tripType": 1, "tripTypeName": "Intercity Trip", "count": 120}
+            ]
+        }
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-breakdown-network-intercity-non-gps-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsna"}],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "tripType",
+                    "operator": "eq",
+                    "value": "intercity"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "tripType"
+            ],
+            "metrics": [
+                {
+                    "field": "shipmentNo",
+                    "function": "count",
+                    "alias": "count"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120."
