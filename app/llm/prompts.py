@@ -242,13 +242,14 @@ CRITICAL RULES:
 9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed"), include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed" or "arrivalDelayed" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
 10. NEVER add a "tripStatus" filter unless the user's query explicitly mentions trip status words such as "active", "running", "closed", "completed", "finished", "scheduled", "live", "transit", "in transit", "en route", "cancelled", or "valid". Do NOT default or assume any tripStatus when the query does not mention it.
 11. When the query asks to count total unique vehicles and distinct transporters (or vehicle counts per transporter), include "groupBy": ["Transporter"] and "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}].
-    - DISTINCT TRANSPORTERS: When the query asks for the total number of unique or distinct transporters (e.g. "Show total number of unique transporters used in Aug 2026"):
+    - DISTINCT TRANSPORTERS: When the query asks for the total number of unique or distinct transporters (e.g. "Show total number of unique transporters used in Aug 2026", "What is the count of unique transporters recorded in Aug 2026?"):
         * Include filter: tripStatus eq "valid"
         * Include runDate gte/lte filters for the specified period
         * Include groupId eq "0041"
-        * Include "groupBy": ["transporter"]
-        * Include "metrics": [{"field": "transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]
+        * Include "groupBy": ["Transporter"]
+        * Include "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]
         * Do NOT include "select"
+        * Do NOT include a "transporter" filter (never treat words like "recorded", "used", "operating", "listed" as a transporter value).
         * Filter order: tripStatus first, then runDate gte, then runDate lte, then groupId
     - DISTINCT VEHICLES: When the query asks to "list all distinct vehicles", "list unique vehicles", "show all distinct vehicles", "list vehicles used", or any variation asking for individual vehicles grouped by vehicle number (for a date range), generate the payload as follows:
         * Include filter: tripStatus eq "valid"
@@ -382,7 +383,9 @@ Reference Examples:
 - "Show GPS trip counts for Empty feeder routes in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "shipmentMethod", "operator": "eq", "value": "empty"}], "select": []}
 - "Show total number of unique transporters used in Aug 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["transporter"], "metrics": [{"field": "transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["Transporter"], "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]}
+- "What is the count of unique transporters recorded in Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["Transporter"], "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]}
 - "List all distinct vehicles used in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "How many vehicles had no GPS in Aug 2026?" ->

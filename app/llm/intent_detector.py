@@ -235,8 +235,27 @@ def detect_shipment_method(msg_lower: str) -> str | None:
     methods = detect_shipment_methods(msg_lower)
     return methods[0] if methods else None
 
+_TRANSPORTER_STOP_WORDS = {
+    "used", "count", "data", "report", "trips", "trip", "all", "unique",
+    "distinct", "the", "a", "an", "is", "and", "or", "name", "names",
+    "for", "in", "during", "between", "on", "with", "",
+    "recorded", "operating", "operated", "active", "running", "listed",
+    "registered", "available", "found", "present", "working", "assigned",
+    "involved", "participated", "total", "number", "numbers", "breakdown",
+    "details", "summary", "list", "each", "every", "per"
+}
+
 def extract_specific_transporter(text: str) -> str | None:
     """Extract a specific transporter name from user message if mentioned."""
+    msg_l = text.lower()
+    # If the query asks for unique/distinct/total count of transporters, it's a distinct transporter query,
+    # not a filter for a specific transporter (unless explicitly named, e.g. 'named ...' or 'called ...')
+    if (
+        re.search(r'\b(?:unique|distinct|how\s+many|total\s+number|count\s+of|count)\b.*?\btransporters?\b', msg_l)
+        and not re.search(r'\btransporters?\s+(?:named|called|is|:|=)\b', msg_l)
+    ):
+        return None
+
     pat = r'\btransporters?\s+(?:is\s+|as\s+|named\s+|called\s+|:\s*)?([A-Za-z0-9&._\-]+(?:\s+[A-Za-z0-9&._\-]+)*)'
     m = re.search(pat, text, re.IGNORECASE)
     if m:
@@ -244,16 +263,11 @@ def extract_specific_transporter(text: str) -> str | None:
         candidate = re.sub(r'^(?:used\s+by|belonging\s+to|of)\s+', '', candidate, flags=re.IGNORECASE).strip()
         parts = re.split(r'\s+(?:in|for|from|during|between|with|having|on|where|whose|dated?)\b', candidate, flags=re.IGNORECASE)
         candidate = parts[0].strip()
-        stop_words = {
-            "used", "count", "data", "report", "trips", "trip", "all", "unique",
-            "distinct", "the", "a", "an", "is", "and", "or", "name", "names",
-            "for", "in", "during", "between", "on", "with", ""
-        }
         month_names = {"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"}
         cand_words = set(candidate.lower().split())
         if cand_words.intersection(month_names) or any(re.match(r'^(?:19|20)\d{2}$', w) for w in cand_words):
             return None
-        if candidate.lower() not in stop_words and len(candidate) > 1:
+        if candidate.lower() not in _TRANSPORTER_STOP_WORDS and len(candidate) > 1:
             return candidate
     return None
 
@@ -631,9 +645,7 @@ class IntentDetector:
                 for f in query_payload.get("filters", []):
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
                         val = f.get("value")
-                        if isinstance(val, str) and val.strip() and val.strip().lower() not in {
-                            "used", "count", "data", "report", "trips", "trip", "all", "unique", "distinct", "the", "a", "an", "is", ""
-                        }:
+                        if isinstance(val, str) and val.strip() and val.strip().lower() not in _TRANSPORTER_STOP_WORDS:
                             specific_transporter = val.strip()
                             break
 
@@ -654,9 +666,15 @@ class IntentDetector:
                     })
 
             has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
+            has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
             _is_transporter_unique_vehicles_query = bool(
                 specific_transporter and has_vehicle_mention and has_count_unique_distinct and not _is_no_gps_vehicle_query
+            )
+            _is_distinct_transporter_query = bool(
+                has_transporter_mention
+                and has_count_unique_distinct
+                and not has_vehicle_mention
             )
 
             if (
@@ -665,6 +683,7 @@ class IntentDetector:
                 or _is_completed_and_closed
                 or re.search(r'\bdevice\s+(?:report|data)\b|\breport\s+for\s+(?:all\s+)?(?:\w+\s+)?devices?\b|\bdevices?\s+report\b', msg_lower)
                 or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
+                or _is_distinct_transporter_query
                 or (re.search(r'\btransporters?\b', msg_lower) and word_in_text(["used"], msg_lower) and not _is_transporter_unique_vehicles_query)
                 or (
                     re.search(r'\bvehicles?\b', msg_lower)
@@ -1361,7 +1380,11 @@ class IntentDetector:
                 query_payload.pop("select", None)
             elif _is_distinct_transporter_query:
                 # Query asks for total number of unique/distinct transporters
-                query_payload.pop("groupBy", None)
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"])
+                ]
+                query_payload["groupBy"] = ["Transporter"]
                 query_payload["metrics"] = [
                     {"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
                 ]
@@ -1635,9 +1658,15 @@ class IntentDetector:
                 and re.search(r'\bvehicles?\b', msg_lower)
             )
             fb_has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
+            fb_has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             fb_has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
             fb_is_transporter_unique_vehicles_query = bool(
                 fb_specific_transporter and fb_has_vehicle_mention and fb_has_count_unique_distinct and not fb_is_no_gps_vehicle_query
+            )
+            fb_is_distinct_transporter_query = bool(
+                fb_has_transporter_mention
+                and fb_has_count_unique_distinct
+                and not fb_has_vehicle_mention
             )
 
             if fb_specific_transporter:
@@ -1683,6 +1712,7 @@ class IntentDetector:
                     or fb_is_completed_and_closed
                     or re.search(r'\bdevice\s+(?:report|data)\b|\breport\s+for\s+(?:all\s+)?(?:\w+\s+)?devices?\b|\bdevices?\s+report\b', msg_lower)
                     or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
+                    or fb_is_distinct_transporter_query
                     or (re.search(r'\btransporters?\b', msg_lower) and any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["used"]) and not fb_is_transporter_unique_vehicles_query)
                     or (
                         re.search(r'\bvehicles?\b', msg_lower)
@@ -2245,7 +2275,11 @@ class IntentDetector:
                 ]
                 fallback_payload.pop("select", None)
             elif fb_is_distinct_transporter_query:
-                fallback_payload.pop("groupBy", None)
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"])
+                ]
+                fallback_payload["groupBy"] = ["Transporter"]
                 fallback_payload["metrics"] = [
                     {"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}
                 ]

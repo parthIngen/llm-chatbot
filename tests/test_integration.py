@@ -3827,3 +3827,165 @@ async def test_vehicles_used_by_transporter_no_gps_fallback_flow():
         }
         assert entities == expected_entities
         assert response.json()["reply"] == "Total 1 vehicles without GPS used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
+@pytest.mark.asyncio
+async def test_count_unique_transporters_recorded_flow():
+    user_query = "What is the count of unique transporters recorded in Aug 2026?"
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-31 23:59:59"
+            },
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "transporter",
+                "operator": "eq",
+                "value": "recorded"
+            }
+        ],
+        "metrics": [
+            {
+                "field": "Transporter",
+                "function": "countDistinct",
+                "alias": "uniqueTransporterCount"
+            }
+        ]
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload, "Total 10  unique Transporter in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"Transporter": "ALL", "uniqueTransporterCount": 10}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-unique-transporters-recorded",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                }
+            ],
+            "groupBy": [
+                "Transporter"
+            ],
+            "metrics": [
+                {
+                    "field": "Transporter",
+                    "function": "countDistinct",
+                    "alias": "uniqueTransporterCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_count_unique_transporters_recorded_fallback_flow():
+    user_query = "What is the count of unique transporters recorded in Aug 2026?"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM connection failed")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"Transporter": "ALL", "uniqueTransporterCount": 10}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-unique-transporters-recorded-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                }
+            ],
+            "groupBy": [
+                "Transporter"
+            ],
+            "metrics": [
+                {
+                    "field": "Transporter",
+                    "function": "countDistinct",
+                    "alias": "uniqueTransporterCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
