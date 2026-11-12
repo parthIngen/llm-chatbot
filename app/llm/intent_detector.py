@@ -1364,9 +1364,27 @@ class IntentDetector:
                 ]
                 has_explicit_trip_status = bool(
                     re.search(r'\b(?:valid\s+trips?|active\s+trips?|running\s+trips?|closed\s+trips?|completed\s+trips?|cancelled\s+trips?)\b', msg_lower)
+                    or re.search(r'\bvalid\s+(?:\w+\s+)?trips?\b', msg_lower)
+                    or re.search(r'\bvalid\b', msg_lower)
+                    or re.search(r'\bnon[\s-]?cancell?ed\b', msg_lower)
+                    or re.search(r'\bnot\s+cancell?ed\b', msg_lower)
                     or re.search(r'\btrip\s+status\b', msg_lower)
                 )
-                if not has_explicit_trip_status:
+                if has_explicit_trip_status:
+                    if re.search(r'\bvalid\b', msg_lower) or re.search(r'\bnon[\s-]?cancell?ed\b', msg_lower) or re.search(r'\bnot\s+cancell?ed\b', msg_lower):
+                        found_status = False
+                        for f in query_payload["filters"]:
+                            if isinstance(f, dict) and f.get("field") == "tripStatus":
+                                f["value"] = "valid"
+                                found_status = True
+                                break
+                        if not found_status:
+                            query_payload["filters"].append({
+                                "field": "tripStatus",
+                                "operator": "eq",
+                                "value": "valid"
+                            })
+                else:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
@@ -1414,25 +1432,25 @@ class IntentDetector:
                     fld = flt.get("field")
                     if fld == "groupId":
                         return 1
+                    if fld == "tripStatus":
+                        return 2
                     if _is_across_trip_types:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 2
+                            return 3
                         if fld == "runDate":
-                            return 3 if flt.get("operator") == "gte" else 4
+                            return 4 if flt.get("operator") == "gte" else 5
                     elif dev_single_route_category:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 2
+                            return 3
                         if fld == "runDate":
-                            return 3 if flt.get("operator") == "gte" else 4
+                            return 4 if flt.get("operator") == "gte" else 5
                         if fld == "routeCategory":
-                            return 5
+                            return 6
                     else:
                         if fld == "runDate":
-                            return 2 if flt.get("operator") == "gte" else 3
+                            return 3 if flt.get("operator") == "gte" else 4
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 4
-                    if fld == "tripStatus":
-                        return 6
+                            return 5
                     if fld == "shipmentMethod":
                         return 7
                     return 8
@@ -2570,9 +2588,27 @@ class IntentDetector:
                 ]
                 has_explicit_trip_status = bool(
                     re.search(r'\b(?:valid\s+trips?|active\s+trips?|running\s+trips?|closed\s+trips?|completed\s+trips?|cancelled\s+trips?)\b', msg_lower)
+                    or re.search(r'\bvalid\s+(?:\w+\s+)?trips?\b', msg_lower)
+                    or re.search(r'\bvalid\b', msg_lower)
+                    or re.search(r'\bnon[\s-]?cancell?ed\b', msg_lower)
+                    or re.search(r'\bnot\s+cancell?ed\b', msg_lower)
                     or re.search(r'\btrip\s+status\b', msg_lower)
                 )
-                if not has_explicit_trip_status:
+                if has_explicit_trip_status:
+                    if re.search(r'\bvalid\b', msg_lower) or re.search(r'\bnon[\s-]?cancell?ed\b', msg_lower) or re.search(r'\bnot\s+cancell?ed\b', msg_lower):
+                        found_status = False
+                        for f in fallback_payload["filters"]:
+                            if isinstance(f, dict) and f.get("field") == "tripStatus":
+                                f["value"] = "valid"
+                                found_status = True
+                                break
+                        if not found_status:
+                            fallback_payload["filters"].append({
+                                "field": "tripStatus",
+                                "operator": "eq",
+                                "value": "valid"
+                            })
+                else:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
@@ -2620,25 +2656,25 @@ class IntentDetector:
                     fld = flt.get("field")
                     if fld == "groupId":
                         return 1
+                    if fld == "tripStatus":
+                        return 2
                     if fb_is_across_trip_types:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 2
+                            return 3
                         if fld == "runDate":
-                            return 3 if flt.get("operator") == "gte" else 4
+                            return 4 if flt.get("operator") == "gte" else 5
                     elif fb_single_route_category:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 2
+                            return 3
                         if fld == "runDate":
-                            return 3 if flt.get("operator") == "gte" else 4
+                            return 4 if flt.get("operator") == "gte" else 5
                         if fld == "routeCategory":
-                            return 5
+                            return 6
                     else:
                         if fld == "runDate":
-                            return 2 if flt.get("operator") == "gte" else 3
+                            return 3 if flt.get("operator") == "gte" else 4
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 4
-                    if fld == "tripStatus":
-                        return 6
+                            return 5
                     if fld == "shipmentMethod":
                         return 7
                     return 8

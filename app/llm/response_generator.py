@@ -355,7 +355,10 @@ def build_natural_response(
         else:
             sentence_parts.append(date_clause)
 
-    return " ".join(sentence_parts).strip() + "."
+    resp = " ".join(sentence_parts).strip() + "."
+    if trip_status == "valid":
+        resp += " It does not include cancelled trips."
+    return resp
 
 
 class ResponseGenerator:

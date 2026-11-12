@@ -492,6 +492,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "Show active Fixed GPS device count across Intercity trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}]}
+- "Show active device status for Fixed GPS units on Valid Intercity trips during Aug 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}]}
 - "Trip with Only with single GPS or Fixed GPS only August 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
 - "Trip with Only with Inactive single GPS or Inactive Fixed GPS only August 2026" ->
@@ -587,7 +589,8 @@ Rules:
 3. Trip Count Results:
    - State the total count and convert all filters into natural language:
      e.g., status ("running", "active", "closed", "cancelled"), routeCategory ("intercity", "intracity"), shipmentMethod ("air", "feeder", "empty", "delivery", "sfc", "speed"), region ("in the <region> region"), vendor ("using Secutrak devices", "using 3rd-party devices"), device conditions ("without GPS", "with GPS", "with inactive Fixed GPS", "equipped with Fixed E-Lock", "equipped with Portable E-Lock"), remarks ("closed forcefully", "closed manually"), ATD/ATA ("where ATD was not captured/missing"), locations ("from <From> to <To>"), and date range ("in date range from <start_date> to <end_date>").
-   - Output ONLY a single concise, clean sentence. Do NOT include markdown, backticks, bullet points, or HTML tags.
+   - If "tripStatus": "valid" is in QueryFilters, append the sentence: "It does not include cancelled trips."
+   - Output ONLY a single concise, clean sentence (plus the cancelled trips clarification sentence if tripStatus is valid). Do NOT include markdown, backticks, bullet points, or HTML tags.
 4. Trip Type Comparison Results (Network vs Local / Intercity vs Intracity):
    - "Network" corresponds to "tripTypeName": "Intercity Trip"
    - "Local" corresponds to "tripTypeName": "Intracity Trip"
@@ -606,6 +609,7 @@ Example outputs:
 - "Total 50 trips without GPS found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
 - "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120 and Local (Intracity Trip) count is 80."
 - "Active Fixed GPS device counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 28020 and Local (Intracity Trip) count is 90041."
+- "Total 28020 valid intercity trips with active Fixed GPS found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. It does not include cancelled trips."
 - "Total 150 trips found for date range from 2026-09-08 00:00:00 to 2026-09-08 23:59:59."
 """
 
