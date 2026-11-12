@@ -899,6 +899,14 @@ class IntentDetector:
             _is_non_cancelled = bool(
                 re.search(r'\b(?:non[\s-]?cancell?ed|not\s+cancell?ed)\b', msg_lower)
             )
+            _is_include_cancelled = bool(
+                re.search(
+                    r'\b(?:includ(?:e|ing|es)|with)\s+(?:all\s+|any\s+|the\s+)?(?:cancell?ed|cancel)(?:\s+trips?)?\b'
+                    r'|\b(?:cancell?ed|cancel)\s+trips?\s+(?:includ(?:ed?|ing))\b'
+                    r'|\binclud(?:e|ing|es)\s+cancel\b',
+                    msg_lower
+                )
+            )
 
             _is_active_vehicle_query = bool(
                 re.search(r'\b(?:active\s+vehicles?|vehicles?\s+(?:that\s+were\s+|that\s+are\s+)?active)\b', msg_lower)
@@ -955,7 +963,10 @@ class IntentDetector:
                 and not has_vehicle_mention
             )
 
-            if (
+            if _is_include_cancelled:
+                has_status_keyword = False
+                status_override = None
+            elif (
                 word_in_text(["valid"], msg_lower)
                 or _is_non_cancelled
                 or _is_completed_and_closed
@@ -998,6 +1009,8 @@ class IntentDetector:
                 if is_inactive_for_trip:
                     has_status_keyword = True
                     status_override = "closed"
+                else:
+                    status_override = "valid"
             elif word_in_text(["cancelled", "canceled"], msg_lower) and not _is_non_cancelled:
                 has_status_keyword = True
                 status_override = "cancelled"
@@ -1032,6 +1045,8 @@ class IntentDetector:
                         status_override = "running"
                     else:
                         status_override = "active"
+                else:
+                    status_override = "valid"
             elif word_in_text(["running", "scheduled", "sceduled", "transit", "ongoing", "moving", "intransit", "live"], msg_lower) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                 has_status_keyword = True
                 status_override = "running"
@@ -1039,14 +1054,24 @@ class IntentDetector:
                 # Queries mentioning any shipment method default to tripStatus="running" ONLY when no date is given
                 has_status_keyword = True
                 status_override = "running"
+            else:
+                # Default for all other payloads: tripStatus eq "valid"
+                has_status_keyword = False
+                status_override = "valid"
 
-            if has_status_keyword:
-                # Normalize any existing tripStatus filters first
+            if _is_include_cancelled:
+                # When query asks to include cancel trips, remove any tripStatus filter
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                ]
+            else:
+                target_status = status_override if status_override is not None else "valid"
                 has_trip_status = False
                 for f in query_payload["filters"]:
                     if isinstance(f, dict) and f.get("field") == "tripStatus":
                         has_trip_status = True
-                        f["value"] = status_override
+                        f["value"] = target_status
                         f["operator"] = "eq"
                         break
 
@@ -1054,15 +1079,8 @@ class IntentDetector:
                     query_payload["filters"].append({
                         "field": "tripStatus",
                         "operator": "eq",
-                        "value": status_override
+                        "value": target_status
                     })
-            else:
-                # No explicit status keyword in the query — remove any tripStatus filter
-                # the LLM may have hallucinated. Never inject a default tripStatus.
-                query_payload["filters"] = [
-                    f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") == "tripStatus")
-                ]
 
             # --- ShipmentMethod Injection ---
             if detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query:
@@ -1375,25 +1393,26 @@ class IntentDetector:
                     or re.search(r'\bnot\s+cancell?ed\b', msg_lower)
                     or re.search(r'\btrip\s+status\b', msg_lower)
                 )
-                if has_explicit_trip_status:
-                    if re.search(r'\bvalid\b', msg_lower) or re.search(r'\bnon[\s-]?cancell?ed\b', msg_lower) or re.search(r'\bnot\s+cancell?ed\b', msg_lower):
-                        found_status = False
-                        for f in query_payload["filters"]:
-                            if isinstance(f, dict) and f.get("field") == "tripStatus":
-                                f["value"] = "valid"
-                                found_status = True
-                                break
-                        if not found_status:
-                            query_payload["filters"].append({
-                                "field": "tripStatus",
-                                "operator": "eq",
-                                "value": "valid"
-                            })
-                else:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
                 for df in _device_analytics["device_filters"]:
                     query_payload["filters"].append(df)
 
@@ -1514,11 +1533,26 @@ class IntentDetector:
                 query_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": "na"})
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif _is_portable_elock_only:
                 portable_val = _get_device_status(msg_lower, "existing")
                 query_payload["filters"] = [
@@ -1534,11 +1568,26 @@ class IntentDetector:
                 query_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": portable_val})
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif _is_portable_elock_trip_query:
                 portable_val = _get_device_status(msg_lower, "existing")
                 query_payload["filters"] = [
@@ -1552,11 +1601,26 @@ class IntentDetector:
                 query_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": portable_val})
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif _is_fixed_elock_only:
                 fixed_val = _get_device_status(msg_lower, "existing")
                 query_payload["filters"] = [
@@ -1572,11 +1636,26 @@ class IntentDetector:
                 query_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": "na"})
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif _is_fixed_elock_trip_query:
                 fixed_val = _get_device_status(msg_lower, "existing")
                 query_payload["filters"] = [
@@ -1590,11 +1669,26 @@ class IntentDetector:
                 query_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": fixed_val})
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif _is_fixed_gps_combo:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -1604,11 +1698,26 @@ class IntentDetector:
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                if not has_status_keyword:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
                 if has_fixed_elock:
                     query_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
                 if has_portable_elock:
@@ -1657,11 +1766,26 @@ class IntentDetector:
                 query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": gps_val})
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif _is_devices_together and (bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_lower)) or has_fixed_elock or has_portable_elock):
                 _has_together_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_lower))
                 query_payload["filters"] = [
@@ -1674,11 +1798,26 @@ class IntentDetector:
                 ]
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
 
                 if _has_together_gps:
                     query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
@@ -2148,6 +2287,27 @@ class IntentDetector:
 
                 query_payload["filters"].sort(key=_vendor_sort_key)
 
+            if _is_include_cancelled:
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                ]
+            else:
+                target_status = status_override if status_override is not None else "valid"
+                found_status = False
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") == "tripStatus":
+                        f["value"] = target_status
+                        f["operator"] = "eq"
+                        found_status = True
+                        break
+                if not found_status:
+                    query_payload.setdefault("filters", []).append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": target_status
+                    })
+
             log_intent_detected(session_id, "trip_report")
             log_entities_extracted(session_id, query_payload)
 
@@ -2268,11 +2428,22 @@ class IntentDetector:
                 fb_is_non_cancelled = bool(
                     re.search(r'\b(?:non[\s-]?cancell?ed|not\s+cancell?ed)\b', msg_lower)
                 )
+                fb_is_include_cancelled = bool(
+                    re.search(
+                        r'\b(?:includ(?:e|ing|es)|with)\s+(?:all\s+|any\s+|the\s+)?(?:cancell?ed|cancel)(?:\s+trips?)?\b'
+                        r'|\b(?:cancell?ed|cancel)\s+trips?\s+(?:includ(?:ed?|ing))\b'
+                        r'|\binclud(?:e|ing|es)\s+cancel\b',
+                        msg_lower
+                    )
+                )
                 fb_is_active_vehicle_query = bool(
                     re.search(r'\b(?:active\s+vehicles?|vehicles?\s+(?:that\s+were\s+|that\s+are\s+)?active)\b', msg_lower)
                 )
 
-                if (
+                if fb_is_include_cancelled:
+                    has_status_keyword = False
+                    status_override = None
+                elif (
                     any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["valid"])
                     or fb_is_non_cancelled
                     or fb_is_completed_and_closed
@@ -2339,7 +2510,15 @@ class IntentDetector:
                     })
                     has_status_keyword = True
                     status_override = "running"
-                # else: no status keyword → do NOT inject a default tripStatus
+                else:
+                    # In all other payloads, default to valid
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "valid"
+                    })
+                    has_status_keyword = False
+                    status_override = "valid"
             if extracted_start and extracted_end:
                 fallback_payload["filters"].append({
                     "field": "runDate",
@@ -2601,25 +2780,26 @@ class IntentDetector:
                     or re.search(r'\bnot\s+cancell?ed\b', msg_lower)
                     or re.search(r'\btrip\s+status\b', msg_lower)
                 )
-                if has_explicit_trip_status:
-                    if re.search(r'\bvalid\b', msg_lower) or re.search(r'\bnon[\s-]?cancell?ed\b', msg_lower) or re.search(r'\bnot\s+cancell?ed\b', msg_lower):
-                        found_status = False
-                        for f in fallback_payload["filters"]:
-                            if isinstance(f, dict) and f.get("field") == "tripStatus":
-                                f["value"] = "valid"
-                                found_status = True
-                                break
-                        if not found_status:
-                            fallback_payload["filters"].append({
-                                "field": "tripStatus",
-                                "operator": "eq",
-                                "value": "valid"
-                            })
-                else:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
                 for df in fb_device_analytics["device_filters"]:
                     fallback_payload["filters"].append(df)
 
@@ -2740,11 +2920,26 @@ class IntentDetector:
                 fallback_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": "na"})
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif fb_is_portable_elock_only:
                 fb_portable_val = _fb_get_device_status(msg_lower, "existing")
                 fallback_payload["filters"] = [
@@ -2760,11 +2955,26 @@ class IntentDetector:
                 fallback_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": fb_portable_val})
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif fb_is_portable_elock_trip_query:
                 fb_portable_val = _fb_get_device_status(msg_lower, "existing")
                 fallback_payload["filters"] = [
@@ -2778,11 +2988,26 @@ class IntentDetector:
                 fallback_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": fb_portable_val})
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif fb_is_fixed_elock_only:
                 fb_fixed_val = _fb_get_device_status(msg_lower, "existing")
                 fallback_payload["filters"] = [
@@ -2798,11 +3023,26 @@ class IntentDetector:
                 fallback_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": "na"})
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif fb_is_fixed_elock_trip_query:
                 fb_fixed_val = _fb_get_device_status(msg_lower, "existing")
                 fallback_payload["filters"] = [
@@ -2816,11 +3056,26 @@ class IntentDetector:
                 fallback_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": fb_fixed_val})
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif fb_is_fixed_gps_combo:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
@@ -2830,11 +3085,26 @@ class IntentDetector:
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                if not has_status_keyword:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
                 if fb_has_fixed_elock:
                     fallback_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
                 if fb_has_portable_elock:
@@ -2883,11 +3153,26 @@ class IntentDetector:
                 fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": fb_gps_val})
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
             elif fb_is_devices_together and (bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_lower)) or fb_has_fixed_elock or fb_has_portable_elock):
                 fb_has_together_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_lower))
                 fallback_payload["filters"] = [
@@ -2900,11 +3185,26 @@ class IntentDetector:
                 ]
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
-                if not has_status_keyword:
+                if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
 
                 if fb_has_together_gps:
                     fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
@@ -3033,10 +3333,26 @@ class IntentDetector:
                     {"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}
                 ]
                 fallback_payload.pop("select", None)
-                fallback_payload["filters"] = [
-                    f for f in fallback_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") == "tripStatus")
-                ]
+                if fb_is_include_cancelled:
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                    ]
+                else:
+                    target_status = status_override if status_override is not None else "valid"
+                    found_status = False
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
                 has_fb_transporter_filter = False
                 for f in fallback_payload["filters"]:
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
@@ -3382,6 +3698,27 @@ class IntentDetector:
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
+
+            if fb_is_include_cancelled:
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                ]
+            else:
+                target_status = status_override if status_override is not None else "valid"
+                found_status = False
+                for f in fallback_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") == "tripStatus":
+                        f["value"] = target_status
+                        f["operator"] = "eq"
+                        found_status = True
+                        break
+                if not found_status:
+                    fallback_payload.setdefault("filters", []).append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": target_status
+                    })
 
             return {
                 "intent": "trip_report",

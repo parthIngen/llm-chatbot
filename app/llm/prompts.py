@@ -52,7 +52,7 @@ FIELD REFERENCE (use these exact API field names and allowed values):
                             "active" (= running — treat running and active as equivalent),
                             "closed" (= completed/finished/inactive),
                             "cancelled",
-                            "valid" (used for device-report / 3rd-party data queries, and active vehicles operating in past periods/months)
+                            "valid" (= default for all payloads unless asking for a specific tripStatus or asking to include cancel trips)
 
   Region        -> field: "region"   (e.g. "North", "South", "East", "West")
 
@@ -135,6 +135,8 @@ CRITICAL RULES:
    - "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" -> tripStatus eq "running"
    - "active trips" or "active" -> tripStatus eq "active" (NOTE: does NOT apply to "active vehicles"; see ACTIVE VEHICLES below)
    - "cancelled trips" or "cancelled" (unless query says "non-cancelled") -> tripStatus eq "cancelled"
+   - If the query asks to include cancel trips (e.g. "include cancel trip", "including cancelled trips", "include cancelled", "with cancelled trips", "all trips including cancelled"): do NOT use any "tripStatus" filter (omit the tripStatus filter so cancelled trips are included).
+   - In all other queries, ALWAYS add tripStatus eq "valid".
    - NOTE: When a query mentions trip status (e.g. "valid", "completed", "cancelled", "active", "running") alongside a vendor (e.g. "Secutrak") or any other field, always include both the tripStatus filter and the vendor / other field filters.
    - SHIPMENT METHODS:
        * "AIR_Network", "air network", "air truck", "air trips", "air" -> shipmentMethod eq "air"
@@ -150,7 +152,7 @@ CRITICAL RULES:
        * Multiple shipment methods: When a query mentions multiple shipment methods (e.g. "Delivery with pick & delivery"), use operator "in" with the list of methods:
          {"field": "shipmentMethod", "operator": "in", "value": ["Delivery", "Pick Up and Delivery"]}
          For "Delivery with pick & delivery" (or active trips of multiple shipment methods), tripStatus is "running".
-       * NOTE: tripStatus eq "running" should ONLY be passed when NO date is given, OR when the query explicitly mentions "running", "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" (or "active" -> tripStatus eq "active"). If a date range is given and no status is mentioned, do NOT add tripStatus.
+       * NOTE: tripStatus eq "running" should ONLY be passed when NO date is given, OR when the query explicitly mentions "running", "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" (or "active" -> tripStatus eq "active"). If a date range is given and no specific status is mentioned, tripStatus MUST be "valid" unless the query asks to include cancelled trips.
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
@@ -200,19 +202,19 @@ CRITICAL RULES:
          * For "No Any GPS" / "No Any GPS device" queries: field: "GPS", operator: "eq", value: "nogps "
          * For other non-GPS queries: field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
          * Do NOT include groupBy or metrics unless explicitly requested.
-         * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned.
+         * Default tripStatus to "valid" unless a specific tripStatus is requested or cancelled trips are included.
          * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
     - GPS TRIPS: When query asks about trips WITH GPS / "GPS trips" / "GPS trip counts" (positive sense, e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026"):
          NOTE: SKIP this rule if the query contains "no GPS", "no any GPS", "non-GPS", "without GPS", "had no GPS" -- use NO GPS rules above.
          * field: "GPS", operator: "eq", value: "existing"
          * Do NOT add FixedELock or PortableELock filters unless they are explicitly mentioned.
-         * Do NOT add a tripStatus filter unless an explicit status keyword was mentioned or no date was given.
+         * Default tripStatus to "valid" unless a specific tripStatus is requested or cancelled trips are included.
    - DEVICES TOGETHER: When the query asks about trips using devices together (e.g. "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?"):
        * GPS / Fixed GPS -> field: "GPS", operator: "eq", value: "existing"
        * Fixed E-Lock -> field: "FixedELock", operator: "eq", value: "existing"
        * Portable E-Lock -> field: "PortableELock", operator: "eq", value: "existing"
        * Do NOT include groupBy or metrics for "together" queries.
-       * Do NOT add a tripStatus filter (the word "used" is not a status keyword).
+       * Include tripStatus eq "valid" unless a specific status is mentioned or cancelled trips are included.
    - SINGLE DEVICE TRIPS (ONLY when "only" or "single device" is explicitly mentioned):
        * When query asks about "Fixed GPS only", "only Fixed GPS", or "Fixed GPS as the single device":
            - field: "GPS", operator: "eq", value: "existing"
@@ -227,18 +229,18 @@ CRITICAL RULES:
            - field: "FixedELock", operator: "eq", value: "existing"
            - field: "PortableELock", operator: "eq", value: "na"
        * Do NOT include groupBy or metrics for single device queries.
-       * If query specifies a status like "valid" (e.g. "How many valid Trips had Fixed GPS as the single device in Aug 2026?"), "non-cancelled", or "completed and closed", include field: "tripStatus", operator: "eq", value: "valid" as the FIRST filter. Do NOT include tripStatus if no status keyword is mentioned.
+       * Include field: "tripStatus", operator: "eq", value: "valid" by default unless a specific status is mentioned or cancelled trips are included.
    - PORTABLE E-LOCK TRIPS / VEHICLES (without "only"):
        * When query asks about "portable E-Lock trips" / "total count of portable E-Lock trips" / "vehicles equipped with Portable E-Locks" (e.g. "Show total count of portable E-Lock trips in Aug 2026", "How many unique Intercity vehicles were equipped with Portable E-Locks In Aug 2026"):
            - field: "PortableELock", operator: "eq", value: "existing" (or status if mentioned)
            - Do NOT add "GPS" or "FixedELock" filters (do NOT add value "na").
-           - Do NOT add tripStatus filter unless explicitly mentioned.
+           - Include tripStatus eq "valid" unless a specific status is mentioned or cancelled trips are included.
            - If unique / distinct vehicles are asked, include groupBy: ["vehicleNo"] and metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}], without select.
    - FIXED E-LOCK TRIPS / VEHICLES (without "only" and without "device count"):
        * When query asks about "Fixed E-Lock trips" / "vehicles equipped with Fixed E-Locks" (e.g. "Show count of Fixed E-Lock trips in Aug 2026"):
            - field: "FixedELock", operator: "eq", value: "existing" (or status if mentioned)
            - Do NOT add "GPS" or "PortableELock" filters (do NOT add value "na").
-           - Do NOT add tripStatus filter unless explicitly mentioned.
+           - Include tripStatus eq "valid" unless a specific status is mentioned or cancelled trips are included.
            - If unique / distinct vehicles are asked, include groupBy: ["vehicleNo"] and metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}], without select.
    - ACTIVE DEVICE COUNT FOR TRIPS:
        * When query asks about "active device count" for Fixed E-Lock trips (e.g. "What was the active device count for Fixed E-Lock trips on Intercity routes in Aug 2026?"): 
@@ -275,7 +277,16 @@ CRITICAL RULES:
 7. For the fields 'FixedELock' and 'PortableELock', when the query asks about device trips (e.g. 'Fixed E-Lock device trips', '3rd-party device trips'), the value MUST be a blank string (""). The value should only be a specific status ("Active", "inactive", "nogps", "gpsInactive", "NA") if those status words are mentioned. Do NOT use "device" or "Fixed E-Lock" as a filter value.
 8. Never map date, time, or temporal terms (such as "today", "yesterday", "last month", "last week", "January 2026", etc.) to the "region" field. The "region" field must only contain actual geographic regions (e.g., "North", "South", "East", "West").
 9. For queries regarding delayed departures or arrivals (e.g., "departure was delayed", "arrival was delayed") or vehicles without GPS / no GPS, include an "analytics" array at the top level of the JSON payload. Inside this array, add an object with key "type" and value "departureDelayed", "arrivalDelayed", or "gpsna" respectively. Do NOT place this in "filters". Do NOT default tripStatus to "Active" when analytics are present.
-10. NEVER add a "tripStatus" filter unless the user's query explicitly mentions trip status words such as "active", "running", "closed", "completed", "finished", "scheduled", "live", "transit", "in transit", "en route", "cancelled", or "valid". Do NOT default or assume any tripStatus when the query does not mention it.
+10. TRIP STATUS FILTER RULES:
+    - ALWAYS include a "tripStatus" filter with "operator": "eq" and "value": "valid" in ALL query payloads by default, EXCEPT:
+      a. When the query explicitly asks for a specific tripStatus:
+         * "running" (= active/live/in-transit/scheduled/ongoing) -> tripStatus eq "running"
+         * "active" (= running — treat running and active as equivalent) -> tripStatus eq "active" (or "running" for multiple shipment methods / delivery with pick)
+         * "closed" (= completed/finished/inactive) -> tripStatus eq "closed"
+         * "cancelled" -> tripStatus eq "cancelled"
+      b. When the query explicitly asks to include cancel trips (e.g. "include cancel trip", "including cancelled trips", "include cancelled", "with cancelled trips", "all trips including cancelled"):
+         * Do NOT use any "tripStatus" filter at all (omit the tripStatus filter so cancelled trips are included).
+    - In ALL other query payloads, include "tripStatus" with "operator": "eq" and "value": "valid".
 11. When the query asks to count total unique vehicles and distinct transporters (or vehicle counts per transporter), include "groupBy": ["Transporter"] and "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}].
     - DISTINCT TRANSPORTERS: When the query asks for the total number of unique or distinct transporters (e.g. "Show total number of unique transporters used in Aug 2026", "What is the count of unique transporters recorded in Aug 2026?"):
         * Include filter: tripStatus eq "valid"
@@ -309,7 +320,7 @@ CRITICAL RULES:
         * Include filter: groupId eq "0041"
         * Include filter: transporter eq "<TransporterName>" (exact name from query, field is lowercase "transporter")
         * Include runDate gte/lte filters for the specified period
-        * Do NOT include tripStatus filter
+        * Include filter: tripStatus eq "valid" unless a specific status is mentioned or cancelled trips are included
         * Do NOT include "select"
         * Include "groupBy": ["transporter"]
         * Include "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}]
@@ -374,6 +385,8 @@ CRITICAL RULES:
 - "Generate the <Vendor> device report" or "<Vendor> device report" -> tripStatus eq "valid", vendor contains "<Vendor>"
 
 Reference Examples:
+- "Show all trips for the North region including cancelled trips" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "region", "operator": "eq", "value": "North"}], "select": []}
 - "Generate the July 2026 report for all Secutrak devices" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "runDate", "operator": "gte", "value": "2026-07-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-07-31 23:59:59"}], "select": []}
 - "how many active trips of Delivery with pick & delivery" ->
