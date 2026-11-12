@@ -186,11 +186,12 @@ CRITICAL RULES:
         - Same as above, but without a specific tripType filter (so both trip types are grouped).
       * When the query asks for device count across Intercity and Intracity trips (e.g. "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026"):
         - Include top-level: "analytics": [{"type": "gps"}]
-        - Include filters: groupId eq "0041", GPS eq "active", runDate gte, runDate lte
+        - Include filters: groupId eq "0041", tripStatus eq "valid", runDate gte, runDate lte
         - Do NOT include select.
         - Include groupBy: ["tripType"]
         - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
-        - Filter order: groupId first, then GPS, then runDate gte, then runDate lte
+        - Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte
+        - Do NOT include a GPS filter (the query asks about GPS active status, not trip status active; the "type": "gps" analytics already covers active GPS devices).
         - Do NOT include a routeCategory, routeType, tripType, or shipmentMethod filter.
       * When the query asks for device count for ONLY Intercity (or ONLY Intracity) trips (e.g. "Show active Fixed GPS device count across Intercity trips in Aug 2026"):
         - Include top-level: "analytics": [{"type": "gps"}]
@@ -507,7 +508,7 @@ Reference Examples:
 - "GPS with active GPS August 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}], "select": []}
 - "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026" ->
-  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "Show active Fixed GPS device count across Intercity trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}]}
 - "Show active device status for Fixed GPS units on Valid Intercity trips during Aug 2026" ->

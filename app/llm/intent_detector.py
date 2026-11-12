@@ -1430,7 +1430,7 @@ class IntentDetector:
                 if _is_across_trip_types:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
-                        if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"])
+                        if not (isinstance(f, dict) and (f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"] or (f.get("field") in ["GPS", "FixedGPS"] and f.get("value") == "active")))
                     ]
                     query_payload.pop("select", None)
                     query_payload["groupBy"] = ["tripType"]
@@ -2496,15 +2496,37 @@ class IntentDetector:
                     })
                     has_status_keyword = True
                     status_override = "cancelled" 
-                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["active", "open"]) and not fb_is_active_vehicle_query:
-                    status_val = "running" if (len(fb_detected_sms) > 1 or re.search(r'\bdelivery\s+with\s+pick\b', msg_lower)) else "active"
-                    fallback_payload["filters"].append({
-                        "field": "tripStatus",
-                        "operator": "eq",
-                        "value": status_val
-                    })
-                    has_status_keyword = True
-                    status_override = status_val
+                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["active", "open"]):
+                    fb_is_active_for_trip = True
+                    has_active = re.search(r'\bactive\b', msg_lower) is not None
+                    has_open = re.search(r'\bopen\b', msg_lower) is not None
+                    if has_active and not has_open:
+                        explicit_active_trip = (
+                            (re.search(r'\bactive\s+trips?\b', msg_lower) is not None and not re.search(r'\b(?:gps|lock|elock|e-lock|portable|fixed|device)\s+active\s+trips?\b', msg_lower)) or
+                            re.search(r'\btrips?\s+(?:status\s+)?is\s+active\b', msg_lower) is not None or
+                            re.search(r'\btrips?\s+are\s+active\b', msg_lower) is not None
+                        )
+                        if not explicit_active_trip:
+                            if re.search(r'\bactive\s+device\b', msg_lower) or re.search(r'\bactive\s+(?:fixed|portable|gps|lock|elock)\b', msg_lower) or fb_is_active_vehicle_query or bool(detect_device_analytics(message)):
+                                fb_is_active_for_trip = False
+
+                    if fb_is_active_for_trip:
+                        status_val = "running" if (len(fb_detected_sms) > 1 or re.search(r'\bdelivery\s+with\s+pick\b', msg_lower)) else "active"
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": status_val
+                        })
+                        has_status_keyword = True
+                        status_override = status_val
+                    else:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": "valid"
+                        })
+                        has_status_keyword = False
+                        status_override = "valid"
                 elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["running", "scheduled", "sceduled", "transit", "ongoing", "moving", "intransit", "live"]) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
@@ -2819,7 +2841,7 @@ class IntentDetector:
                 if fb_is_across_trip_types:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
-                        if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"])
+                        if not (isinstance(f, dict) and (f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"] or (f.get("field") in ["GPS", "FixedGPS"] and f.get("value") == "active")))
                     ]
                     fallback_payload.pop("select", None)
                     fallback_payload["groupBy"] = ["tripType"]

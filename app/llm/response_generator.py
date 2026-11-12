@@ -597,7 +597,6 @@ class ResponseGenerator:
                 cleaned = cleaned[7:-3].strip()
             elif cleaned.startswith("```") and cleaned.endswith("```"):
                 cleaned = cleaned[3:-3].strip()
-            import re
             cleaned = re.sub(r'<[^>]+>', '', cleaned).strip()
             return cleaned
         except LLMRateLimitError as rle:

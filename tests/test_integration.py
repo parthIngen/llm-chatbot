@@ -4911,7 +4911,7 @@ async def test_active_fixed_gps_across_intercity_and_intracity_flow():
             "analytics": [{"type": "gps"}],
             "filters": [
                 {"field": "groupId", "operator": "eq", "value": "0041"},
-                {"field": "GPS", "operator": "eq", "value": "active"},
+                {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
                 {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
                 {"field": "routeCategory", "operator": "eq", "value": "intracity"}
@@ -4954,7 +4954,7 @@ async def test_active_fixed_gps_across_intercity_and_intracity_flow():
             "analytics": [{"type": "gps"}],
             "filters": [
                 {"field": "groupId", "operator": "eq", "value": "0041"},
-                {"field": "GPS", "operator": "eq", "value": "active"},
+                {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
                 {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
             ],
@@ -5012,7 +5012,7 @@ async def test_active_fixed_gps_across_intercity_and_intracity_fallback_flow():
             "analytics": [{"type": "gps"}],
             "filters": [
                 {"field": "groupId", "operator": "eq", "value": "0041"},
-                {"field": "GPS", "operator": "eq", "value": "active"},
+                {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
                 {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
             ],
