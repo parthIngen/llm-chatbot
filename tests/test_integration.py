@@ -5203,5 +5203,311 @@ async def test_active_fixed_gps_valid_intercity_fallback_flow():
         assert response.json()["reply"] == "Total 28020 valid intercity trips with active Fixed GPS found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. It does not include cancelled trips."
 
 
+@pytest.mark.asyncio
+async def test_total_count_non_gps_vehicles_flow():
+    user_query = "Give me the total count of Non-GPS vehicles in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.return_value = json.dumps({
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsna"}],
+            "filters": [
+                {"field": "tripStatus", "operator": "eq", "value": "valid"},
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+            ],
+            "select": [],
+            "groupBy": ["vehicleNo"],
+            "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        })
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"uniqueVehicleCount": 12}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-non-gps-vehicles-flow",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "gpsna"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 12 vehicles without GPS in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
+@pytest.mark.asyncio
+async def test_total_count_non_gps_vehicles_fallback_flow():
+    user_query = "Give me the total count of Non-GPS vehicles in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"uniqueVehicleCount": 12}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-non-gps-vehicles-fallback-flow",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "gpsna"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 12 vehicles without GPS in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
+@pytest.mark.asyncio
+async def test_total_count_non_gps_space_vehicles_flow():
+    user_query = "Give me the total count of non gps vehicles in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.return_value = json.dumps({
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gpsna"}],
+            "filters": [
+                {"field": "tripStatus", "operator": "eq", "value": "valid"},
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+            ],
+            "select": [],
+            "groupBy": ["vehicleNo"],
+            "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        })
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"uniqueVehicleCount": 12}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-non-gps-space-vehicles-flow",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "gpsna"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 12 vehicles without GPS in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
+@pytest.mark.asyncio
+async def test_total_count_non_gps_space_vehicles_fallback_flow():
+    user_query = "Give me the total count of non gps vehicles in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"uniqueVehicleCount": 12}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-non-gps-space-vehicles-fallback-flow",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "gpsna"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 12 vehicles without GPS in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
 
 

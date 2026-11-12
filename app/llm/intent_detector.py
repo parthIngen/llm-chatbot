@@ -285,9 +285,7 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
 
     # Do not intercept vehicle unique/distinct count queries, transporter queries,
     # or Network vs Local / route breakdown queries.
-    if bool(re.search(r'\b(?:unique|distinct|how\s+many)\s+vehicles?\b', msg_l)):
-        return None
-    if bool(re.search(r'\bvehicles?\b', msg_l) and re.search(r'\b(?:count|number)\b', msg_l) and re.search(r'\bno\s+gps\b', msg_l)):
+    if bool(re.search(r'\bvehicles?\b', msg_l)):
         return None
     if bool(re.search(r'\btransporters?\b', msg_l)):
         return None
@@ -423,7 +421,12 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
     has_fixed_elock = (bool(re.search(r'\bfixed[\s-]e?locks?\b|\bfixed[\s-]locks?\b', msg_l)) or (bool(re.search(r'\be?locks?\b', msg_l)) and not has_portable)) and not has_portable
     has_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps|fixed\s+device)\b', msg_l)) and not has_portable and not has_fixed_elock
 
-    is_na = bool(re.search(r'\b(?:na|not\s+available|notavailable)\b', msg_l) or re.search(r'\b(?:no|without)\s+gps\b', msg_l))
+    is_na = bool(
+        re.search(r'\b(?:na|not\s+available|notavailable)\b', msg_l)
+        or re.search(r'\b(?:no|without)\s+gps\b', msg_l)
+        or re.search(r'\bnon[\s\-_]*gps\b', msg_l)
+        or re.search(r'\bnon\s+gps\b', msg_l)
+    )
     is_inactive = bool(re.search(r'\b(?:inactive|no\s+connectivity|connectivity)\b', msg_l))
     is_active = bool(re.search(r'\bactive\b', msg_l)) and not bool(re.search(r'\bactive\s+trips?\b', msg_l))
     is_only_or_single = bool(re.search(r'\b(?:single|only|sole|alone)\b', msg_l))
@@ -909,7 +912,8 @@ class IntentDetector:
                     or re.search(r'\bgps\s+not\s+available\b', msg_lower)
                     or re.search(r'\bgps\s+absent\b', msg_lower)
                     or re.search(r'\blacking\s+gps\b', msg_lower)
-                    or re.search(r'\bnon[\s-]?gps\b', msg_lower)
+                    or re.search(r'\bnon[\s\-_]*gps\b', msg_lower)
+                    or re.search(r'\bnon\s+gps\b', msg_lower)
                 )
                 and re.search(r'\bvehicles?\b', msg_lower)
             )
@@ -1257,7 +1261,8 @@ class IntentDetector:
                     or re.search(r'\bgps\s+not\s+available\b', msg_lower)
                     or re.search(r'\bgps\s+absent\b', msg_lower)
                     or re.search(r'\blacking\s+gps\b', msg_lower)
-                    or re.search(r'\bnon[\s-]?gps\b', msg_lower)
+                    or re.search(r'\bnon[\s\-_]*gps\b', msg_lower)
+                    or re.search(r'\bnon\s+gps\b', msg_lower)
                 )
                 and re.search(r'\bvehicles?\b', msg_lower)
             )
@@ -2211,7 +2216,8 @@ class IntentDetector:
                     or re.search(r'\bgps\s+not\s+available\b', msg_lower)
                     or re.search(r'\bgps\s+absent\b', msg_lower)
                     or re.search(r'\blacking\s+gps\b', msg_lower)
-                    or re.search(r'\bnon[\s-]?gps\b', msg_lower)
+                    or re.search(r'\bnon[\s\-_]*gps\b', msg_lower)
+                    or re.search(r'\bnon\s+gps\b', msg_lower)
                 )
                 and re.search(r'\bvehicles?\b', msg_lower)
             )
@@ -2482,7 +2488,8 @@ class IntentDetector:
                     or re.search(r'\bgps\s+not\s+available\b', msg_lower)
                     or re.search(r'\bgps\s+absent\b', msg_lower)
                     or re.search(r'\blacking\s+gps\b', msg_lower)
-                    or re.search(r'\bnon[\s-]?gps\b', msg_lower)
+                    or re.search(r'\bnon[\s\-_]*gps\b', msg_lower)
+                    or re.search(r'\bnon\s+gps\b', msg_lower)
                 )
                 and re.search(r'\bvehicles?\b', msg_lower)
             )

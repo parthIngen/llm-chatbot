@@ -154,7 +154,7 @@ CRITICAL RULES:
    - "intracity trips" -> routeCategory eq "intracity"
    - "intercity trips" -> routeCategory eq "intercity"
    - IMPORTANT: routeCategory MUST NEVER be added unless the user's query explicitly contains the word "intracity" or "intercity". Do NOT infer or default routeCategory for any other query.
-    - VEHICLES WITHOUT GPS: When the query counts vehicles lacking GPS or uses phrases like "no GPS", "without GPS", "had no GPS" with vehicles (e.g. "How many vehicles had no GPS in Aug 2026?", "vehicles without GPS in August", "no gps vehicle"):
+    - VEHICLES WITHOUT GPS: When the query counts vehicles lacking GPS or uses phrases like "no GPS", "without GPS", "had no GPS", "Non-GPS" with vehicles (e.g. "Give me the total count of Non-GPS vehicles in Aug 2026", "How many vehicles had no GPS in Aug 2026?", "vehicles without GPS in August", "no gps vehicle"):
          * Include top-level: "analytics": [{"type": "gpsna"}]
          * Do NOT add a "GPS" filter in "filters" (do NOT use field "GPS" or value "nogps").
          * Include filter: field: "tripStatus", operator: "eq", value: "valid"
@@ -461,6 +461,10 @@ Reference Examples:
 - "List all distinct vehicles used in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "How many vehicles had no GPS in Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "Give me the total count of Non-GPS vehicles in Aug 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "Give me the total count of non gps vehicles in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
