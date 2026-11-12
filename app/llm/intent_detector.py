@@ -229,6 +229,15 @@ def detect_shipment_methods(text: str) -> list[str]:
 
     # Sort methods by appearance index in original text
     methods.sort(key=lambda x: x[1])
+
+    # If both empty and feeder are detected, normalize to capitalized ['Empty', 'Feeder']
+    method_names_lower = [name.lower() for name, _ in methods]
+    if 'empty' in method_names_lower and 'feeder' in method_names_lower:
+        methods = [
+            ('Empty' if name.lower() == 'empty' else ('Feeder' if name.lower() == 'feeder' else name), pos)
+            for name, pos in methods
+        ]
+
     return [name for name, _ in methods]
 
 def detect_shipment_method(msg_lower: str) -> str | None:
@@ -1935,7 +1944,7 @@ class IntentDetector:
 
             # --- ShipmentMethod Post-Processing ---
             # Full list of recognized shipmentMethod values.
-            if detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and not _is_across_trip_types and not bool(detect_device_analytics(message)):
+            if detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and not _is_across_trip_types:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -1952,6 +1961,8 @@ class IntentDetector:
                         "operator": "eq",
                         "value": detected_sms[0]
                     })
+                if detect_device_analytics(message):
+                    query_payload["filters"].sort(key=_device_analytics_sort_key)
             elif _is_across_trip_types:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -3277,7 +3288,7 @@ class IntentDetector:
             fb_sms = detect_shipment_methods(message)
             if fb_is_across_trip_types:
                 fb_sms = [sm for sm in fb_sms if sm != 'network']
-            if fb_sms and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and not fb_is_across_trip_types and not bool(detect_device_analytics(message)):
+            if fb_sms and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and not fb_is_across_trip_types:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -3290,6 +3301,8 @@ class IntentDetector:
                     fallback_payload["filters"].append(
                         {"field": "shipmentMethod", "operator": "eq", "value": fb_sms[0]}
                     )
+                if detect_device_analytics(message):
+                    fallback_payload["filters"].sort(key=_fb_device_analytics_sort_key)
             elif fb_is_across_trip_types:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]

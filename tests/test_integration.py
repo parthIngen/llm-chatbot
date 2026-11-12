@@ -2382,12 +2382,17 @@ async def test_gps_trip_counts_empty_feeder_flow():
     llm_payload_response = json.dumps({
         "entity": "trip",
         "operation": "count",
+        "analytics": [
+            {
+                "type": "gps"
+            }
+        ],
         "filters": [
             {"field": "groupId", "operator": "eq", "value": "0041"},
-            {"field": "GPS", "operator": "eq", "value": "existing"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
             {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
             {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-            {"field": "shipmentMethod", "operator": "eq", "value": "empty"}
+            {"field": "shipmentMethod", "operator": "in", "value": ["Empty", "Feeder"]}
         ],
         "select": []
     })
@@ -2415,6 +2420,11 @@ async def test_gps_trip_counts_empty_feeder_flow():
         expected_entities = {
             "entity": "trip",
             "operation": "count",
+            "analytics": [
+                {
+                    "type": "gps"
+                }
+            ],
             "filters": [
                 {
                     "field": "groupId",
@@ -2422,9 +2432,9 @@ async def test_gps_trip_counts_empty_feeder_flow():
                     "value": "0041"
                 },
                 {
-                    "field": "GPS",
+                    "field": "tripStatus",
                     "operator": "eq",
-                    "value": "existing"
+                    "value": "valid"
                 },
                 {
                     "field": "runDate",
@@ -2438,8 +2448,72 @@ async def test_gps_trip_counts_empty_feeder_flow():
                 },
                 {
                     "field": "shipmentMethod",
+                    "operator": "in",
+                    "value": ["Empty", "Feeder"]
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_gps_trip_counts_empty_feeder_fallback_flow():
+    user_query = "Show GPS trip counts for Empty feeder routes in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Groq failure")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-gps-empty-feeder-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "gps"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "groupId",
                     "operator": "eq",
-                    "value": "empty"
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "shipmentMethod",
+                    "operator": "in",
+                    "value": ["Empty", "Feeder"]
                 }
             ],
             "select": []

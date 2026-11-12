@@ -206,9 +206,10 @@ CRITICAL RULES:
          * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
     - GPS TRIPS: When query asks about trips WITH GPS / "GPS trips" / "GPS trip counts" (positive sense, e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026"):
          NOTE: SKIP this rule if the query contains "no GPS", "no any GPS", "non-GPS", "without GPS", "had no GPS" -- use NO GPS rules above.
-         * field: "GPS", operator: "eq", value: "existing"
+         * analytics: [{"type": "gps"}]
          * Do NOT add FixedELock or PortableELock filters unless they are explicitly mentioned.
          * Default tripStatus to "valid" unless a specific tripStatus is requested or cancelled trips are included.
+         * For "Empty feeder routes", shipmentMethod operator is "in" and value is ["Empty", "Feeder"].
    - DEVICES TOGETHER: When the query asks about trips using devices together (e.g. "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?"):
        * GPS / Fixed GPS -> field: "GPS", operator: "eq", value: "existing"
        * Fixed E-Lock -> field: "FixedELock", operator: "eq", value: "existing"
@@ -466,7 +467,7 @@ Reference Examples:
 - "What was the active device count for Fixed E-Lock trips on Intercity routes in Aug 2026?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "active"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "Show GPS trip counts for Empty feeder routes in Aug 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "shipmentMethod", "operator": "eq", "value": "empty"}], "select": []}
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "shipmentMethod", "operator": "in", "value": ["Empty", "Feeder"]}], "select": []}
 - "Show total number of unique transporters used in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["Transporter"], "metrics": [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]}
 - "What is the count of unique transporters recorded in Aug 2026?" ->
