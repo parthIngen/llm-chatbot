@@ -48,6 +48,20 @@ _SPECIFIC_DATE_PAT2 = re.compile(
     re.IGNORECASE,
 )
 
+_DAY_RANGE_THEN_MONTH_PAT = re.compile(
+    r'\b(?P<day1>\d{1,2})(?:st|nd|rd|th)?\s*(?:to|–|—|-|until|through|\band\b)\s*'
+    r'(?P<day2>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+'
+    r'(?P<month>' + _MONTHS_STR + r')(?:[\s,]+(?P<year>20\d{2}))?\b',
+    re.IGNORECASE,
+)
+
+_MONTH_THEN_DAY_RANGE_PAT = re.compile(
+    r'\b(?P<month>' + _MONTHS_STR + r')\s+'
+    r'(?P<day1>\d{1,2})(?:st|nd|rd|th)?\s*(?:to|–|—|-|until|through|\band\b)\s*'
+    r'(?P<day2>\d{1,2})(?:st|nd|rd|th)?(?:[\s,]+(?P<year>20\d{2}))?\b',
+    re.IGNORECASE,
+)
+
 _DMY_DATE_PAT = re.compile(
     r'\b(?P<day>\d{1,2})[-/.](?P<month>\d{1,2})[-/.](?P<year>\d{4})(?:\s+(?P<time>\d{2}:\d{2}:\d{2}))?\b'
 )
@@ -63,7 +77,14 @@ def _resolve_month_range(text: str, reference_now: datetime.datetime) -> tuple[s
     Otherwise the most-recently-passed occurrence of that month relative to
     *reference_now* is used (so 'august' in September 2026 → August 2026).
     """
-    if _SPECIFIC_DATE_PAT1.search(text) or _SPECIFIC_DATE_PAT2.search(text) or _DMY_DATE_PAT.search(text) or _YMD_DATE_PAT.search(text):
+    if (
+        _SPECIFIC_DATE_PAT1.search(text)
+        or _SPECIFIC_DATE_PAT2.search(text)
+        or _DAY_RANGE_THEN_MONTH_PAT.search(text)
+        or _MONTH_THEN_DAY_RANGE_PAT.search(text)
+        or _DMY_DATE_PAT.search(text)
+        or _YMD_DATE_PAT.search(text)
+    ):
         return None, None
 
     m = _MONTH_PATTERN.search(text)
@@ -90,8 +111,14 @@ def _resolve_month_range(text: str, reference_now: datetime.datetime) -> tuple[s
     return start, end
 
 def extract_date_range(text: str, reference_now: datetime.datetime | None = None) -> tuple[str | None, str | None]:
-    ref_year = reference_now.year if reference_now else datetime.datetime.now().year
+    now_dt = reference_now or datetime.datetime.now()
+    ref_year = now_dt.year
+
+    text_year_match = re.search(r'\b(20\d{2})\b', text)
+    explicit_text_year = int(text_year_match.group(1)) if text_year_match else None
+
     dates: list[tuple[int, str, str | None]] = []
+    masked_text = text
 
     # 1. YMD format (e.g. 2026-08-05, 2026/08/05)
     for m in _YMD_DATE_PAT.finditer(text):
@@ -100,6 +127,7 @@ def extract_date_range(text: str, reference_now: datetime.datetime | None = None
         try:
             dt = datetime.date(y, mo, d)
             dates.append((m.start(), dt.strftime("%Y-%m-%d"), t))
+            masked_text = masked_text[:m.start()] + ' ' * (m.end() - m.start()) + masked_text[m.end():]
         except ValueError:
             pass
 
@@ -112,36 +140,119 @@ def extract_date_range(text: str, reference_now: datetime.datetime | None = None
         try:
             dt = datetime.date(y, mo_val, d_val)
             dates.append((m.start(), dt.strftime("%Y-%m-%d"), t))
+            masked_text = masked_text[:m.start()] + ' ' * (m.end() - m.start()) + masked_text[m.end():]
         except ValueError:
             pass
 
-    # 3. Natural language specific day patterns (e.g. 'Aug 1, 2026')
-    for m in _SPECIFIC_DATE_PAT1.finditer(text):
+    # 3. Day range then month (e.g. '6 to 10 July 2026', '6-10 July 2026', '6th to 10th July 2026')
+    for m in _DAY_RANGE_THEN_MONTH_PAT.finditer(masked_text):
+        m_name = m.group("month").lower()
+        m_num = _MONTH_MAP.get(m_name)
+        if not m_num:
+            continue
+        day1 = int(m.group("day1"))
+        day2 = int(m.group("day2"))
+        year_str = m.group("year")
+        if year_str:
+            year = int(year_str)
+        elif explicit_text_year:
+            year = explicit_text_year
+        else:
+            year = ref_year
+            if m_num > now_dt.month:
+                year -= 1
+        try:
+            last_day = calendar.monthrange(year, m_num)[1]
+            d1 = max(1, min(day1, last_day))
+            d2 = max(1, min(day2, last_day))
+            if d1 > d2:
+                d1, d2 = d2, d1
+            dt1 = datetime.date(year, m_num, d1)
+            dt2 = datetime.date(year, m_num, d2)
+            dates.append((m.start(), dt1.strftime("%Y-%m-%d"), None))
+            dates.append((m.start() + 1, dt2.strftime("%Y-%m-%d"), None))
+            masked_text = masked_text[:m.start()] + ' ' * (m.end() - m.start()) + masked_text[m.end():]
+        except ValueError:
+            pass
+
+    # 4. Month then day range (e.g. 'July 6 to 10 2026', 'July 6 - 10, 2026', 'July 6th to 10th')
+    for m in _MONTH_THEN_DAY_RANGE_PAT.finditer(masked_text):
+        m_name = m.group("month").lower()
+        m_num = _MONTH_MAP.get(m_name)
+        if not m_num:
+            continue
+        day1 = int(m.group("day1"))
+        day2 = int(m.group("day2"))
+        year_str = m.group("year")
+        if year_str:
+            year = int(year_str)
+        elif explicit_text_year:
+            year = explicit_text_year
+        else:
+            year = ref_year
+            if m_num > now_dt.month:
+                year -= 1
+        try:
+            last_day = calendar.monthrange(year, m_num)[1]
+            d1 = max(1, min(day1, last_day))
+            d2 = max(1, min(day2, last_day))
+            if d1 > d2:
+                d1, d2 = d2, d1
+            dt1 = datetime.date(year, m_num, d1)
+            dt2 = datetime.date(year, m_num, d2)
+            dates.append((m.start(), dt1.strftime("%Y-%m-%d"), None))
+            dates.append((m.start() + 1, dt2.strftime("%Y-%m-%d"), None))
+            masked_text = masked_text[:m.start()] + ' ' * (m.end() - m.start()) + masked_text[m.end():]
+        except ValueError:
+            pass
+
+    # 5. Natural language specific day patterns (e.g. 'Aug 1, 2026')
+    for m in _SPECIFIC_DATE_PAT1.finditer(masked_text):
         m_name = m.group("month").lower()
         m_num = _MONTH_MAP.get(m_name)
         if not m_num:
             continue
         day = int(m.group("day"))
         year_str = m.group("year")
-        year = int(year_str) if year_str else ref_year
+        if year_str:
+            year = int(year_str)
+        elif explicit_text_year:
+            year = explicit_text_year
+        else:
+            year = ref_year
+            if m_num > now_dt.month:
+                year -= 1
         try:
-            dt = datetime.date(year, m_num, day)
+            last_day = calendar.monthrange(year, m_num)[1]
+            d = max(1, min(day, last_day))
+            dt = datetime.date(year, m_num, d)
             dates.append((m.start(), dt.strftime("%Y-%m-%d"), None))
+            masked_text = masked_text[:m.start()] + ' ' * (m.end() - m.start()) + masked_text[m.end():]
         except ValueError:
             pass
 
-    # 4. Natural language specific day patterns (e.g. '1st August 2026')
-    for m in _SPECIFIC_DATE_PAT2.finditer(text):
+    # 6. Natural language specific day patterns (e.g. '1st August 2026')
+    for m in _SPECIFIC_DATE_PAT2.finditer(masked_text):
         m_name = m.group("month").lower()
         m_num = _MONTH_MAP.get(m_name)
         if not m_num:
             continue
         day = int(m.group("day"))
         year_str = m.group("year")
-        year = int(year_str) if year_str else ref_year
+        if year_str:
+            year = int(year_str)
+        elif explicit_text_year:
+            year = explicit_text_year
+        else:
+            year = ref_year
+            if m_num > now_dt.month:
+                year -= 1
         try:
-            dt = datetime.date(year, m_num, day)
+            last_day = calendar.monthrange(year, m_num)[1]
+            d = max(1, min(day, last_day))
+            dt = datetime.date(year, m_num, d)
             dates.append((m.start(), dt.strftime("%Y-%m-%d"), None))
+            masked_text = masked_text[:m.start()] + ' ' * (m.end() - m.start()) + masked_text[m.end():]
         except ValueError:
             pass
 
@@ -150,6 +261,9 @@ def extract_date_range(text: str, reference_now: datetime.datetime | None = None
     if len(dates) >= 2:
         start_d, start_t = dates[0][1], dates[0][2]
         end_d, end_t = dates[-1][1], dates[-1][2]
+        if start_d > end_d:
+            start_d, end_d = end_d, start_d
+            start_t, end_t = end_t, start_t
         start_str = f"{start_d} {start_t}" if start_t else f"{start_d} 00:00:00"
         end_str = f"{end_d} {end_t}" if end_t else f"{end_d} 23:59:59"
         return start_str, end_str
@@ -160,6 +274,8 @@ def extract_date_range(text: str, reference_now: datetime.datetime | None = None
         return start_str, end_str
 
     return None, None
+
+extract_date_range_from_message = extract_date_range
 
 def detect_shipment_methods(text: str) -> list[str]:
     """Detect and normalize all shipment method names present in text, returned in order of appearance.
@@ -316,6 +432,26 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
             "device_filters": []
         }
 
+    # Check for withgps (Fixed GPS, Fixed E-Lock, and Portable E-Lock together):
+    # e.g. "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together Aug 2026?"
+    is_devices_together = bool(re.search(r'\btogether\b', msg_l))
+    has_gps_mention_together = bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l))
+    has_fixed_elock_mention_together = bool(re.search(r'\bfixed[\s-]e?locks?\b|\bfixed[\s-]locks?\b', msg_l))
+    has_portable_mention_together = bool(re.search(r'\bportab?le[\s-]e?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\b', msg_l))
+
+    if is_devices_together and (
+        (has_gps_mention_together and has_fixed_elock_mention_together and has_portable_mention_together)
+        or re.search(r'\b(?:all\s+)?devices?\s+together\b', msg_l)
+    ):
+        return {
+            "analytics_type": "withgps",
+            "device_filters": [
+                {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
+                {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
+                {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}
+            ]
+        }
+
     # Check for withoutorgps combinations:
     # Patterns: having X and Y (only) but not Z / with not X but having Y and Z
     has_combo_marker = bool(
@@ -424,6 +560,9 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                         {"field": "fixed-elock-status", "operator": "eq", "value": "na"}
                     ]
                 }
+
+    if is_devices_together:
+        return None
 
     # Single device categories
     has_portable = bool(re.search(r'\bportab?le[\s-]e?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\s+gps\b|\bportab?le\b', msg_l))
@@ -1802,11 +1941,13 @@ class IntentDetector:
                     if not (isinstance(f, dict) and f.get("field") in [
                         "GPS", "FixedGPS", "FixedELock", "PortableELock",
                         "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "fixed-gps-status", "fixed-elock-status", "portable-elock-status",
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
+                query_payload["select"] = []
                 if _is_include_cancelled:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
@@ -1828,33 +1969,51 @@ class IntentDetector:
                             "value": target_status
                         })
 
-                if _has_together_gps:
-                    query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
-                if has_fixed_elock:
-                    query_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
-                if has_portable_elock:
-                    query_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
+                if _has_together_gps and has_fixed_elock and has_portable_elock:
+                    query_payload["analytics"] = [{"type": "withgps"}]
+                    query_payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
+                else:
+                    if _has_together_gps:
+                        query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
+                    if has_fixed_elock:
+                        query_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
+                    if has_portable_elock:
+                        query_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
 
                 def _filter_sort_key(flt):
                     if not isinstance(flt, dict):
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "runDate" and op == "gte":
+                    if field == "groupId":
                         return 1
-                    elif field == "runDate" and op == "lte":
+                    elif field == "tripStatus":
                         return 2
-                    elif field == "groupId":
+                    elif field == "runDate" and op == "gte":
                         return 3
-                    elif field == "GPS":
+                    elif field == "runDate" and op == "lte":
                         return 4
-                    elif field == "FixedELock":
+                    elif field in ("fixed-gps-status", "GPS"):
                         return 5
-                    elif field == "PortableELock":
+                    elif field in ("portable-elock-status", "PortableELock"):
                         return 6
+                    elif field in ("fixed-elock-status", "FixedELock"):
+                        return 7
                     return 10
 
                 query_payload["filters"].sort(key=_filter_sort_key)
+                reordered = {}
+                key_order = ["entity", "operation", "analytics", "filters", "select"]
+                for k in key_order:
+                    if k in query_payload:
+                        reordered[k] = query_payload[k]
+                for k, v in query_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                query_payload.clear()
+                query_payload.update(reordered)
             elif has_fixed_elock and has_portable_elock:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -3213,11 +3372,13 @@ class IntentDetector:
                     if not (isinstance(f, dict) and f.get("field") in [
                         "GPS", "FixedGPS", "FixedELock", "PortableELock",
                         "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "fixed-gps-status", "fixed-elock-status", "portable-elock-status",
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
+                fallback_payload["select"] = []
                 if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
@@ -3239,33 +3400,51 @@ class IntentDetector:
                             "value": target_status
                         })
 
-                if fb_has_together_gps:
-                    fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
-                if fb_has_fixed_elock:
-                    fallback_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
-                if fb_has_portable_elock:
-                    fallback_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
+                if fb_has_together_gps and fb_has_fixed_elock and fb_has_portable_elock:
+                    fallback_payload["analytics"] = [{"type": "withgps"}]
+                    fallback_payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
+                else:
+                    if fb_has_together_gps:
+                        fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
+                    if fb_has_fixed_elock:
+                        fallback_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
+                    if fb_has_portable_elock:
+                        fallback_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
 
                 def _fb_filter_sort_key(flt):
                     if not isinstance(flt, dict):
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "runDate" and op == "gte":
+                    if field == "groupId":
                         return 1
-                    elif field == "runDate" and op == "lte":
+                    elif field == "tripStatus":
                         return 2
-                    elif field == "groupId":
+                    elif field == "runDate" and op == "gte":
                         return 3
-                    elif field == "GPS":
+                    elif field == "runDate" and op == "lte":
                         return 4
-                    elif field == "FixedELock":
+                    elif field in ("fixed-gps-status", "GPS"):
                         return 5
-                    elif field == "PortableELock":
+                    elif field in ("portable-elock-status", "PortableELock"):
                         return 6
+                    elif field in ("fixed-elock-status", "FixedELock"):
+                        return 7
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_filter_sort_key)
+                reordered = {}
+                key_order = ["entity", "operation", "analytics", "filters", "select"]
+                for k in key_order:
+                    if k in fallback_payload:
+                        reordered[k] = fallback_payload[k]
+                for k, v in fallback_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                fallback_payload.clear()
+                fallback_payload.update(reordered)
             elif fb_has_fixed_elock and fb_has_portable_elock:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]

@@ -8,7 +8,7 @@ The output JSON MUST follow this format exactly:
   "operation": "count",
   "analytics": [
     {
-      "type": "departureDelayed" | "arrivalDelayed" | "gps" | "gpsna" | "gpsonly" | "fixedgpsonly" | "fixedlock" | "fixedlockna" | "fixedlockonly" | "fixedelockonly" | "portablelock" | "portablelockna" | "portablelockonly" | "portableelockonly" | "withoutanygps" | "withoutorgps"
+      "type": "departureDelayed" | "arrivalDelayed" | "gps" | "gpsna" | "gpsonly" | "fixedgpsonly" | "fixedlock" | "fixedlockna" | "fixedlockonly" | "fixedelockonly" | "portablelock" | "portablelockna" | "portablelockonly" | "portableelockonly" | "withoutanygps" | "withoutorgps" | "withgps"
     }
   ],
   "filters": [
@@ -29,7 +29,7 @@ The output JSON MUST follow this format exactly:
   "select": []
 }
 
-Note: "analytics" is optional. Include it when the query asks about device analytics (gps, gpsna, gpsonly, fixedgpsonly, fixedlock, fixedlockna, fixedlockonly, fixedelockonly, portablelock, portablelockna, portablelockonly, portableelockonly, withoutanygps, withoutorgps) or delayed departures/arrivals. Do NOT add unnecessary filters when an analytics type already captures the criteria.
+Note: "analytics" is optional. Include it when the query asks about device analytics (gps, gpsna, gpsonly, fixedgpsonly, fixedlock, fixedlockna, fixedlockonly, fixedelockonly, portablelock, portablelockna, portablelockonly, portableelockonly, withoutanygps, withoutorgps, withgps) or delayed departures/arrivals. Do NOT add unnecessary filters when an analytics type already captures the criteria.
 Note: "groupBy" and "metrics" are optional. Include them for device-combo queries, transporter/unique-vehicle count queries, or trip type comparison queries (such as Network vs Local trip counts).
 
 FIELD REFERENCE (use these exact API field names and allowed values):
@@ -101,7 +101,7 @@ CRITICAL RULES:
    - "<Region> region" -> region eq "<Region>" (e.g. "East region" -> region: "East")
    - "West and South region" -> region in ["West", "South"]
    - "ICICI device trips", "Secutrak devices", "all Secutrak devices", "Secutrak vendor" -> vendor eq "Secutrak"
-   - "report for Secutrak devices", "report for all Secutrak devices", "Secutrak device report", "Generate the <Month> report for all Secutrak devices" -> tripStatus eq "valid", vendor eq "Secutrak"
+   - "report for Secutrak devices", "report for all Secutrak devices", "Secutrak device report", "Generate the <Month> report for all Secutrak devices", "Generate the <Date Range> report for all Secutrak devices" -> tripStatus eq "valid", vendor eq "Secutrak"
    - "3rd-party device trips" or "portable device trips" or "portable lock device trips" -> portableelock eq ""
    - "Fixed E-Lock device trips" or "fixed lock device trips" or "elock device trips" -> fixedelock eq ""
    - "Fixed GPS inactive/nogps/gpsInactive/NA" -> FixedGPS eq "inactive"/"nogps"/"gpsInactive"/"NA"
@@ -211,10 +211,12 @@ CRITICAL RULES:
          * Do NOT add FixedELock or PortableELock filters unless they are explicitly mentioned.
          * Default tripStatus to "valid" unless a specific tripStatus is requested or cancelled trips are included.
          * For "Empty feeder routes", shipmentMethod operator is "in" and value is ["Empty", "Feeder"].
-   - DEVICES TOGETHER: When the query asks about trips using devices together (e.g. "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?"):
-       * GPS / Fixed GPS -> field: "GPS", operator: "eq", value: "existing"
-       * Fixed E-Lock -> field: "FixedELock", operator: "eq", value: "existing"
-       * Portable E-Lock -> field: "PortableELock", operator: "eq", value: "existing"
+   - DEVICES TOGETHER: When the query asks about trips using devices together (e.g. "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together Aug 2026?"):
+       * analytics: [{"type": "withgps"}]
+       * Fixed GPS -> field: "fixed-gps-status", operator: "eq", value: "existing"
+       * Portable E-Lock -> field: "portable-elock-status", operator: "eq", value: "existing"
+       * Fixed E-Lock -> field: "fixed-elock-status", operator: "eq", value: "existing"
+       * select: []
        * Do NOT include groupBy or metrics for "together" queries.
        * Include tripStatus eq "valid" unless a specific status is mentioned or cancelled trips are included.
    - SINGLE DEVICE TRIPS (ONLY when "only" or "single device" is explicitly mentioned):
@@ -268,6 +270,7 @@ CRITICAL RULES:
    - 'August 1, 2026', 'Aug 1, 2026', '1 Aug 2026', or '2026-08-01' -> single specific day: runDate gte '2026-08-01 00:00:00', runDate lte '2026-08-01 23:59:59' (do NOT expand to the whole month)
    - 'January 2026' -> runDate gte '2026-01-01 00:00:00', runDate lte '2026-01-31 23:59:59'
    - 'from 2026-01-01 to 2026-01-31' -> runDate gte '2026-01-01 00:00:00', runDate lte '2026-01-31 23:59:59'
+   - '6 to 10 July 2026', '6-10 July 2026', or 'July 6 to 10 2026' -> day range in a month: runDate gte '2026-07-06 00:00:00', runDate lte '2026-07-10 23:59:59'
    - 'today' -> runDate gte 'TODAY_START', runDate lte 'TODAY_END'
    - 'yesterday' -> runDate gte 'YESTERDAY_START', runDate lte 'YESTERDAY_END'
    - 'last week' -> runDate gte 'LAST_WEEK_START', runDate lte 'LAST_WEEK_END'
@@ -374,6 +377,7 @@ CRITICAL RULES:
       - "Trip with Only with Active single Portbale Elock in <period>" -> analytics: [{"type": "portableelockonly"}], filter: PortableELock eq "active", select: []
 
    D. MISCELLANEOUS (Combinations & Without Any Device):
+      - "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together Aug 2026?" or "Trip using Fixed GPS, Fixed E-Lock, and Portable E-Lock together in <period>" -> analytics: [{"type": "withgps"}], filters: fixed-gps-status eq "existing", portable-elock-status eq "existing", fixed-elock-status eq "existing", select: []
       - "Trip without any Device or GPS and Fixed Elock and Portable Elock in <period>" -> analytics: [{"type": "withoutanygps"}], select: []
       - "Trip with not Fixed Elock but having GPS and Portable Elock only in <period>" -> analytics: [{"type": "withoutorgps"}], filters: fixed-gps-status eq "existing", portable-elock-status eq "existing", fixed-elock-status eq "na", select: []
       - "Trip with not Portable Elock but having GPS and Fixed Elock only in <period>" -> analytics: [{"type": "withoutorgps"}], filters: fixed-gps-status eq "existing", fixed-elock-status eq "existing", portable-elock-status eq "na", select: []
@@ -391,6 +395,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "region", "operator": "eq", "value": "North"}], "select": []}
 - "Generate the July 2026 report for all Secutrak devices" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "runDate", "operator": "gte", "value": "2026-07-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-07-31 23:59:59"}], "select": []}
+- "Generate the 6 to 10 July 2026 report for all Secutrak devices" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "runDate", "operator": "gte", "value": "2026-07-06 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-07-10 23:59:59"}], "select": []}
 - "how many active trips of Delivery with pick & delivery" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "shipmentMethod", "operator": "in", "value": ["Delivery", "Pick Up and Delivery"]}], "select": []}
 - "Get the daily report for 05-08-2026" ->
@@ -457,8 +463,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "delivery"}], "select": []}
 - "Count total unique vehicles and distinct transporters for April 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-04-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-04-30 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}], "groupBy": ["Transporter"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}], "select": []}
-- "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together in august ?" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "existing"}, {"field": "PortableELock", "operator": "eq", "value": "existing"}], "select": []}
+- "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fixed-gps-status", "operator": "eq", "value": "existing"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}], "select": []}
 - "Count Intercity trips that used Fixed GPS only in Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "na"}, {"field": "PortableELock", "operator": "eq", "value": "na"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "How many valid Trips had Fixed GPS as the single device in Aug 2026?" ->

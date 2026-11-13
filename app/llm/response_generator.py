@@ -275,6 +275,8 @@ def build_natural_response(
         device_qualifiers.append("without any device")
     elif filter_map.get("withoutorgps"):
         device_qualifiers.append("matching device combination")
+    elif filter_map.get("withgps"):
+        device_qualifiers.append("using Fixed GPS, Fixed E-Lock, and Portable E-Lock together")
     elif filter_map.get("gpsonly"):
         device_qualifiers.append("with single Fixed GPS only")
     elif filter_map.get("fixedgpsonly"):
@@ -533,6 +535,8 @@ class ResponseGenerator:
                     prefix = "Portable E-Lock device counts"
             elif "withoutanygps" in analytics_types or re.search(r'\bwithout\s+any\s+device\b', msg_l):
                 prefix = "Trips without any device counts"
+            elif "withgps" in analytics_types or (re.search(r'\btogether\b', msg_l) and "fixed" in msg_l and "portable" in msg_l):
+                prefix = "Trips using Fixed GPS, Fixed E-Lock, and Portable E-Lock together counts"
             else:
                 prefix = "Trip counts"
 
