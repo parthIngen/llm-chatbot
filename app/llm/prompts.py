@@ -199,12 +199,14 @@ CRITICAL RULES:
         - Do NOT include select.
         - Do NOT include groupBy or metrics (as this query specifies a single trip type, not across both).
         - Filter order: groupId first, then GPS, then runDate gte, then runDate lte, then routeCategory
-    - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS / NO ANY GPS: When the query asks about trips without GPS or "No Any GPS" (e.g. "Count total trips listed under No Any GPS device in Aug 2026", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
-         * For "No Any GPS" / "No Any GPS device" queries: field: "GPS", operator: "eq", value: "nogps "
-         * For other non-GPS queries: field: "GPS", operator: "eq", value: "nogps"  -- use "nogps" NOT "existing"
-         * Do NOT include groupBy or metrics unless explicitly requested.
+    - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS / NO ANY GPS: When the query asks about trips without GPS or "No Any GPS" (e.g. "Count total trips listed under No Any GPS device in Aug 2026", "Show total count of trips without any GPS devices attached in Aug 2026", "Show total count of trips without any GPS devices attached", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
+         * Include top-level: "analytics": [{"type": "gpsna"}]
+         * Do NOT add a "GPS" filter in "filters" (do NOT use field "GPS" or value "nogps" or "nogps ").
          * Default tripStatus to "valid" unless a specific tripStatus is requested or cancelled trips are included.
+         * Do NOT include groupBy or metrics unless explicitly requested.
+         * Include select: []
          * Do NOT add FixedELock or PortableELock filters unless explicitly mentioned.
+         * Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte
     - GPS TRIPS: When query asks about trips WITH GPS / "GPS trips" / "GPS trip counts" (positive sense, e.g. "Show GPS trip counts for Empty feeder routes in Aug 2026"):
          NOTE: SKIP this rule if the query contains "no GPS", "no any GPS", "non-GPS", "without GPS", "had no GPS" -- use NO GPS rules above.
          * analytics: [{"type": "gps"}]
@@ -494,9 +496,11 @@ Reference Examples:
 - "Show total Intercity trips running exclusively on Fixed GPS" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "select": []}
 - "Count total trips listed under No Any GPS device in Aug 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps "}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "Show total count of trips without any GPS devices attached in Aug 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
 - "Show total count of trips without any GPS devices attached" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "nogps "}], "select": []}
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}], "select": []}
 - "What is the total unique vehicle count for the Fixed GPS + Fixed E-Lock combination Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "existing"}, {"field": "GPS", "operator": "eq", "value": "existing"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "How many unique Intercity vehicles were equipped with Portable E-Locks In Aug 2026" ->

@@ -422,10 +422,10 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
 
     # Check for withoutanygps:
     # "Trip without any Device or GPS and Fixed Elock and Portable Elock August 2026", "without any device", "trips without any device"
-    if bool(
+    if not re.search(r'\b(?:no|without)\s+(?:any\s+)?gps\b', msg_l) and bool(
         re.search(r'\bwithout\s+any\s+(?:device|gps\s+and\s+fixed\s+e?lock\s+and\s+portable\s+e?lock)\b', msg_l)
-        or re.search(r'\bwithout\s+(?:any\s+)?devices?\b', msg_l)
-        or re.search(r'\bno\s+(?:any\s+)?devices?\b', msg_l)
+        or (re.search(r'\bwithout\s+(?:any\s+)?devices?\b', msg_l) and not re.search(r'\bgps\b', msg_l))
+        or (re.search(r'\bno\s+(?:any\s+)?devices?\b', msg_l) and not re.search(r'\bgps\b', msg_l))
     ):
         return {
             "analytics_type": "withoutanygps",
@@ -571,9 +571,11 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
 
     is_na = bool(
         re.search(r'\b(?:na|not\s+available|notavailable)\b', msg_l)
-        or re.search(r'\b(?:no|without)\s+gps\b', msg_l)
+        or re.search(r'\b(?:no|without)\s+(?:any\s+)?gps\b', msg_l)
+        or re.search(r'\bhad\s+no\s+(?:any\s+)?gps\b', msg_l)
         or re.search(r'\bnon[\s\-_]*gps\b', msg_l)
         or re.search(r'\bnon\s+gps\b', msg_l)
+        or re.search(r'\bnogps\b', msg_l)
     )
     is_inactive = bool(re.search(r'\b(?:inactive|no\s+connectivity|connectivity)\b', msg_l))
     is_active = bool(re.search(r'\bactive\b', msg_l)) and not bool(re.search(r'\bactive\s+trips?\b', msg_l))

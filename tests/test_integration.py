@@ -3306,6 +3306,11 @@ async def test_no_any_gps_device_aug_2026_flow():
         expected_entities = {
             "entity": "trip",
             "operation": "count",
+            "analytics": [
+                {
+                    "type": "gpsna"
+                }
+            ],
             "filters": [
                 {
                     "field": "groupId",
@@ -3313,9 +3318,68 @@ async def test_no_any_gps_device_aug_2026_flow():
                     "value": "0041"
                 },
                 {
-                    "field": "GPS",
+                    "field": "tripStatus",
                     "operator": "eq",
-                    "value": "nogps "
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_trips_without_any_gps_devices_attached_aug_2026_flow():
+    user_query = "Show total count of trips without any GPS devices attached in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Groq 413 Payload Too Large")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 41943}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-without-any-gps-devices-aug-2026",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "gpsna"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
                 },
                 {
                     "field": "runDate",
@@ -3360,6 +3424,11 @@ async def test_trips_without_any_gps_devices_attached_flow():
         expected_entities = {
             "entity": "trip",
             "operation": "count",
+            "analytics": [
+                {
+                    "type": "gpsna"
+                }
+            ],
             "filters": [
                 {
                     "field": "groupId",
@@ -3367,9 +3436,9 @@ async def test_trips_without_any_gps_devices_attached_flow():
                     "value": "0041"
                 },
                 {
-                    "field": "GPS",
+                    "field": "tripStatus",
                     "operator": "eq",
-                    "value": "nogps "
+                    "value": "valid"
                 }
             ],
             "select": []
