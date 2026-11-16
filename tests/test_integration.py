@@ -6800,6 +6800,225 @@ async def test_is_this_included_cancel_trips_without_history_flow():
     assert response.json()["reply"] == "yes"
 
 
+@pytest.mark.asyncio
+async def test_multi_turn_download_north_region_date_clarification_flow():
+    # Turn 1: Download all trips for the North region. (no date range)
+    user_query_1 = "Download all trips for the North region."
+
+    llm_payload_response_1 = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "region",
+                "operator": "eq",
+                "value": "North"
+            }
+        ],
+        "select": []
+    })
+
+    llm_payload_response_2 = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-11-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-11-30 23:59:59"
+            },
+            {
+                "field": "region",
+                "operator": "eq",
+                "value": "North"
+            }
+        ],
+        "select": []
+    })
+
+    llm_natural_response = "Total 81031 valid trips found in the North region in date range from 2026-11-01 00:00:00 to 2026-11-30 23:59:59. It does not include cancelled trips."
+
+    api_response_data = {
+        "success": True,
+        "data": 81031
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+
+        mock_generate.side_effect = [llm_payload_response_1, llm_payload_response_2, llm_natural_response]
+
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        # --- TURN 1 ---
+        payload_1 = {
+            "message": user_query_1,
+            "history": [],
+            "session_id": "test-session-north-region-clarification",
+            "AccessToken": "mock-token"
+        }
+
+        response_1 = client.post("/api/v1/chat", json=payload_1)
+        assert response_1.status_code == 200
+        data_1 = response_1.json()
+        assert data_1["reply"] == "Please provide the date range (start date and end date) for the trips."
+        assert data_1["intent"] == "trip_report"
+        mock_post.assert_not_called()
+
+        # --- TURN 2 ---
+        history = [
+            {"role": "user", "content": user_query_1},
+            {"role": "assistant", "content": data_1["reply"]}
+        ]
+
+        payload_2 = {
+            "message": "of nov",
+            "history": history,
+            "session_id": "test-session-north-region-clarification",
+            "AccessToken": "mock-token"
+        }
+
+        response_2 = client.post("/api/v1/chat", json=payload_2)
+        assert response_2.status_code == 200
+        data_2 = response_2.json()
+
+        entities_2 = data_2["entities"]
+        assert entities_2["entity"] == "trip"
+        assert entities_2["operation"] == "count"
+
+        filters_2 = entities_2["filters"]
+        filter_fields = [f.get("field") for f in filters_2]
+
+        assert "groupId" in filter_fields
+        assert "tripStatus" in filter_fields
+        assert "runDate" in filter_fields
+        assert "region" in filter_fields
+
+        region_filter = [f for f in filters_2 if f.get("field") == "region"][0]
+        assert region_filter["operator"] == "eq"
+        assert region_filter["value"] == "North"
+
+        run_date_filters = [f for f in filters_2 if f.get("field") == "runDate"]
+        assert len(run_date_filters) == 2
+        start_flt = [f for f in run_date_filters if f.get("operator") == "gte"][0]
+        end_flt = [f for f in run_date_filters if f.get("operator") == "lte"][0]
+        assert "2026-11-01" in start_flt["value"]
+        assert "2026-11-30" in end_flt["value"]
+
+        # Verify correct payload forwarded to API
+        mock_post.assert_called_once()
+        called_args, called_kwargs = mock_post.call_args
+        assert called_kwargs["json"] == entities_2
+
+
+@pytest.mark.asyncio
+async def test_multi_turn_download_north_region_fallback_flow():
+    # Turn 1: Download all trips for the North region (LLM generates exception -> fallback triggers)
+    user_query_1 = "Download all trips for the North region."
+
+    llm_natural_response = "Total 81031 valid trips found in the North region in date range from 2026-11-01 00:00:00 to 2026-11-30 23:59:59. It does not include cancelled trips."
+
+    api_response_data = {
+        "success": True,
+        "data": 81031
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+
+        # Turn 1 intent LLM raises Exception (triggers fallback_payload)
+        # Turn 2 intent LLM raises Exception (triggers fallback_payload)
+        # Turn 2 response LLM returns natural response
+        mock_generate.side_effect = [Exception("Groq rate limit"), Exception("Groq rate limit"), llm_natural_response]
+
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        # --- TURN 1 ---
+        payload_1 = {
+            "message": user_query_1,
+            "history": [],
+            "session_id": "test-session-north-region-fallback",
+            "AccessToken": "mock-token"
+        }
+
+        response_1 = client.post("/api/v1/chat", json=payload_1)
+        assert response_1.status_code == 200
+        data_1 = response_1.json()
+        assert data_1["reply"] == "Please provide the date range (start date and end date) for the trips."
+        assert data_1["intent"] == "trip_report"
+
+        # Verify fallback in Turn 1 retained region North
+        entities_1 = data_1["entities"]
+        filters_1 = entities_1["filters"]
+        region_filters_1 = [f for f in filters_1 if f.get("field") == "region"]
+        assert len(region_filters_1) == 1
+        assert region_filters_1[0]["value"] == "North"
+
+        # --- TURN 2 ---
+        history = [
+            {"role": "user", "content": user_query_1},
+            {"role": "assistant", "content": data_1["reply"]}
+        ]
+
+        payload_2 = {
+            "message": "of nov",
+            "history": history,
+            "session_id": "test-session-north-region-fallback",
+            "AccessToken": "mock-token"
+        }
+
+        response_2 = client.post("/api/v1/chat", json=payload_2)
+        assert response_2.status_code == 200
+        data_2 = response_2.json()
+
+        entities_2 = data_2["entities"]
+        assert entities_2["entity"] == "trip"
+        assert entities_2["operation"] == "count"
+
+        filters_2 = entities_2["filters"]
+        expected_fields = ["groupId", "tripStatus", "runDate", "runDate", "region"]
+        actual_fields = [f.get("field") for f in filters_2]
+        assert actual_fields == expected_fields
+
+        # Check values
+        assert filters_2[0] == {"field": "groupId", "operator": "eq", "value": "0041"}
+        assert filters_2[1] == {"field": "tripStatus", "operator": "eq", "value": "valid"}
+        assert filters_2[2]["field"] == "runDate"
+        assert filters_2[2]["operator"] == "gte"
+        assert "2026-11-01 00:00:00" in filters_2[2]["value"]
+        assert filters_2[3]["field"] == "runDate"
+        assert filters_2[3]["operator"] == "lte"
+        assert "2026-11-30 23:59:59" in filters_2[3]["value"]
+        assert filters_2[4] == {"field": "region", "operator": "eq", "value": "North"}
+
+
+
 
 
 

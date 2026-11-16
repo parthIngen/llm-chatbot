@@ -397,6 +397,63 @@ def extract_specific_transporter(text: str) -> str | None:
             return candidate
     return None
 
+def detect_regions(text: str) -> list[str]:
+    """
+    Detects and normalizes geographic regions mentioned in the text.
+    Canonical values: "North", "South", "East", "West", "Central",
+    "North East", "North West", "South East", "South West".
+    """
+    text_lower = text.lower()
+
+    # Check if there is explicit region/zone mention or directional preposition with region
+    has_region_word = bool(re.search(r'\b(?:regions?|zones?)\b', text_lower))
+    has_directional_prep = bool(re.search(
+        r'\b(?:in|for|of|across)\s+(?:the\s+)?(north|south|east|west|central|north[\s-]?east|north[\s-]?west|south[\s-]?east|south[\s-]?west)\b',
+        text_lower
+    ))
+
+    if not (has_region_word or has_directional_prep):
+        return []
+
+    found_regions: list[tuple[str, int]] = []
+    masked = text_lower
+
+    # 1. Match compound directions first
+    compound_patterns = [
+        ("North East", r'\b(?:north[\s-]?east|northeast)\b'),
+        ("North West", r'\b(?:north[\s-]?west|northwest)\b'),
+        ("South East", r'\b(?:south[\s-]?east|southeast)\b'),
+        ("South West", r'\b(?:south[\s-]?west|southwest)\b'),
+    ]
+    for canon, pat in compound_patterns:
+        for m in re.finditer(pat, masked):
+            found_regions.append((canon, m.start()))
+            masked = masked[:m.start()] + ' ' * (m.end() - m.start()) + masked[m.end():]
+
+    # 2. Match cardinal directions
+    cardinal_patterns = [
+        ("North", r'\bnorth\b'),
+        ("South", r'\bsouth\b'),
+        ("East", r'\beast\b'),
+        ("West", r'\bwest\b'),
+        ("Central", r'\bcentral\b'),
+    ]
+    for canon, pat in cardinal_patterns:
+        for m in re.finditer(pat, masked):
+            found_regions.append((canon, m.start()))
+            masked = masked[:m.start()] + ' ' * (m.end() - m.start()) + masked[m.end():]
+
+    found_regions.sort(key=lambda x: x[1])
+
+    seen = set()
+    result = []
+    for r, _ in found_regions:
+        if r not in seen:
+            seen.add(r)
+            result.append(r)
+
+    return result
+
 def is_included_cancel_trips_query(message: str) -> bool:
     """Checks if the user is asking whether cancelled trips are included."""
     clean_msg = message.strip().lower()
@@ -749,6 +806,7 @@ class IntentDetector:
         _DATE_CLARIFICATION_MARKER = "please provide the date range (start date and end date)"
         is_follow_up = False
         prev_user_msg = None
+        prev_filters = []
         if history and len(history) >= 2:
             last_assistant_msg = history[-1]
             if (
@@ -761,8 +819,25 @@ class IntentDetector:
                         is_follow_up = True
                         break
 
+        if is_follow_up and history:
+            for item in reversed(history):
+                payload = (
+                    item.get("query_payload")
+                    or item.get("entities")
+                    or getattr(item, "query_payload", None)
+                    or getattr(item, "entities", None)
+                )
+                if isinstance(payload, dict) and isinstance(payload.get("filters"), list):
+                    prev_filters = payload.get("filters")
+                    break
+                flts = item.get("filters") or getattr(item, "filters", None)
+                if isinstance(flts, list) and flts:
+                    prev_filters = flts
+                    break
+
         if is_follow_up and prev_user_msg:
-            message = f"{prev_user_msg} for date range {message}"
+            cleaned_prev = prev_user_msg.rstrip(". ")
+            message = f"{cleaned_prev} for date range {message}"
 
         # --- Date-Refinement Follow-Up Detection ---
         # Handle cases like "i want for july" / "for last month" / "july 2026" sent
@@ -1216,6 +1291,68 @@ class IntentDetector:
                         "field": transporter_field_name,
                         "operator": "eq",
                         "value": specific_transporter
+                    })
+
+            # --- Region Extraction & Normalization ---
+            detected_regions = detect_regions(message)
+            if not detected_regions and prev_filters:
+                for pf in prev_filters:
+                    if isinstance(pf, dict) and pf.get("field") == "region":
+                        pv = pf.get("value")
+                        if isinstance(pv, list):
+                            detected_regions = pv
+                        elif isinstance(pv, str) and pv:
+                            detected_regions = [pv]
+                        break
+
+            # Remove invalid/temporal values that might have been mistakenly assigned to region
+            _INVALID_REGION_VALUES = {
+                "today", "yesterday", "tomorrow", "last week", "last month", "this month",
+                "january", "february", "march", "april", "may", "june", "july", "august",
+                "september", "october", "november", "december", "jan", "feb", "mar", "apr",
+                "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"
+            }
+            query_payload["filters"] = [
+                f for f in query_payload.get("filters", [])
+                if not (
+                    isinstance(f, dict)
+                    and f.get("field") == "region"
+                    and (
+                        str(f.get("value", "")).lower() in _INVALID_REGION_VALUES
+                        or bool(re.search(r'\d', str(f.get("value", ""))))
+                    )
+                )
+            ]
+
+            has_region_flt = False
+            for f in query_payload.get("filters", []):
+                if isinstance(f, dict) and f.get("field") == "region":
+                    has_region_flt = True
+                    if detected_regions:
+                        if len(detected_regions) > 1:
+                            f["operator"] = "in"
+                            f["value"] = detected_regions
+                        else:
+                            f["operator"] = "eq"
+                            f["value"] = detected_regions[0]
+                    else:
+                        val = f.get("value")
+                        if isinstance(val, str) and val.capitalize() in ["North", "South", "East", "West", "Central", "North East", "North West", "South East", "South West"]:
+                            f["value"] = val.capitalize()
+                    break
+
+            if not has_region_flt and detected_regions:
+                if len(detected_regions) > 1:
+                    query_payload.setdefault("filters", []).append({
+                        "field": "region",
+                        "operator": "in",
+                        "value": detected_regions
+                    })
+                else:
+                    query_payload.setdefault("filters", []).append({
+                        "field": "region",
+                        "operator": "eq",
+                        "value": detected_regions[0]
                     })
 
             is_vendor_running_query = bool(
@@ -2737,6 +2874,35 @@ class IntentDetector:
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
 
+            if detected_regions or any(isinstance(f, dict) and f.get("field") == "region" for f in query_payload.get("filters", [])):
+                def _region_filter_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "tripStatus":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "region":
+                        return 5
+                    elif field in ("transporter", "Transporter"):
+                        return 6
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                        return 7
+                    elif field == "shipmentMethod":
+                        return 8
+                    elif field in ("routeCategory", "routeType", "tripType"):
+                        return 9
+                    return 20
+
+                if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
+                    query_payload["filters"].sort(key=_region_filter_sort_key)
+
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
                 if k in query_payload:
@@ -2867,6 +3033,45 @@ class IntentDetector:
                         "field": transporter_field_name,
                         "operator": "eq",
                         "value": fb_specific_transporter
+                    })
+
+            # --- Region Fallback Extraction ---
+            fb_detected_regions = detect_regions(message)
+            if not fb_detected_regions and prev_filters:
+                for pf in prev_filters:
+                    if isinstance(pf, dict) and pf.get("field") == "region":
+                        pv = pf.get("value")
+                        if isinstance(pv, list):
+                            fb_detected_regions = pv
+                        elif isinstance(pv, str) and pv:
+                            fb_detected_regions = [pv]
+                        break
+
+            has_fb_region_flt = False
+            for f in fallback_payload.get("filters", []):
+                if isinstance(f, dict) and f.get("field") == "region":
+                    has_fb_region_flt = True
+                    if fb_detected_regions:
+                        if len(fb_detected_regions) > 1:
+                            f["operator"] = "in"
+                            f["value"] = fb_detected_regions
+                        else:
+                            f["operator"] = "eq"
+                            f["value"] = fb_detected_regions[0]
+                    break
+
+            if not has_fb_region_flt and fb_detected_regions:
+                if len(fb_detected_regions) > 1:
+                    fallback_payload.setdefault("filters", []).append({
+                        "field": "region",
+                        "operator": "in",
+                        "value": fb_detected_regions
+                    })
+                else:
+                    fallback_payload.setdefault("filters", []).append({
+                        "field": "region",
+                        "operator": "eq",
+                        "value": fb_detected_regions[0]
                     })
 
             if has_status_keyword and status_override:
@@ -4368,6 +4573,35 @@ class IntentDetector:
                 fallback_payload.pop("select", None)
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
+
+            if fb_detected_regions or any(isinstance(f, dict) and f.get("field") == "region" for f in fallback_payload.get("filters", [])):
+                def _fb_region_filter_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "tripStatus":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "region":
+                        return 5
+                    elif field in ("transporter", "Transporter"):
+                        return 6
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                        return 7
+                    elif field == "shipmentMethod":
+                        return 8
+                    elif field in ("routeCategory", "routeType", "tripType"):
+                        return 9
+                    return 20
+
+                if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
+                    fallback_payload["filters"].sort(key=_fb_region_filter_sort_key)
 
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
