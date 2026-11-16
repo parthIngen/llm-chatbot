@@ -397,6 +397,53 @@ def extract_specific_transporter(text: str) -> str | None:
             return candidate
     return None
 
+def is_included_cancel_trips_query(message: str) -> bool:
+    """Checks if the user is asking whether cancelled trips are included."""
+    clean_msg = message.strip().lower()
+    if bool(re.search(r'\b(?:show|count|list|download|export|generate|fetch|get|give|display)\b', clean_msg)):
+        return False
+        
+    patterns = [
+        r'^(?:is|are|does|did|was|were)?\s*(?:this|it|these)?\s*(?:included|includes|including|include)\s+(?:any\s+)?(?:cancelled|canceled|cancel)\s+trips?[?.]*$',
+        r'^(?:is|are|does|did|was|were)\s+(?:any\s+)?(?:cancelled|canceled|cancel)\s+trips?\s+(?:included|include)[?.]*$',
+        r'^(?:is|are|does|did|was|were)?\s*(?:this|it)?\s*(?:included|includes|including|include)\s+(?:any\s+)?(?:cancelled|canceled|cancel)[?.]*$',
+        r'^(?:cancelled|canceled|cancel)\s+trips?\s+(?:included|part\s+of\s+(?:this|it))[?.]*$',
+        r'^(?:are|is|was|were)\s+(?:cancelled|canceled|cancel)\s+(?:trips?\s+)?included[?.]*$',
+    ]
+    return any(re.search(p, clean_msg) for p in patterns)
+
+def check_has_valid_trip_status_filter(filters: Any) -> bool:
+    """Returns True if filters contain {'field': 'tripStatus', 'operator': 'eq', 'value': 'valid'}."""
+    if not isinstance(filters, list):
+        return False
+    for f in filters:
+        if isinstance(f, dict):
+            field = f.get("field")
+            op = f.get("operator")
+            val = str(f.get("value", "")).strip().lower()
+            if field == "tripStatus" and op == "eq" and val == "valid":
+                return True
+    return False
+
+def check_history_has_valid_status(history: list) -> Optional[bool]:
+    """Inspects history items for existing payload or filters with tripStatus == valid."""
+    for item in reversed(history):
+        item_dict = item.model_dump() if hasattr(item, "model_dump") else (item if isinstance(item, dict) else {})
+        payload = (
+            item_dict.get("query_payload")
+            or item_dict.get("entities")
+            or getattr(item, "query_payload", None)
+            or getattr(item, "entities", None)
+        )
+        if isinstance(payload, dict):
+            flts = payload.get("filters")
+            if isinstance(flts, list) and len(flts) > 0:
+                return check_has_valid_trip_status_filter(flts)
+        flts = item_dict.get("filters") or getattr(item, "filters", None)
+        if isinstance(flts, list) and len(flts) > 0:
+            return check_has_valid_trip_status_filter(flts)
+    return None
+
 def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
     """
     Detects Device/GPS Related Analytics queries (BASIC Question availability/na/inactive/active/only)
@@ -665,6 +712,34 @@ class IntentDetector:
         """
         # Restrict history to at most 3 past messages for concise context
         history = history[-3:] if history else []
+
+        if is_included_cancel_trips_query(message):
+            has_valid = check_history_has_valid_status(history)
+            if has_valid is None:
+                prev_user_msg = None
+                for h in reversed(history):
+                    role = h.get("role") if isinstance(h, dict) else getattr(h, "role", None)
+                    content = h.get("content") if isinstance(h, dict) else getattr(h, "content", None)
+                    if role == "user" and content and not is_included_cancel_trips_query(content):
+                        prev_user_msg = content
+                        break
+                if prev_user_msg:
+                    try:
+                        prev_res = await self.detect(prev_user_msg, [], session_id)
+                        prev_filters = prev_res.get("entities", {}).get("filters", [])
+                        has_valid = check_has_valid_trip_status_filter(prev_filters)
+                    except Exception:
+                        has_valid = False
+                else:
+                    has_valid = False
+
+            return {
+                "intent": "cancel_trips_check",
+                "entities": {
+                    "has_valid_trip_status": has_valid,
+                    "reply": "no" if has_valid else "yes"
+                }
+            }
 
         # Check if this is a follow-up answer to a date range clarification request.
         # IMPORTANT: match ONLY the specific clarification question the bot asks when

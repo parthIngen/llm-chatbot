@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from app.schemas.request import ChatMessageRequest
 from app.schemas.response import ChatMessageResponse
-from app.llm.intent_detector import IntentDetector, IntentDetectorError
+from app.llm.intent_detector import (
+    IntentDetector,
+    IntentDetectorError,
+    is_included_cancel_trips_query,
+    check_has_valid_trip_status_filter,
+    check_history_has_valid_status,
+)
 from app.llm.response_generator import ResponseGenerator
 from app.tools.router import ToolRouter, UnsupportedIntentError
 from app.services.excel_service import generate_trips_excel, EXPORTS_DIR
@@ -97,6 +103,41 @@ async def chat_endpoint(
                 reply=reply,
                 intent="greeting",
                 entities={},
+                data=None,
+                download_url=None,
+                query_payload=None
+            )
+
+        # Check if message asks whether cancelled trips were included
+        if is_included_cancel_trips_query(request.message):
+            has_valid = check_history_has_valid_status(request.history)
+            if has_valid is None:
+                prev_user_msg = None
+                for h in reversed(request.history):
+                    role = getattr(h, "role", None) or (h.get("role") if isinstance(h, dict) else None)
+                    content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else None)
+                    if role == "user" and content and not is_included_cancel_trips_query(content):
+                        prev_user_msg = content
+                        break
+                if prev_user_msg:
+                    try:
+                        prev_extraction = await intent_detector.detect(
+                            message=prev_user_msg,
+                            history=[],
+                            session_id=session_id
+                        )
+                        prev_filters = prev_extraction.get("entities", {}).get("filters", [])
+                        has_valid = check_has_valid_trip_status_filter(prev_filters)
+                    except Exception:
+                        has_valid = False
+                else:
+                    has_valid = False
+
+            reply = "no" if has_valid else "yes"
+            return ChatMessageResponse(
+                reply=reply,
+                intent="cancel_trips_check",
+                entities={"has_valid_trip_status": has_valid, "reply": reply},
                 data=None,
                 download_url=None,
                 query_payload=None

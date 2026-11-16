@@ -6678,6 +6678,129 @@ async def test_intracity_trips_fixed_elock_plus_portable_elock_combo_aug_2026_fa
         assert entities == expected_entities
 
 
+@pytest.mark.asyncio
+async def test_is_this_included_cancel_trips_when_previous_has_valid_status_flow():
+    # Multi-turn conversation:
+    # Turn 1: query produces tripStatus: "valid"
+    # Turn 2: "Is this included cancel trips" -> reply should be "no"
+    user_query_1 = "Show Intracity trip count for vehicles using both Fixed E-Lock and Portable E-Lock Aug 2026"
+    user_query_2 = "Is this included cancel trips"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [Exception("Fallback"), "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": 19}
+        mock_post.return_value = mock_api_res
+
+        # Turn 1
+        payload_1 = {
+            "message": user_query_1,
+            "history": [],
+            "session_id": "test-session-included-cancel-trips",
+            "AccessToken": "mock-token"
+        }
+        response_1 = client.post("/api/v1/chat", json=payload_1)
+        assert response_1.status_code == 200
+        data_1 = response_1.json()
+
+        # Turn 2
+        history = [
+            {"role": "user", "content": user_query_1},
+            {"role": "assistant", "content": data_1["reply"]}
+        ]
+        payload_2 = {
+            "message": user_query_2,
+            "history": history,
+            "session_id": "test-session-included-cancel-trips",
+            "AccessToken": "mock-token"
+        }
+        response_2 = client.post("/api/v1/chat", json=payload_2)
+        assert response_2.status_code == 200
+        data_2 = response_2.json()
+        assert data_2["reply"] == "no"
+
+
+@pytest.mark.asyncio
+async def test_is_this_included_cancel_trips_when_previous_has_explicit_valid_filter_flow():
+    user_query = "Is this included cancel trips"
+    history = [
+        {
+            "role": "user",
+            "content": "show count",
+            "query_payload": {
+                "filters": [
+                    {"field": "tripStatus", "operator": "eq", "value": "valid"}
+                ]
+            }
+        },
+        {
+            "role": "assistant",
+            "content": "Total 10 trips found."
+        }
+    ]
+
+    payload = {
+        "message": user_query,
+        "history": history,
+        "session_id": "test-session-included-cancel-trips-explicit",
+        "AccessToken": "mock-token"
+    }
+    response = client.post("/api/v1/chat", json=payload)
+    assert response.status_code == 200
+    assert response.json()["reply"] == "no"
+
+
+@pytest.mark.asyncio
+async def test_is_this_included_cancel_trips_when_previous_does_not_have_valid_status_flow():
+    # Previous query includes running trips (not valid status filter) -> reply should be "yes"
+    user_query = "Is this included cancel trips"
+    history = [
+        {
+            "role": "user",
+            "content": "show count",
+            "query_payload": {
+                "filters": [
+                    {"field": "tripStatus", "operator": "eq", "value": "running"}
+                ]
+            }
+        },
+        {
+            "role": "assistant",
+            "content": "Total 5 trips found."
+        }
+    ]
+
+    payload = {
+        "message": user_query,
+        "history": history,
+        "session_id": "test-session-included-cancel-trips-running",
+        "AccessToken": "mock-token"
+    }
+    response = client.post("/api/v1/chat", json=payload)
+    assert response.status_code == 200
+    assert response.json()["reply"] == "yes"
+
+
+@pytest.mark.asyncio
+async def test_is_this_included_cancel_trips_without_history_flow():
+    # No history -> reply should be "yes"
+    user_query = "Is this included cancel trips"
+
+    payload = {
+        "message": user_query,
+        "history": [],
+        "session_id": "test-session-included-cancel-trips-nohistory",
+        "AccessToken": "mock-token"
+    }
+    response = client.post("/api/v1/chat", json=payload)
+    assert response.status_code == 200
+    assert response.json()["reply"] == "yes"
+
+
+
 
 
 

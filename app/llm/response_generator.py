@@ -395,6 +395,9 @@ class ResponseGenerator:
         """
         Generates a natural language response based on user message and API results.
         """
+        if entities and "reply" in entities:
+            return entities["reply"]
+
         total_trips = 0
         api_data = None
         
