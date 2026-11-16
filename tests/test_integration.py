@@ -7080,6 +7080,73 @@ async def test_multi_turn_download_north_region_fallback_flow():
         assert filters_2[4] == {"field": "region", "operator": "eq", "value": "North"}
 
 
+@pytest.mark.asyncio
+async def test_route_trips_this_month_multi_turn_flow():
+    # Turn 1: user asks "how all trips for route ABL"
+    # Bot asks for date range
+    # Turn 2: user says "this month"
+    # Bot resolves this month date range and keeps Route: "ABL"
+    import datetime
+    import calendar
+    now = datetime.datetime.now()
+    first_day = f"{now.year}-{now.month:02d}-01 00:00:00"
+    last_day_num = calendar.monthrange(now.year, now.month)[1]
+    last_day = f"{now.year}-{now.month:02d}-{last_day_num:02d} 23:59:59"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Fallback")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 120}
+        mock_post.return_value = mock_api_res
+
+        # Turn 1
+        payload_1 = {
+            "message": "how all trips for route ABL",
+            "history": [],
+            "session_id": "test-session-route-abl-this-month",
+            "AccessToken": "mock-token"
+        }
+        response_1 = client.post("/api/v1/chat", json=payload_1)
+        assert response_1.status_code == 200
+        data_1 = response_1.json()
+        assert "Please provide the date range" in data_1["reply"]
+
+        history = [
+            {"role": "user", "content": "how all trips for route ABL"},
+            {"role": "assistant", "content": data_1["reply"], "query_payload": data_1.get("query_payload")}
+        ]
+
+        # Turn 2
+        payload_2 = {
+            "message": "this month",
+            "history": history,
+            "session_id": "test-session-route-abl-this-month",
+            "AccessToken": "mock-token"
+        }
+        response_2 = client.post("/api/v1/chat", json=payload_2)
+        assert response_2.status_code == 200
+        data_2 = response_2.json()
+
+        entities_2 = data_2["entities"]
+        assert entities_2["entity"] == "trip"
+        assert entities_2["operation"] == "count"
+
+        filters_2 = entities_2["filters"]
+        expected_fields = ["groupId", "tripStatus", "runDate", "runDate", "Route"]
+        actual_fields = [f.get("field") for f in filters_2]
+        assert actual_fields == expected_fields
+
+        assert filters_2[0] == {"field": "groupId", "operator": "eq", "value": "0041"}
+        assert filters_2[1] == {"field": "tripStatus", "operator": "eq", "value": "valid"}
+        assert filters_2[2] == {"field": "runDate", "operator": "gte", "value": first_day}
+        assert filters_2[3] == {"field": "runDate", "operator": "lte", "value": last_day}
+        assert filters_2[4] == {"field": "Route", "operator": "eq", "value": "ABL"}
+
+
+
 
 
 

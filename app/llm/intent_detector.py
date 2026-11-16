@@ -454,6 +454,24 @@ def detect_regions(text: str) -> list[str]:
 
     return result
 
+def extract_route_code(text: str) -> str | None:
+    """Extract specific route code or name from query (e.g. 'route ABL', 'route: ABL').
+    Excludes non-route words like 'intercity', 'intracity', 'feeder', 'trips', etc.
+    """
+    _NON_ROUTE_WORDS = {
+        "intercity", "intracity", "network", "local", "feeder", "empty",
+        "delivery", "air", "surface", "speed", "category", "type",
+        "breakdown", "schedule", "trip", "trips", "count", "counts",
+        "report", "reports", "details", "data", "for", "in", "of", "to", "from",
+        "the", "all", "valid", "closed", "running", "active", "cancelled", "canceled"
+    }
+    m = re.search(r'\broute\s*(?:code|name)?[:\s]+([A-Za-z0-9_-]+)\b', text, re.IGNORECASE)
+    if m:
+        candidate = m.group(1).strip()
+        if candidate.lower() not in _NON_ROUTE_WORDS:
+            return candidate
+    return None
+
 def is_included_cancel_trips_query(message: str) -> bool:
     """Checks if the user is asking whether cancelled trips are included."""
     clean_msg = message.strip().lower()
@@ -851,6 +869,7 @@ class IntentDetector:
                 r'|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b',
                 r'\blast\s+(?:week|month|year)\b',
                 r'\bthis\s+(?:week|month|year)\b',
+                r'\bcurrent\s+(?:week|month|year)\b',
                 r'\btoday\b',
                 r'\byesterday\b',
                 r'\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b',
@@ -892,9 +911,30 @@ class IntentDetector:
         yesterday_start = yesterday.strftime("%Y-%m-%d 00:00:00")
         yesterday_end = yesterday.strftime("%Y-%m-%d 23:59:59")
 
+        # Calculate this week (Monday to Sunday of the current week)
+        try:
+            this_week_monday = (now - datetime.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            this_week_sunday = this_week_monday + datetime.timedelta(days=6)
+            this_week_start = this_week_monday.strftime("%Y-%m-%d 00:00:00")
+            this_week_end = this_week_sunday.strftime("%Y-%m-%d 23:59:59")
+        except Exception:
+            this_week_start = (now - datetime.timedelta(days=7)).strftime("%Y-%m-%d 00:00:00")
+            this_week_end = now.strftime("%Y-%m-%d 23:59:59")
+
         # Calculate last week (relative to current date, matching July 9 to July 15 when today is July 23)
         last_week_start = (now - datetime.timedelta(days=14)).strftime("%Y-%m-%d 00:00:00")
         last_week_end = (now - datetime.timedelta(days=8)).strftime("%Y-%m-%d 23:59:59")
+
+        # Calculate this month (current calendar month)
+        try:
+            first_day_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            last_day_num = calendar.monthrange(now.year, now.month)[1]
+            last_day_this_month = now.replace(day=last_day_num, hour=23, minute=59, second=59, microsecond=0)
+            this_month_start = first_day_this_month.strftime("%Y-%m-%d 00:00:00")
+            this_month_end = last_day_this_month.strftime("%Y-%m-%d 23:59:59")
+        except Exception:
+            this_month_start = now.strftime("%Y-%m-01 00:00:00")
+            this_month_end = now.strftime("%Y-%m-28 23:59:59")
         
         # Calculate last month (previous calendar month)
         try:
@@ -914,8 +954,12 @@ class IntentDetector:
             f"- TODAY_END: {today_end}\n"
             f"- YESTERDAY_START: {yesterday_start}\n"
             f"- YESTERDAY_END: {yesterday_end}\n"
+            f"- THIS_WEEK_START: {this_week_start}\n"
+            f"- THIS_WEEK_END: {this_week_end}\n"
             f"- LAST_WEEK_START: {last_week_start}\n"
             f"- LAST_WEEK_END: {last_week_end}\n"
+            f"- THIS_MONTH_START: {this_month_start}\n"
+            f"- THIS_MONTH_END: {this_month_end}\n"
             f"- LAST_MONTH_START: {last_month_start}\n"
             f"- LAST_MONTH_END: {last_month_end}"
         )
@@ -1061,10 +1105,18 @@ class IntentDetector:
                         f["value"] = yesterday_start
                     elif "YESTERDAY_END" in val:
                         f["value"] = yesterday_end
+                    elif "THIS_WEEK_START" in val:
+                        f["value"] = this_week_start
+                    elif "THIS_WEEK_END" in val:
+                        f["value"] = this_week_end
                     elif "LAST_WEEK_START" in val:
                         f["value"] = last_week_start
                     elif "LAST_WEEK_END" in val:
                         f["value"] = last_week_end
+                    elif "THIS_MONTH_START" in val:
+                        f["value"] = this_month_start
+                    elif "THIS_MONTH_END" in val:
+                        f["value"] = this_month_end
                     elif "LAST_MONTH_START" in val:
                         f["value"] = last_month_start
                     elif "LAST_MONTH_END" in val:
@@ -1113,9 +1165,15 @@ class IntentDetector:
                 elif re.search(r'\byesterday\b', msg_lower):
                     query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": yesterday_start})
                     query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": yesterday_end})
+                elif re.search(r'\b(?:this|current)\s+week\b', msg_lower):
+                    query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": this_week_start})
+                    query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": this_week_end})
                 elif re.search(r'\blast\s+week\b', msg_lower):
                     query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": last_week_start})
                     query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": last_week_end})
+                elif re.search(r'\b(?:this|current)\s+month\b', msg_lower):
+                    query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": this_month_start})
+                    query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": this_month_end})
                 elif re.search(r'\blast\s+month\b', msg_lower):
                     query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": last_month_start})
                     query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": last_month_end})
@@ -1140,6 +1198,8 @@ class IntentDetector:
                 "gps": "FixedGPS",
                 "atd": "ATD",
                 "ata": "ATA",
+                "route": "Route",
+                "routename": "Route",
             }
             for f in query_payload["filters"]:
                 if isinstance(f, dict):
@@ -1188,6 +1248,30 @@ class IntentDetector:
                     "operator": "eq",
                     "value": "0041"
                 })
+
+            # Ensure route filter is present if route code detected in message or prev_filters
+            detected_route = extract_route_code(message)
+            if not detected_route and is_follow_up and prev_filters:
+                for pf in prev_filters:
+                    if isinstance(pf, dict) and pf.get("field") in ("Route", "route", "RouteName", "routeName"):
+                        detected_route = pf.get("value")
+                        break
+
+            if detected_route:
+                has_route_flt = False
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ("Route", "route", "RouteName", "routeName"):
+                        f["field"] = "Route"
+                        f["operator"] = "eq"
+                        f["value"] = detected_route
+                        has_route_flt = True
+                        break
+                if not has_route_flt:
+                    query_payload.setdefault("filters", []).append({
+                        "field": "Route",
+                        "operator": "eq",
+                        "value": detected_route
+                    })
                 
             # Determine if a status was requested based on keywords in user message
             msg_lower = message.lower()
@@ -2979,18 +3063,51 @@ class IntentDetector:
                         return 4
                     elif field == "region":
                         return 5
-                    elif field in ("transporter", "Transporter"):
+                    elif field in ("Route", "route", "RouteName", "routeName"):
                         return 6
-                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                    elif field in ("transporter", "Transporter"):
                         return 7
-                    elif field == "shipmentMethod":
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 8
-                    elif field in ("routeCategory", "routeType", "tripType"):
+                    elif field == "shipmentMethod":
                         return 9
+                    elif field in ("routeCategory", "routeType", "tripType"):
+                        return 10
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
                     query_payload["filters"].sort(key=_region_filter_sort_key)
+
+            if detected_route or any(isinstance(f, dict) and f.get("field") in ("Route", "route", "RouteName", "routeName") for f in query_payload.get("filters", [])):
+                def _route_filter_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "tripStatus":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "region":
+                        return 5
+                    elif field in ("Route", "route", "RouteName", "routeName"):
+                        return 6
+                    elif field in ("transporter", "Transporter"):
+                        return 7
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                        return 8
+                    elif field == "shipmentMethod":
+                        return 9
+                    elif field in ("routeCategory", "routeType", "tripType"):
+                        return 10
+                    return 20
+
+                if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
+                    query_payload["filters"].sort(key=_route_filter_sort_key)
 
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
@@ -3163,6 +3280,31 @@ class IntentDetector:
                         "value": fb_detected_regions[0]
                     })
 
+            # --- Route Fallback Extraction ---
+            fb_detected_route = extract_route_code(message)
+            if not fb_detected_route and prev_filters:
+                for pf in prev_filters:
+                    if isinstance(pf, dict) and pf.get("field") in ("Route", "route", "RouteName", "routeName"):
+                        fb_detected_route = pf.get("value")
+                        break
+
+            has_fb_route_flt = False
+            for f in fallback_payload.get("filters", []):
+                if isinstance(f, dict) and f.get("field") in ("Route", "route", "RouteName", "routeName"):
+                    has_fb_route_flt = True
+                    if fb_detected_route:
+                        f["field"] = "Route"
+                        f["operator"] = "eq"
+                        f["value"] = fb_detected_route
+                    break
+
+            if not has_fb_route_flt and fb_detected_route:
+                fallback_payload.setdefault("filters", []).append({
+                    "field": "Route",
+                    "operator": "eq",
+                    "value": fb_detected_route
+                })
+
             if has_status_keyword and status_override:
                 fallback_payload["filters"].append({
                     "field": "tripStatus",
@@ -3322,7 +3464,7 @@ class IntentDetector:
                     })
                     has_status_keyword = True
                     status_override = "running"
-                elif fb_detected_sm and not (bool(extracted_start and extracted_end) or bool(re.search(r'\b(today|yesterday|last\s+week|last\s+month)\b', msg_lower)) or bool(_resolve_month_range(msg_lower, now)[0])):
+                elif fb_detected_sm and not (bool(extracted_start and extracted_end) or bool(re.search(r'\b(today|yesterday|this\s+week|current\s+week|last\s+week|this\s+month|current\s+month|last\s+month)\b', msg_lower)) or bool(_resolve_month_range(msg_lower, now)[0])):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
                         "operator": "eq",
@@ -3359,9 +3501,15 @@ class IntentDetector:
                 elif re.search(r'\byesterday\b', msg_lower):
                     fallback_payload["filters"].append({"field": "runDate", "operator": "gte", "value": yesterday_start})
                     fallback_payload["filters"].append({"field": "runDate", "operator": "lte", "value": yesterday_end})
+                elif re.search(r'\b(?:this|current)\s+week\b', msg_lower):
+                    fallback_payload["filters"].append({"field": "runDate", "operator": "gte", "value": this_week_start})
+                    fallback_payload["filters"].append({"field": "runDate", "operator": "lte", "value": this_week_end})
                 elif re.search(r'\blast\s+week\b', msg_lower):
                     fallback_payload["filters"].append({"field": "runDate", "operator": "gte", "value": last_week_start})
                     fallback_payload["filters"].append({"field": "runDate", "operator": "lte", "value": last_week_end})
+                elif re.search(r'\b(?:this|current)\s+month\b', msg_lower):
+                    fallback_payload["filters"].append({"field": "runDate", "operator": "gte", "value": this_month_start})
+                    fallback_payload["filters"].append({"field": "runDate", "operator": "lte", "value": this_month_end})
                 elif re.search(r'\blast\s+month\b', msg_lower):
                     fallback_payload["filters"].append({"field": "runDate", "operator": "gte", "value": last_month_start})
                     fallback_payload["filters"].append({"field": "runDate", "operator": "lte", "value": last_month_end})
@@ -4705,18 +4853,51 @@ class IntentDetector:
                         return 4
                     elif field == "region":
                         return 5
-                    elif field in ("transporter", "Transporter"):
+                    elif field in ("Route", "route", "RouteName", "routeName"):
                         return 6
-                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                    elif field in ("transporter", "Transporter"):
                         return 7
-                    elif field == "shipmentMethod":
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 8
-                    elif field in ("routeCategory", "routeType", "tripType"):
+                    elif field == "shipmentMethod":
                         return 9
+                    elif field in ("routeCategory", "routeType", "tripType"):
+                        return 10
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
                     fallback_payload["filters"].sort(key=_fb_region_filter_sort_key)
+
+            if fb_detected_route or any(isinstance(f, dict) and f.get("field") in ("Route", "route", "RouteName", "routeName") for f in fallback_payload.get("filters", [])):
+                def _fb_route_filter_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "tripStatus":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "region":
+                        return 5
+                    elif field in ("Route", "route", "RouteName", "routeName"):
+                        return 6
+                    elif field in ("transporter", "Transporter"):
+                        return 7
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                        return 8
+                    elif field == "shipmentMethod":
+                        return 9
+                    elif field in ("routeCategory", "routeType", "tripType"):
+                        return 10
+                    return 20
+
+                if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
+                    fallback_payload["filters"].sort(key=_fb_route_filter_sort_key)
 
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:

@@ -167,7 +167,7 @@ def build_natural_response(
     region = filter_map.get("region")
     vendor = str(filter_map.get("vendor") or filter_map.get("vendorgps") or filter_map.get("vendorfixedelock") or filter_map.get("vendorportableelock", "")).lower()
     vehicle_no = filter_map.get("vehicleNo")
-    route = filter_map.get("Route") or filter_map.get("RouteName")
+    route = filter_map.get("Route") or filter_map.get("RouteName") or filter_map.get("route")
     from_loc = filter_map.get("From")
     to_loc = filter_map.get("To")
     close_remarks = str(filter_map.get("closeRemarks", "")).lower()
