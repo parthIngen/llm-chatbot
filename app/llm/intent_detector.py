@@ -1396,17 +1396,25 @@ class IntentDetector:
                 is_inactive_for_trip = True
                 has_inactive = re.search(r'\binactive\b', msg_lower) is not None
                 if has_inactive:
-                    inactive_field_filters = [
-                        f for f in query_payload.get("filters", [])
-                        if isinstance(f, dict) and f.get("field") in ["FixedGPS", "PortableELock", "FixedELock"] and f.get("value", "").lower() in {"inactive", "nogps", "gpsinactive", "na"}
-                    ]
-                    if inactive_field_filters:
-                        explicit_inactive_trip = (
-                            (re.search(r'\binactive\s+trips?\b', msg_lower) is not None and not re.search(r'\b(?:gps|lock|elock|e-lock|portable|fixed|device)\s+inactive\s+trips?\b', msg_lower)) or
-                            re.search(r'\btrips?\s+(?:status\s+)?is\s+inactive\b', msg_lower) is not None or
-                            re.search(r'\btrips?\s+are\s+inactive\b', msg_lower) is not None
-                        )
-                        if not explicit_inactive_trip:
+                    explicit_inactive_trip = (
+                        (re.search(r'\binactive\s+trips?\b', msg_lower) is not None and not re.search(r'\b(?:gps|fixed[\s-]gps|lock|elock|e-lock|portable|fixed|device)\s+inactive\s+trips?\b', msg_lower)) or
+                        re.search(r'\btrips?\s+(?:status\s+)?is\s+inactive\b', msg_lower) is not None or
+                        re.search(r'\btrips?\s+are\s+inactive\b', msg_lower) is not None
+                    )
+                    has_device_inactive = bool(
+                        re.search(r'\b(?:gps|fixed[\s-]gps|lock|elock|e-lock|portable|fixed|device)\s+inactive\b', msg_lower)
+                        or (detect_device_analytics(message) and any(
+                            f.get("value") == "inactive" for f in (detect_device_analytics(message).get("device_filters") or [])
+                        ))
+                    )
+                    if not explicit_inactive_trip and has_device_inactive:
+                        is_inactive_for_trip = False
+                    else:
+                        inactive_field_filters = [
+                            f for f in query_payload.get("filters", [])
+                            if isinstance(f, dict) and f.get("field") in ["GPS", "FixedGPS", "PortableELock", "FixedELock", "gps", "fixedgps", "fixedelock", "portableelock"] and f.get("value", "").lower() in {"inactive", "nogps", "gpsinactive", "na"}
+                        ]
+                        if inactive_field_filters and not explicit_inactive_trip:
                             inactive_count = len(re.findall(r'\binactive\b', msg_lower))
                             if inactive_count <= len(inactive_field_filters):
                                 is_inactive_for_trip = False
@@ -1865,7 +1873,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -2009,7 +2026,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -2044,7 +2070,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -2077,7 +2112,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -2112,7 +2156,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -2145,7 +2198,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -2176,7 +2238,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -2244,7 +2315,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -2278,7 +2358,16 @@ class IntentDetector:
                         if not (isinstance(f, dict) and f.get("field") == "tripStatus")
                     ]
                 else:
-                    target_status = status_override if status_override is not None else "valid"
+                    explicit_closed_trip = bool(
+                        re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
+                        or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
+                    )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
                     found_status = False
                     for f in query_payload["filters"]:
                         if isinstance(f, dict) and f.get("field") == "tripStatus":
@@ -3153,13 +3242,39 @@ class IntentDetector:
                     has_status_keyword = True
                     status_override = "valid"
                 elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["completed", "finish", "finished", "closed", "inactive"]):
-                    fallback_payload["filters"].append({
-                        "field": "tripStatus",
-                        "operator": "eq",
-                        "value": "closed"
-                    })
-                    has_status_keyword = True
-                    status_override = "closed"
+                    fb_is_inactive_for_trip = True
+                    has_inactive = re.search(r'\binactive\b', msg_lower) is not None
+                    if has_inactive:
+                        explicit_inactive_trip = (
+                            (re.search(r'\binactive\s+trips?\b', msg_lower) is not None and not re.search(r'\b(?:gps|fixed[\s-]gps|lock|elock|e-lock|portable|fixed|device)\s+inactive\s+trips?\b', msg_lower)) or
+                            re.search(r'\btrips?\s+(?:status\s+)?is\s+inactive\b', msg_lower) is not None or
+                            re.search(r'\btrips?\s+are\s+inactive\b', msg_lower) is not None
+                        )
+                        has_device_inactive = bool(
+                            re.search(r'\b(?:gps|fixed[\s-]gps|lock|elock|e-lock|portable|fixed|device)\s+inactive\b', msg_lower)
+                            or (detect_device_analytics(message) and any(
+                                f.get("value") == "inactive" for f in (detect_device_analytics(message).get("device_filters") or [])
+                            ))
+                        )
+                        if not explicit_inactive_trip and has_device_inactive:
+                            fb_is_inactive_for_trip = False
+
+                    if fb_is_inactive_for_trip:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": "closed"
+                        })
+                        has_status_keyword = True
+                        status_override = "closed"
+                    else:
+                        fallback_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": "valid"
+                        })
+                        has_status_keyword = True
+                        status_override = "valid"
                 elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["cancelled", "canceled"]) and not fb_is_non_cancelled:
                     fallback_payload["filters"].append({
                         "field": "tripStatus",

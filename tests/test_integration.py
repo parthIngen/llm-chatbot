@@ -820,12 +820,27 @@ async def test_trip_status_keywords_mapping_flow():
 
 @pytest.mark.asyncio
 async def test_gps_inactive_no_trip_status_flow():
-    # Test that "all GPS inactive trips for January 2026" does NOT trigger tripStatus field since "inactive" should not match "active" word boundary
+    # Test that "all GPS inactive trips for January 2026" triggers tripStatus eq "valid", not "closed"
     user_query = "all GPS inactive trips for January 2026"
     llm_payload_response = json.dumps({
         "entity": "trip",
         "operation": "count",
+        "analytics": [
+            {
+                "type": "gps"
+            }
+        ],
         "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
             {
                 "field": "runDate",
                 "operator": "gte",
@@ -837,7 +852,7 @@ async def test_gps_inactive_no_trip_status_flow():
                 "value": "2026-01-31 23:59:59"
             },
             {
-                "field": "gps",
+                "field": "GPS",
                 "operator": "eq",
                 "value": "inactive"
             }
@@ -864,10 +879,57 @@ async def test_gps_inactive_no_trip_status_flow():
         assert response.status_code == 200
         filters = response.json()["entities"]["filters"]
         
-        # Verify no tripStatus filter is present
+        # Verify tripStatus is valid (not closed)
         fields = [f["field"] for f in filters]
-        assert "tripStatus" not in fields
-        assert "gps" in fields
+        assert "tripStatus" in fields
+        status_val = [f["value"] for f in filters if f["field"] == "tripStatus"][0]
+        assert status_val == "valid"
+        assert "GPS" in fields or "gps" in fields
+
+
+@pytest.mark.asyncio
+async def test_download_all_gps_inactive_trips_january_2026_flow():
+    user_query = "Download all GPS inactive trips for January 2026."
+
+    api_response_data = {
+        "success": True,
+        "data": 120
+    }
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        # Simulate LLM returning payload or triggering fallback
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-gps-inactive-jan",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "gps"}]
+
+        filters = entities["filters"]
+        expected_filters = [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"},
+            {"field": "GPS", "operator": "eq", "value": "inactive"}
+        ]
+        assert filters == expected_filters
+        assert entities["select"] == []
 
 
 @pytest.mark.asyncio
