@@ -408,6 +408,19 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
     """
     msg_l = message.lower()
 
+    # Do not intercept Fixed E-Lock and Portable E-Lock combination queries (handled by dedicated flow)
+    has_fixed_elock_mention_combo = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixed[\s-]e?locks?\b', msg_l))
+    has_portable_mention_combo = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\b', msg_l))
+    has_gps_mention_combo = bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l))
+    if (
+        has_fixed_elock_mention_combo
+        and has_portable_mention_combo
+        and not has_gps_mention_combo
+        and not bool(re.search(r'\b(?:not\s+(?:fixed|portable)|without\s+(?:fixed|portable))\b', msg_l))
+        and not bool(re.search(r'\b(?:only|single|sole)\b', msg_l))
+    ):
+        return None
+
     # Do not intercept vehicle unique/distinct count queries, transporter queries,
     # or Network vs Local / route breakdown queries.
     if bool(re.search(r'\bvehicles?\b', msg_l)):
@@ -1400,6 +1413,13 @@ class IntentDetector:
             _is_devices_together = bool(re.search(r'\btogether\b', msg_lower))
             _is_device_trips = bool(re.search(r'\b(?:device\s+trips?|device\s+data|device\s+report)\b', msg_lower))
             _is_gps_na = bool(re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower))
+            _is_fixed_portable_elock_combo = (
+                has_fixed_elock
+                and has_portable_elock
+                and not has_fixed_gps
+                and not bool(re.search(r'\b(?:gps|withoutorgps|not\s+(?:fixed|portable)|without\s+(?:fixed|portable))\b', msg_lower))
+                and not bool(re.search(r'\b(?:only|single|sole)\b', msg_lower))
+            )
 
             def _get_device_status(msg: str, default: str = "existing") -> str:
                 if re.search(r'\b(?:(?:no|without)\s+any\s+gps|without\s+(?:any\s+)?gps\s+devices?)\b', msg):
@@ -2104,25 +2124,26 @@ class IntentDetector:
                         reordered[k] = v
                 query_payload.clear()
                 query_payload.update(reordered)
-            elif has_fixed_elock and has_portable_elock:
+            elif _is_fixed_portable_elock_combo:
+                query_payload["analytics"] = [{"type": "withgps"}]
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") in ["FixedGPS", "FixedELock", "PortableELock", "fixed-gps status", "gps", "fixedelock", "portableelock"])
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "FixedGPS", "FixedELock", "PortableELock", "GPS", "gps", "fixedgps",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "fixed-gps-status", "fixed-elock-status", "portable-elock-status",
+                        "fixedelock", "portableelock"
+                    ])
                 ]
-                group_by_fields: list = []
                 query_payload["filters"].append(
-                    {"field": "fixed-e-lock status", "operator": "eq", "value": "existing"}
+                    {"field": "portable-elock-status", "operator": "eq", "value": "existing"}
                 )
-                group_by_fields.append("fixed-e-lock status")
                 query_payload["filters"].append(
-                    {"field": "portable-e-lock status", "operator": "eq", "value": "existing"}
+                    {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}
                 )
-                group_by_fields.append("portable-e-lock status")
-
-                query_payload["groupBy"] = group_by_fields
-                query_payload["metrics"] = [
-                    {"field": "shipmentNo", "function": "count", "alias": "trip_count"}
-                ]
+                query_payload.pop("select", None)
+                query_payload.pop("groupBy", None)
+                query_payload.pop("metrics", None)
 
             # --- RouteCategory Post-Processing ---
             # Also handle tripType as a synonym for routeCategory.
@@ -2139,7 +2160,7 @@ class IntentDetector:
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
                 ]
-            elif route_category_value and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and not bool(detect_device_analytics(message)):
+            elif route_category_value and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and (not bool(detect_device_analytics(message)) or _is_fixed_portable_elock_combo):
                 # Remove any routeType, routeCategory, or tripType filter the LLM may have generated
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -2590,6 +2611,33 @@ class IntentDetector:
                 if target_vendor and not _is_devices_together:
                     query_payload["filters"].sort(key=_vendor_sort_key)
 
+            if _is_fixed_portable_elock_combo:
+                def _fixed_portable_combo_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "tripStatus":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "portable-elock-status":
+                        return 5
+                    elif field == "fixed-elock-status":
+                        return 6
+                    elif field in ("routeCategory", "routeType"):
+                        return 7
+                    return 10
+
+                query_payload["filters"].sort(key=_fixed_portable_combo_sort_key)
+                query_payload.pop("select", None)
+                query_payload.pop("groupBy", None)
+                query_payload.pop("metrics", None)
+
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
                 if k in query_payload:
@@ -2915,6 +2963,13 @@ class IntentDetector:
             fb_is_devices_together = bool(re.search(r'\btogether\b', msg_lower))
             fb_is_device_trips = bool(re.search(r'\b(?:device\s+trips?|device\s+data|device\s+report)\b', msg_lower))
             fb_is_gps_na = bool(re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower))
+            fb_is_fixed_portable_elock_combo = (
+                fb_has_fixed_elock
+                and fb_has_portable_elock
+                and not fb_has_fixed_gps
+                and not bool(re.search(r'\b(?:gps|withoutorgps|not\s+(?:fixed|portable)|without\s+(?:fixed|portable))\b', msg_lower))
+                and not bool(re.search(r'\b(?:only|single|sole)\b', msg_lower))
+            )
 
             def _fb_get_device_status(msg: str, default: str = "existing") -> str:
                 if re.search(r'\b(?:(?:no|without)\s+any\s+gps|without\s+(?:any\s+)?gps\s+devices?)\b', msg):
@@ -3617,24 +3672,26 @@ class IntentDetector:
                         reordered[k] = v
                 fallback_payload.clear()
                 fallback_payload.update(reordered)
-            elif fb_has_fixed_elock and fb_has_portable_elock:
+            elif fb_is_fixed_portable_elock_combo:
+                fallback_payload["analytics"] = [{"type": "withgps"}]
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") in ["FixedGPS", "FixedELock", "PortableELock", "fixed-gps status", "gps", "fixedelock", "portableelock"])
+                    if not (isinstance(f, dict) and f.get("field") in [
+                        "FixedGPS", "FixedELock", "PortableELock", "GPS", "gps", "fixedgps",
+                        "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "fixed-gps-status", "fixed-elock-status", "portable-elock-status",
+                        "fixedelock", "portableelock"
+                    ])
                 ]
-                fb_group_by: list = []
                 fallback_payload["filters"].append(
-                    {"field": "fixed-e-lock status", "operator": "eq", "value": "existing"}
+                    {"field": "portable-elock-status", "operator": "eq", "value": "existing"}
                 )
-                fb_group_by.append("fixed-e-lock status")
                 fallback_payload["filters"].append(
-                    {"field": "portable-e-lock status", "operator": "eq", "value": "existing"}
+                    {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}
                 )
-                fb_group_by.append("portable-e-lock status")
-                fallback_payload["groupBy"] = fb_group_by
-                fallback_payload["metrics"] = [
-                    {"field": "shipmentNo", "function": "count", "alias": "trip_count"}
-                ]
+                fallback_payload.pop("select", None)
+                fallback_payload.pop("groupBy", None)
+                fallback_payload.pop("metrics", None)
 
             # Apply the same routeCategory post-processing as the main path
             fb_route_category: str | None = None
@@ -3649,7 +3706,7 @@ class IntentDetector:
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
                 ]
-            elif fb_route_category and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and not bool(detect_device_analytics(message)):
+            elif fb_route_category and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and (not bool(detect_device_analytics(message)) or fb_is_fixed_portable_elock_combo):
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType"])
@@ -4177,6 +4234,33 @@ class IntentDetector:
                 ]
                 if fb_target_vendor and not fb_is_devices_together:
                     fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
+
+            if fb_is_fixed_portable_elock_combo:
+                def _fb_fixed_portable_combo_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "tripStatus":
+                        return 2
+                    elif field == "runDate" and op == "gte":
+                        return 3
+                    elif field == "runDate" and op == "lte":
+                        return 4
+                    elif field == "portable-elock-status":
+                        return 5
+                    elif field == "fixed-elock-status":
+                        return 6
+                    elif field in ("routeCategory", "routeType"):
+                        return 7
+                    return 10
+
+                fallback_payload["filters"].sort(key=_fb_fixed_portable_combo_sort_key)
+                fallback_payload.pop("select", None)
+                fallback_payload.pop("groupBy", None)
+                fallback_payload.pop("metrics", None)
 
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
