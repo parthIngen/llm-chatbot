@@ -2592,6 +2592,402 @@ async def test_secutrak_devices_july_2026_report_flow():
 
 
 @pytest.mark.asyncio
+async def test_ilgic_devices_aug_2026_report_flow():
+    user_query = "show the count Aug 2026 report for all ILGIC devices"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "vendor", "operator": "contains", "value": "Ilgic"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-ilgic-devices-aug",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "vendor",
+                    "operator": "eq",
+                    "value": "Secutrak"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_ilgic_devices_aug_2026_report_fallback_flow():
+    user_query = "show the count Aug 2026 report for all ILGIC devices"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Connection error to LLM")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-ilgic-devices-aug-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "vendor",
+                    "operator": "eq",
+                    "value": "Secutrak"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_ilgic_gps_devices_aug_2026_flow():
+    user_query = "What is the count of trips of ILGIC GPS devices in Aug 2026"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [{"type": "gps"}],
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "vendorgps", "operator": "eq", "value": "Secutrak"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-ilgic-gps-devices-aug",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gps"}],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "vendorgps",
+                    "operator": "eq",
+                    "value": "Secutrak"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_ilgic_gps_devices_aug_2026_fallback_flow():
+    user_query = "What is the count of trips of ILGIC GPS devices in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Connection error to LLM")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-ilgic-gps-devices-aug-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "gps"}],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "vendorgps",
+                    "operator": "eq",
+                    "value": "Secutrak"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_ilgic_fixed_elock_devices_aug_2026_flow():
+    user_query = "show the count Aug 2026 report for all ILGIC fixed elock devices"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [{"type": "fixedlock"}],
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "vendorfixedelock", "operator": "eq", "value": "Secutrak"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-ilgic-fixed-elock-devices-aug",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "fixedlock"}],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "vendorfixedelock",
+                    "operator": "eq",
+                    "value": "Secutrak"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_ilgic_fixed_elock_devices_aug_2026_fallback_flow():
+    user_query = "show the count Aug 2026 report for all ILGIC fixed elock devices"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Connection error to LLM")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-ilgic-fixed-elock-devices-aug-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [{"type": "fixedlock"}],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "vendorfixedelock",
+                    "operator": "eq",
+                    "value": "Secutrak"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
 async def test_secutrak_devices_6_to_10_july_2026_report_flow():
     user_query = "Generate the 6 to 10 July 2026 report for all Secutrak devices."
     llm_payload_response = json.dumps({
@@ -3095,6 +3491,114 @@ async def test_wheelseye_device_report_april_2026_fallback_with_history_flow():
                     "field": "runDate",
                     "operator": "lte",
                     "value": "2026-04-30 23:59:59"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_wheelseye_running_devices_aug_2026_flow():
+    user_query = "how the count of vehicle which was running on wheelseye devices in Aug 2026"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "running"},
+            {"field": "vendor", "operator": "contains", "value": "Wheelseye"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-wheelseye-running-aug",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "running"
+                },
+                {
+                    "field": "vendor",
+                    "operator": "contains",
+                    "value": "Wheelseye"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_wheelseye_running_devices_aug_2026_fallback_flow():
+    user_query = "how the count of vehicle which was running on wheelseye devices in Aug 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Groq 413 Payload Too Large")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-wheelseye-running-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "running"
+                },
+                {
+                    "field": "vendor",
+                    "operator": "contains",
+                    "value": "Wheelseye"
                 }
             ],
             "select": []

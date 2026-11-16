@@ -699,7 +699,7 @@ class IntentDetector:
             # Ensure this is truly a follow-up date refinement and not a standalone query
             _is_standalone_query = bool(re.search(
                 r'\b(?:generate|download|show|count|get|fetch)\b'
-                r'|\b(?:trips?|devices?|report|data|wheelseye|secutrak|icici|thirdparty|3rd[\s-]party)\b'
+                r'|\b(?:trips?|devices?|report|data|wheelseye|secutrak|icici|ilgic|thirdparty|3rd[\s-]party)\b'
                 r'|\b(?:intracity|intercity|feeder|air|surface|speed|sfc|delivery|pickup|pick\s+up)\b',
                 _msg_lower_tmp
             ))
@@ -759,6 +759,16 @@ class IntentDetector:
         msg_lower = message.lower()
         has_status_keyword = False
         status_override = None
+
+        is_vendor_running_query = bool(
+            re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
+            or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
+            or (
+                re.search(r'\b(?:was\s+running|running)\b', msg_lower)
+                and re.search(r'\b(?:wheelseye|secutrak|icici|ilgic)\b', msg_lower)
+                and re.search(r'\b(?:vehicles?|devices?)\b', msg_lower)
+            )
+        )
 
         _is_network_vs_local_query = bool(
             re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
@@ -907,7 +917,12 @@ class IntentDetector:
                             f["value"] = f"{val} 23:59:59"
 
             # Apply regex-extracted date ranges as override
-            if extracted_start and extracted_end:
+            if is_vendor_running_query:
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") == "runDate")
+                ]
+            elif extracted_start and extracted_end:
                 # Remove any existing runDate filters first to avoid duplicates
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -927,7 +942,7 @@ class IntentDetector:
 
             # If no runDate filter was extracted by regex or LLM, check for relative date keywords in user query
             has_run_date = any(isinstance(f, dict) and f.get("field") == "runDate" for f in query_payload["filters"])
-            if not has_run_date:
+            if not has_run_date and not is_vendor_running_query:
                 if re.search(r'\btoday\b', msg_lower):
                     query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": today_start})
                     query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": today_end})
@@ -1113,7 +1128,20 @@ class IntentDetector:
                 and not has_vehicle_mention
             )
 
-            if _is_include_cancelled:
+            is_vendor_running_query = bool(
+                re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
+                or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
+                or (
+                    re.search(r'\b(?:was\s+running|running)\b', msg_lower)
+                    and re.search(r'\b(?:wheelseye|secutrak|icici|ilgic)\b', msg_lower)
+                    and re.search(r'\b(?:vehicles?|devices?)\b', msg_lower)
+                )
+            )
+
+            if is_vendor_running_query:
+                has_status_keyword = True
+                status_override = "running"
+            elif _is_include_cancelled:
                 has_status_keyword = False
                 status_override = None
             elif (
@@ -1257,7 +1285,7 @@ class IntentDetector:
 
             if re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 target_vendor = "ThirdParty"
-            elif re.search(r'\b(secutrak|icici)\b', msg_lower):
+            elif re.search(r'\b(secutrak|icici|ilgic)\b', msg_lower):
                 target_vendor = "Secutrak"
             elif re.search(r'\bwheelseye\b', msg_lower):
                 target_vendor = "Wheelseye"
@@ -1265,6 +1293,8 @@ class IntentDetector:
                 dev_vendor_match = re.search(r'\b([A-Za-z0-9_-]+)\s+devices?\s+(?:report|data)\b', msg_lower)
                 if not dev_vendor_match:
                     dev_vendor_match = re.search(r'\breport\s+(?:for\s+)?(?:all\s+)?([A-Za-z0-9_-]+)\s+devices?\b', msg_lower)
+                if not dev_vendor_match:
+                    dev_vendor_match = re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+([A-Za-z0-9_-]+)\s+devices?\b', msg_lower)
                 if dev_vendor_match:
                     candidate = dev_vendor_match.group(1)
                     if candidate.lower() not in ["the", "a", "an", "generate", "download", "get", "show", "fetch", "all", "party", "gps", "elock", "e-lock"]:
@@ -1273,20 +1303,20 @@ class IntentDetector:
                         dev_vendor_match = None
 
                 if not target_vendor and re.search(r'\bdevice\s+(?:report|data)\b', msg_lower):
-                    v_match = re.search(r'\b(wheelseye|secutrak|icici)\b', msg_lower)
+                    v_match = re.search(r'\b(wheelseye|secutrak|icici|ilgic)\b', msg_lower)
                     if v_match:
                         target_vendor = v_match.group(1)
 
                 if not target_vendor:
                     for f in query_payload.get("filters", []):
-                        if isinstance(f, dict) and f.get("field") == "vendor":
+                        if isinstance(f, dict) and f.get("field") in ["vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"]:
                             target_vendor = f.get("value")
                             break
 
             if target_vendor:
                 if target_vendor.lower() == "wheelseye":
                     canonical_vendor = "Wheelseye"
-                elif target_vendor.lower() in ["secutrak", "icici"]:
+                elif target_vendor.lower() in ["secutrak", "icici", "ilgic"]:
                     canonical_vendor = "Secutrak"
                 elif target_vendor == "ThirdParty" or target_vendor.lower() in ["3rdparty", "thirdparty", "3rd-party"]:
                     canonical_vendor = "ThirdParty"
@@ -1294,6 +1324,53 @@ class IntentDetector:
                     canonical_vendor = target_vendor.capitalize()
 
                 op = "contains" if (canonical_vendor == "Wheelseye" or (dev_vendor_match and canonical_vendor not in ["Secutrak", "ThirdParty"])) else "eq"
+
+                is_vendor_fixed_elock = bool(
+                    (target_vendor or dev_vendor_match) and (
+                        re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower)
+                    )
+                )
+                is_vendor_portable_elock = bool(
+                    (target_vendor or dev_vendor_match) and not is_vendor_fixed_elock and (
+                        re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', msg_lower)
+                    )
+                )
+                is_vendor_gps = bool(
+                    not is_vendor_fixed_elock and not is_vendor_portable_elock and (target_vendor or dev_vendor_match) and (
+                        re.search(r'\b(?:[A-Za-z0-9_-]+)\s+gps\s+devices?\b', msg_lower)
+                        or re.search(r'\bgps\s+devices?\s+(?:of|for|from|using|with)\s+[A-Za-z0-9_-]+\b', msg_lower)
+                        or re.search(r'\b(?:ilgic|secutrak|icici|wheelseye)\s+gps\b', msg_lower)
+                        or (target_vendor and re.search(rf'\b{re.escape(target_vendor.lower())}\s+gps\b', msg_lower))
+                    )
+                )
+
+                if is_vendor_fixed_elock:
+                    vendor_field = "vendorfixedelock"
+                    query_payload["analytics"] = [{"type": "fixedlock"}]
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in [
+                            "FixedELock", "fixedelock", "fixed-elock-status", "fixed-e-lock status"
+                        ])
+                    ]
+                elif is_vendor_portable_elock:
+                    vendor_field = "vendorportableelock"
+                    query_payload["analytics"] = [{"type": "portablelock"}]
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in [
+                            "PortableELock", "portableelock", "portable-elock-status", "portable-e-lock status"
+                        ])
+                    ]
+                elif is_vendor_gps:
+                    vendor_field = "vendorgps"
+                    query_payload["analytics"] = [{"type": "gps"}]
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in ["GPS", "FixedGPS", "gps", "fixedgps"])
+                    ]
+                else:
+                    vendor_field = "vendor"
 
                 if canonical_vendor == "ThirdParty":
                     query_payload["filters"] = [
@@ -1303,14 +1380,15 @@ class IntentDetector:
 
                 has_vendor = False
                 for f in query_payload["filters"]:
-                    if isinstance(f, dict) and f.get("field") == "vendor":
+                    if isinstance(f, dict) and f.get("field") in ["vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"]:
                         has_vendor = True
+                        f["field"] = vendor_field
                         f["value"] = canonical_vendor
                         f["operator"] = op
                         break
                 if not has_vendor:
                     query_payload["filters"].append({
-                        "field": "vendor",
+                        "field": vendor_field,
                         "operator": op,
                         "value": canonical_vendor
                     })
@@ -1395,6 +1473,8 @@ class IntentDetector:
                 and not _is_gps_na
                 and not _is_active_device_count
                 and not _is_portable_elock_only
+                and not target_vendor
+                and not dev_vendor_match
             )
 
             # 3a. Fixed E-Lock Single Device ONLY (when "only" / "single" is mentioned)
@@ -1418,6 +1498,8 @@ class IntentDetector:
                 and not _is_gps_na
                 and not _is_active_device_count
                 and not _is_fixed_elock_only
+                and not target_vendor
+                and not dev_vendor_match
             )
 
             # 4a. No GPS / Vehicles without GPS (e.g. "How many vehicles had no GPS in Aug 2026?")
@@ -1608,23 +1690,27 @@ class IntentDetector:
                         return 1
                     if fld == "tripStatus":
                         return 2
+                    if fld in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                        return 3
                     if _is_across_trip_types:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 3
+                            return 4
                         if fld == "runDate":
-                            return 4 if flt.get("operator") == "gte" else 5
+                            return 5 if flt.get("operator") == "gte" else 6
                     elif dev_single_route_category:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                            return 4
+                        if fld == "runDate":
+                            return 5 if flt.get("operator") == "gte" else 6
+                        if fld == "routeCategory":
+                            return 7
+                    else:
+                        if fld in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                             return 3
                         if fld == "runDate":
                             return 4 if flt.get("operator") == "gte" else 5
-                        if fld == "routeCategory":
-                            return 6
-                    else:
-                        if fld == "runDate":
-                            return 3 if flt.get("operator") == "gte" else 4
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 5
+                            return 6
                     if fld == "shipmentMethod":
                         return 7
                     return 8
@@ -1840,11 +1926,13 @@ class IntentDetector:
                             "value": target_status
                         })
             elif _is_fixed_gps_combo:
+                query_payload["analytics"] = [{"type": "withgps"}]
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
                         "GPS", "FixedGPS", "FixedELock", "PortableELock",
                         "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "fixed-gps-status", "fixed-elock-status", "portable-elock-status",
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
@@ -1868,11 +1956,11 @@ class IntentDetector:
                             "operator": "eq",
                             "value": target_status
                         })
+                query_payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
                 if has_fixed_elock:
-                    query_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
                 if has_portable_elock:
-                    query_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
-                query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
             elif _is_no_gps_vehicle_query:
                 # Vehicles with no GPS: tripStatus eq "valid", analytics: [{"type": "gpsna"}], grouped by vehicleNo with countDistinct
                 query_payload["filters"] = [
@@ -2136,12 +2224,15 @@ class IntentDetector:
             has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
             _is_distinct_vehicle_query = (
                 (
-                    has_vehicle_mention
-                    and has_count_unique_distinct
-                    and not has_transporter_mention
-                    and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
+                    (
+                        has_vehicle_mention
+                        and has_count_unique_distinct
+                        and not has_transporter_mention
+                        and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
+                    )
+                    or _is_active_vehicle_query
                 )
-                or _is_active_vehicle_query
+                and not is_vendor_running_query
             )
             _is_distinct_transporter_query = (
                 has_transporter_mention
@@ -2211,6 +2302,15 @@ class IntentDetector:
                     query_payload["metrics"] = [
                         {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
                     ]
+
+            if is_vendor_running_query:
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "runDate")
+                ]
+                query_payload.pop("groupBy", None)
+                query_payload.pop("metrics", None)
+                query_payload["select"] = []
 
             if _is_transporter_unique_vehicles_query:
                 def _transporter_unique_vehicles_sort_key(flt):
@@ -2311,17 +2411,17 @@ class IntentDetector:
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "tripStatus":
+                    if field == "groupId":
                         return 1
-                    elif field == "groupId":
+                    elif field == "tripStatus":
                         return 2
                     elif field == "runDate" and op == "gte":
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
-                    elif field in ["FixedELock", "PortableELock"]:
+                    elif field == "fixed-gps-status":
                         return 5
-                    elif field == "GPS":
+                    elif field in ["fixed-elock-status", "portable-elock-status"]:
                         return 6
                     elif field in ["shipmentMethod", "routeCategory"]:
                         return 7
@@ -2445,7 +2545,7 @@ class IntentDetector:
                         return 1
                     elif field == "tripStatus":
                         return 2
-                    elif field == "vendor":
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 3
                     elif field == "runDate" and op == "gte":
                         return 4
@@ -2479,6 +2579,26 @@ class IntentDetector:
                         "operator": "eq",
                         "value": target_status
                     })
+                    if target_vendor and not _is_devices_together:
+                        query_payload["filters"].sort(key=_vendor_sort_key)
+
+            if is_vendor_running_query:
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "runDate")
+                ]
+                if target_vendor and not _is_devices_together:
+                    query_payload["filters"].sort(key=_vendor_sort_key)
+
+            reordered = {}
+            for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                if k in query_payload:
+                    reordered[k] = query_payload[k]
+            for k, v in query_payload.items():
+                if k not in reordered:
+                    reordered[k] = v
+            query_payload.clear()
+            query_payload.update(reordered)
 
             log_intent_detected(session_id, "trip_report")
             log_entities_extracted(session_id, query_payload)
@@ -2505,6 +2625,26 @@ class IntentDetector:
                 ],
                 "select": []
             }
+            fb_target_vendor = None
+            fb_dev_vendor_match = None
+
+            if re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
+                fb_target_vendor = "ThirdParty"
+            elif re.search(r'\b(secutrak|icici|ilgic)\b', msg_lower):
+                fb_target_vendor = "Secutrak"
+            elif re.search(r'\bwheelseye\b', msg_lower):
+                fb_target_vendor = "Wheelseye"
+            else:
+                fb_dev_vendor_match = re.search(r'\b([A-Za-z0-9_-]+)\s+devices?\s+(?:report|data)\b', msg_lower)
+                if not fb_dev_vendor_match:
+                    fb_dev_vendor_match = re.search(r'\breport\s+(?:for\s+)?(?:all\s+)?([A-Za-z0-9_-]+)\s+devices?\b', msg_lower)
+                if not fb_dev_vendor_match:
+                    fb_dev_vendor_match = re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+([A-Za-z0-9_-]+)\s+devices?\b', msg_lower)
+                if fb_dev_vendor_match:
+                    candidate = fb_dev_vendor_match.group(1)
+                    if candidate.lower() not in ["the", "a", "an", "generate", "download", "get", "show", "fetch", "all", "party", "gps", "elock", "e-lock"]:
+                        fb_target_vendor = candidate
+
             fb_is_network_vs_local_query = bool(
                 re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
                 or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
@@ -2612,7 +2752,25 @@ class IntentDetector:
                     re.search(r'\b(?:active\s+vehicles?|vehicles?\s+(?:that\s+were\s+|that\s+are\s+)?active)\b', msg_lower)
                 )
 
-                if fb_is_include_cancelled:
+                fb_is_vendor_running_query = bool(
+                    re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
+                    or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
+                    or (
+                        re.search(r'\b(?:was\s+running|running)\b', msg_lower)
+                        and re.search(r'\b(?:wheelseye|secutrak|icici|ilgic)\b', msg_lower)
+                        and re.search(r'\b(?:vehicles?|devices?)\b', msg_lower)
+                    )
+                )
+
+                if fb_is_vendor_running_query:
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "running"
+                    })
+                    has_status_keyword = True
+                    status_override = "running"
+                elif fb_is_include_cancelled:
                     has_status_keyword = False
                     status_override = None
                 elif (
@@ -2713,7 +2871,9 @@ class IntentDetector:
                     })
                     has_status_keyword = False
                     status_override = "valid"
-            if extracted_start and extracted_end:
+            if fb_is_vendor_running_query:
+                pass
+            elif extracted_start and extracted_end:
                 fallback_payload["filters"].append({
                     "field": "runDate",
                     "operator": "gte",
@@ -2828,6 +2988,8 @@ class IntentDetector:
                 and not fb_is_gps_na
                 and not fb_is_active_device_count
                 and not fb_is_portable_elock_only
+                and not fb_target_vendor
+                and not fb_dev_vendor_match
             )
 
             # 3a. Fixed E-Lock Single Device ONLY (when "only" / "single" is mentioned)
@@ -2851,6 +3013,8 @@ class IntentDetector:
                 and not fb_is_gps_na
                 and not fb_is_active_device_count
                 and not fb_is_fixed_elock_only
+                and not fb_target_vendor
+                and not fb_dev_vendor_match
             )
 
             fb_is_no_gps_vehicle_query = bool(
@@ -3039,23 +3203,27 @@ class IntentDetector:
                         return 1
                     if fld == "tripStatus":
                         return 2
+                    if fld in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                        return 3
                     if fb_is_across_trip_types:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 3
+                            return 4
                         if fld == "runDate":
-                            return 4 if flt.get("operator") == "gte" else 5
+                            return 5 if flt.get("operator") == "gte" else 6
                     elif fb_single_route_category:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                            return 4
+                        if fld == "runDate":
+                            return 5 if flt.get("operator") == "gte" else 6
+                        if fld == "routeCategory":
+                            return 7
+                    else:
+                        if fld in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                             return 3
                         if fld == "runDate":
                             return 4 if flt.get("operator") == "gte" else 5
-                        if fld == "routeCategory":
-                            return 6
-                    else:
-                        if fld == "runDate":
-                            return 3 if flt.get("operator") == "gte" else 4
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 5
+                            return 6
                     if fld == "shipmentMethod":
                         return 7
                     return 8
@@ -3271,11 +3439,13 @@ class IntentDetector:
                             "value": target_status
                         })
             elif fb_is_fixed_gps_combo:
+                fallback_payload["analytics"] = [{"type": "withgps"}]
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
                         "GPS", "FixedGPS", "FixedELock", "PortableELock",
                         "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
+                        "fixed-gps-status", "fixed-elock-status", "portable-elock-status",
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
@@ -3299,11 +3469,11 @@ class IntentDetector:
                             "operator": "eq",
                             "value": target_status
                         })
+                fallback_payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
                 if fb_has_fixed_elock:
-                    fallback_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
                 if fb_has_portable_elock:
-                    fallback_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
-                fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
             elif fb_is_no_gps_vehicle_query:
                 # Vehicles with no GPS: tripStatus eq "valid", analytics: [{"type": "gpsna"}], grouped by vehicleNo with countDistinct
                 fallback_payload["filters"] = [
@@ -3530,12 +3700,15 @@ class IntentDetector:
             fb_has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
             fb_is_distinct_vehicle_query = (
                 (
-                    fb_has_vehicle_mention
-                    and fb_has_count_unique_distinct
-                    and not fb_has_transporter_mention
-                    and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
+                    (
+                        fb_has_vehicle_mention
+                        and fb_has_count_unique_distinct
+                        and not fb_has_transporter_mention
+                        and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
+                    )
+                    or fb_is_active_vehicle_query
                 )
-                or fb_is_active_vehicle_query
+                and not fb_is_vendor_running_query
             )
             fb_is_distinct_transporter_query = (
                 fb_has_transporter_mention
@@ -3623,7 +3796,7 @@ class IntentDetector:
 
             if re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 fb_target_vendor = "ThirdParty"
-            elif re.search(r'\b(secutrak|icici)\b', msg_lower):
+            elif re.search(r'\b(secutrak|icici|ilgic)\b', msg_lower):
                 fb_target_vendor = "Secutrak"
             elif re.search(r'\bwheelseye\b', msg_lower):
                 fb_target_vendor = "Wheelseye"
@@ -3631,6 +3804,8 @@ class IntentDetector:
                 fb_dev_vendor_match = re.search(r'\b([A-Za-z0-9_-]+)\s+devices?\s+(?:report|data)\b', msg_lower)
                 if not fb_dev_vendor_match:
                     fb_dev_vendor_match = re.search(r'\breport\s+(?:for\s+)?(?:all\s+)?([A-Za-z0-9_-]+)\s+devices?\b', msg_lower)
+                if not fb_dev_vendor_match:
+                    fb_dev_vendor_match = re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+([A-Za-z0-9_-]+)\s+devices?\b', msg_lower)
                 if fb_dev_vendor_match:
                     candidate = fb_dev_vendor_match.group(1)
                     if candidate.lower() not in ["the", "a", "an", "generate", "download", "get", "show", "fetch", "all", "party", "gps", "elock", "e-lock"]:
@@ -3639,7 +3814,7 @@ class IntentDetector:
             if fb_target_vendor:
                 if fb_target_vendor.lower() == "wheelseye":
                     fb_canonical_vendor = "Wheelseye"
-                elif fb_target_vendor.lower() in ["secutrak", "icici"]:
+                elif fb_target_vendor.lower() in ["secutrak", "icici", "ilgic"]:
                     fb_canonical_vendor = "Secutrak"
                 elif fb_target_vendor == "ThirdParty" or fb_target_vendor.lower() in ["3rdparty", "thirdparty", "3rd-party"]:
                     fb_canonical_vendor = "ThirdParty"
@@ -3647,6 +3822,53 @@ class IntentDetector:
                     fb_canonical_vendor = fb_target_vendor.capitalize()
 
                 fb_op = "contains" if (fb_canonical_vendor == "Wheelseye" or (fb_dev_vendor_match and fb_canonical_vendor not in ["Secutrak", "ThirdParty"])) else "eq"
+
+                fb_is_vendor_fixed_elock = bool(
+                    (fb_target_vendor or fb_dev_vendor_match) and (
+                        re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower)
+                    )
+                )
+                fb_is_vendor_portable_elock = bool(
+                    (fb_target_vendor or fb_dev_vendor_match) and not fb_is_vendor_fixed_elock and (
+                        re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', msg_lower)
+                    )
+                )
+                fb_is_vendor_gps = bool(
+                    not fb_is_vendor_fixed_elock and not fb_is_vendor_portable_elock and (fb_target_vendor or fb_dev_vendor_match) and (
+                        re.search(r'\b(?:[A-Za-z0-9_-]+)\s+gps\s+devices?\b', msg_lower)
+                        or re.search(r'\bgps\s+devices?\s+(?:of|for|from|using|with)\s+[A-Za-z0-9_-]+\b', msg_lower)
+                        or re.search(r'\b(?:ilgic|secutrak|icici|wheelseye)\s+gps\b', msg_lower)
+                        or (fb_target_vendor and re.search(rf'\b{re.escape(fb_target_vendor.lower())}\s+gps\b', msg_lower))
+                    )
+                )
+
+                if fb_is_vendor_fixed_elock:
+                    fb_vendor_field = "vendorfixedelock"
+                    fallback_payload["analytics"] = [{"type": "fixedlock"}]
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in [
+                            "FixedELock", "fixedelock", "fixed-elock-status", "fixed-e-lock status"
+                        ])
+                    ]
+                elif fb_is_vendor_portable_elock:
+                    fb_vendor_field = "vendorportableelock"
+                    fallback_payload["analytics"] = [{"type": "portablelock"}]
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in [
+                            "PortableELock", "portableelock", "portable-elock-status", "portable-e-lock status"
+                        ])
+                    ]
+                elif fb_is_vendor_gps:
+                    fb_vendor_field = "vendorgps"
+                    fallback_payload["analytics"] = [{"type": "gps"}]
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in ["GPS", "FixedGPS", "gps", "fixedgps"])
+                    ]
+                else:
+                    fb_vendor_field = "vendor"
 
                 if fb_canonical_vendor == "ThirdParty":
                     fallback_payload["filters"] = [
@@ -3656,17 +3878,27 @@ class IntentDetector:
 
                 fb_has_vendor = False
                 for f in fallback_payload["filters"]:
-                    if isinstance(f, dict) and f.get("field") == "vendor":
+                    if isinstance(f, dict) and f.get("field") in ["vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"]:
                         fb_has_vendor = True
+                        f["field"] = fb_vendor_field
                         f["value"] = fb_canonical_vendor
                         f["operator"] = fb_op
                         break
                 if not fb_has_vendor:
                     fallback_payload["filters"].append({
-                        "field": "vendor",
+                        "field": fb_vendor_field,
                         "operator": fb_op,
                         "value": fb_canonical_vendor
                     })
+
+            if fb_is_vendor_running_query:
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "runDate")
+                ]
+                fallback_payload.pop("groupBy", None)
+                fallback_payload.pop("metrics", None)
+                fallback_payload["select"] = []
 
             if fb_is_transporter_unique_vehicles_query:
                 def _fb_transporter_unique_vehicles_sort_key(flt):
@@ -3767,17 +3999,17 @@ class IntentDetector:
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "tripStatus":
+                    if field == "groupId":
                         return 1
-                    elif field == "groupId":
+                    elif field == "tripStatus":
                         return 2
                     elif field == "runDate" and op == "gte":
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
-                    elif field in ["FixedELock", "PortableELock"]:
+                    elif field == "fixed-gps-status":
                         return 5
-                    elif field == "GPS":
+                    elif field in ["fixed-elock-status", "portable-elock-status"]:
                         return 6
                     elif field in ["shipmentMethod", "routeCategory"]:
                         return 7
@@ -3901,7 +4133,7 @@ class IntentDetector:
                         return 1
                     elif field == "tripStatus":
                         return 2
-                    elif field == "vendor":
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 3
                     elif field == "runDate" and op == "gte":
                         return 4
@@ -3935,6 +4167,26 @@ class IntentDetector:
                         "operator": "eq",
                         "value": target_status
                     })
+                    if fb_target_vendor and not fb_is_devices_together:
+                        fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
+
+            if fb_is_vendor_running_query:
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "runDate")
+                ]
+                if fb_target_vendor and not fb_is_devices_together:
+                    fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
+
+            reordered = {}
+            for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                if k in fallback_payload:
+                    reordered[k] = fallback_payload[k]
+            for k, v in fallback_payload.items():
+                if k not in reordered:
+                    reordered[k] = v
+            fallback_payload.clear()
+            fallback_payload.update(reordered)
 
             return {
                 "intent": "trip_report",

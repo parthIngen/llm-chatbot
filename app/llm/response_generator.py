@@ -70,11 +70,11 @@ def build_natural_response(
         shipment_method = filter_map.get("shipmentMethod")
         transporter = filter_map.get("transporter")
         region = filter_map.get("region")
-        vendor = str(filter_map.get("vendor", "")).lower()
-        gps = str(filter_map.get("GPS") or filter_map.get("gps", "")).lower().strip()
-        fixed_gps = str(filter_map.get("FixedGPS") or filter_map.get("fixedgps", "")).lower().strip()
-        fixed_elock = str(filter_map.get("FixedELock") or filter_map.get("fixedelock", "")).lower().strip()
-        portable_elock = str(filter_map.get("PortableELock") or filter_map.get("portableelock", "")).lower().strip()
+        vendor = str(filter_map.get("vendor") or filter_map.get("vendorgps") or filter_map.get("vendorfixedelock") or filter_map.get("vendorportableelock", "")).lower()
+        gps = str(filter_map.get("GPS") or filter_map.get("gps", "") or filter_map.get("fixed-gps-status", "")).lower().strip()
+        fixed_gps = str(filter_map.get("FixedGPS") or filter_map.get("fixedgps", "") or filter_map.get("fixed-gps-status", "")).lower().strip()
+        fixed_elock = str(filter_map.get("FixedELock") or filter_map.get("fixedelock", "") or filter_map.get("fixed-elock-status", "")).lower().strip()
+        portable_elock = str(filter_map.get("PortableELock") or filter_map.get("portableelock", "") or filter_map.get("portable-elock-status", "")).lower().strip()
 
         # Determine vehicle subject
         is_active = (
@@ -145,6 +145,8 @@ def build_natural_response(
         # Vendor
         if vendor == "secutrak":
             post_qualifiers.append("using Secutrak devices")
+        elif vendor == "wheelseye":
+            post_qualifiers.append("using Wheelseye devices")
         elif vendor in ("thirdparty", "3rdparty"):
             post_qualifiers.append("using 3rd-party devices")
         elif vendor:
@@ -163,7 +165,7 @@ def build_natural_response(
     shipment_method = filter_map.get("shipmentMethod")
     transporter = filter_map.get("transporter")
     region = filter_map.get("region")
-    vendor = str(filter_map.get("vendor", "")).lower()
+    vendor = str(filter_map.get("vendor") or filter_map.get("vendorgps") or filter_map.get("vendorfixedelock") or filter_map.get("vendorportableelock", "")).lower()
     vehicle_no = filter_map.get("vehicleNo")
     route = filter_map.get("Route") or filter_map.get("RouteName")
     from_loc = filter_map.get("From")
@@ -171,10 +173,10 @@ def build_natural_response(
     close_remarks = str(filter_map.get("closeRemarks", "")).lower()
     atd = str(filter_map.get("ATD", "")).lower()
     ata = str(filter_map.get("ATA", "")).lower()
-    gps = str(filter_map.get("GPS") or filter_map.get("gps", "")).lower().strip()
-    fixed_gps = str(filter_map.get("FixedGPS") or filter_map.get("fixedgps", "")).lower().strip()
-    fixed_elock = str(filter_map.get("FixedELock") or filter_map.get("fixedelock", "")).lower().strip()
-    portable_elock = str(filter_map.get("PortableELock") or filter_map.get("portableelock", "")).lower().strip()
+    gps = str(filter_map.get("GPS") or filter_map.get("gps", "") or filter_map.get("fixed-gps-status", "")).lower().strip()
+    fixed_gps = str(filter_map.get("FixedGPS") or filter_map.get("fixedgps", "") or filter_map.get("fixed-gps-status", "")).lower().strip()
+    fixed_elock = str(filter_map.get("FixedELock") or filter_map.get("fixedelock", "") or filter_map.get("fixed-elock-status", "")).lower().strip()
+    portable_elock = str(filter_map.get("PortableELock") or filter_map.get("portableelock", "") or filter_map.get("portable-elock-status", "")).lower().strip()
 
     prefix_parts = []
     if trip_status in ("running", "active"):
@@ -342,10 +344,12 @@ def build_natural_response(
 
     if vendor == "secutrak":
         context_qualifiers.append("using Secutrak devices")
+    elif vendor == "wheelseye":
+        context_qualifiers.append("using Wheelseye devices")
     elif vendor in ("thirdparty", "3rdparty"):
         context_qualifiers.append("using 3rd-party devices")
     elif vendor:
-        context_qualifiers.append(f"for {filter_map.get('vendor')} vendor")
+        context_qualifiers.append(f"for {filter_map.get('vendor') or filter_map.get('vendorgps') or filter_map.get('vendorfixedelock') or filter_map.get('vendorportableelock')} vendor")
 
     dev_str = (" " + " and ".join(device_qualifiers)) if device_qualifiers else ""
     ctx_str = (" " + " ".join(context_qualifiers)) if context_qualifiers else ""
