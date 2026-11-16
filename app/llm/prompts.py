@@ -52,6 +52,7 @@ FIELD REFERENCE (use these exact API field names and allowed values):
                             "active" (= running — treat running and active as equivalent),
                             "closed" (= completed/finished/inactive),
                             "cancelled",
+                            "cancel",
                             "valid" (= default for all payloads unless asking for a specific tripStatus or asking to include cancel trips)
 
   Region        -> field: "region"   (e.g. "North", "South", "East", "West")
@@ -137,6 +138,7 @@ CRITICAL RULES:
    - "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" -> tripStatus eq "running"
    - "active trips" or "active" -> tripStatus eq "active" (NOTE: does NOT apply to "active vehicles"; see ACTIVE VEHICLES below)
    - "cancelled trips" or "cancelled" (unless query says "non-cancelled") -> tripStatus eq "cancelled"
+   - "cancel trips", "cancel trip", or "cancel" (unless query says "non-cancelled" or asks to include cancel trips) -> tripStatus eq "cancel"
    - If the query asks to include cancel trips (e.g. "include cancel trip", "including cancelled trips", "include cancelled", "with cancelled trips", "all trips including cancelled"): do NOT use any "tripStatus" filter (omit the tripStatus filter so cancelled trips are included).
    - In all other queries, ALWAYS add tripStatus eq "valid".
    - NOTE: When a query mentions trip status (e.g. "valid", "completed", "cancelled", "active", "running") alongside a vendor (e.g. "Secutrak") or any other field, always include both the tripStatus filter and the vendor / other field filters.
@@ -298,6 +300,7 @@ CRITICAL RULES:
          * "active" (= running — treat running and active as equivalent) -> tripStatus eq "active" (or "running" for multiple shipment methods / delivery with pick)
          * "closed" (= completed/finished/inactive) -> tripStatus eq "closed"
          * "cancelled" -> tripStatus eq "cancelled"
+         * "cancel" -> tripStatus eq "cancel"
       b. When the query explicitly asks to include cancel trips (e.g. "include cancel trip", "including cancelled trips", "include cancelled", "with cancelled trips", "all trips including cancelled"):
          * Do NOT use any "tripStatus" filter at all (omit the tripStatus filter so cancelled trips are included).
     - In ALL other query payloads, include "tripStatus" with "operator": "eq" and "value": "valid".
@@ -459,7 +462,7 @@ Reference Examples:
 - "Generate the July 2026 report for all valid trip which is using Secutrak devices" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "vendor", "operator": "eq", "value": "Secutrak"}, {"field": "runDate", "operator": "gte", "value": "2026-07-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-07-31 23:59:59"}], "select": []}
 - "how the count of vehicle which was running on wheelseye devices in Aug 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}, {"field": "vendor", "operator": "contains", "value": "Wheelseye"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "vendor", "operator": "contains", "value": "Wheelseye"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "Show Intracity trip count for vehicles using both Fixed E-Lock and Portable E-Lock Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "withgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}, {"field": "routeCategory", "operator": "eq", "value": "intracity"}]}
 - "How many Intracity trips used the Fixed E-Lock plus Portable E-Lock combination Aug 2026" ->

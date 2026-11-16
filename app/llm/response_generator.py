@@ -183,8 +183,8 @@ def build_natural_response(
         prefix_parts.append("running")
     elif trip_status == "closed":
         prefix_parts.append("closed")
-    elif trip_status == "cancelled":
-        prefix_parts.append("cancelled")
+    elif trip_status in ("cancelled", "cancel"):
+        prefix_parts.append(trip_status)
     elif trip_status == "valid":
         prefix_parts.append("valid")
 

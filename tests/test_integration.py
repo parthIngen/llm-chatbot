@@ -3562,16 +3562,21 @@ async def test_wheelseye_device_report_april_2026_fallback_with_history_flow():
 
 @pytest.mark.asyncio
 async def test_wheelseye_running_devices_aug_2026_flow():
-    user_query = "how the count of vehicle which was running on wheelseye devices in Aug 2026"
+    user_query = "show the count of vehicle which was running on wheelseye devices in Aug 2026"
     llm_payload_response = json.dumps({
         "entity": "trip",
         "operation": "count",
         "filters": [
             {"field": "groupId", "operator": "eq", "value": "0041"},
-            {"field": "tripStatus", "operator": "eq", "value": "running"},
-            {"field": "vendor", "operator": "contains", "value": "Wheelseye"}
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "vendor", "operator": "contains", "value": "Wheelseye"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
         ],
-        "select": []
+        "groupBy": ["vehicleNo"],
+        "metrics": [
+            {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
+        ]
     })
 
     from unittest.mock import MagicMock
@@ -3606,22 +3611,41 @@ async def test_wheelseye_running_devices_aug_2026_flow():
                 {
                     "field": "tripStatus",
                     "operator": "eq",
-                    "value": "running"
+                    "value": "valid"
                 },
                 {
                     "field": "vendor",
                     "operator": "contains",
                     "value": "Wheelseye"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
                 }
             ],
-            "select": []
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
         }
         assert entities == expected_entities
 
 
 @pytest.mark.asyncio
 async def test_wheelseye_running_devices_aug_2026_fallback_flow():
-    user_query = "how the count of vehicle which was running on wheelseye devices in Aug 2026"
+    user_query = "show the count of vehicle which was running on wheelseye devices in Aug 2026"
 
     from unittest.mock import MagicMock
     with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
@@ -3655,17 +3679,192 @@ async def test_wheelseye_running_devices_aug_2026_fallback_flow():
                 {
                     "field": "tripStatus",
                     "operator": "eq",
-                    "value": "running"
+                    "value": "valid"
                 },
                 {
                     "field": "vendor",
                     "operator": "contains",
                     "value": "Wheelseye"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
                 }
             ],
-            "select": []
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
         }
         assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_running_trips_august_2026_asks_clarification_flow():
+    user_query = "show running trips for Aug 2026"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "running"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "select": []
+    })
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-running-clarification-turn1",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        reply = response.json()["reply"]
+        assert "Are you asking about closed and completed or current running (unclosed trips) trips?" in reply
+
+
+@pytest.mark.asyncio
+async def test_running_trips_clarification_response_closed_completed_flow():
+    user_query = "closed and completed"
+    prior_entities = {
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "running"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "select": []
+    }
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = ["Total 10 trips found"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [
+                {"role": "user", "content": "show running trips for Aug 2026"},
+                {
+                    "role": "assistant",
+                    "content": "Are you asking about closed and completed or current running (unclosed trips) trips?",
+                    "query_payload": prior_entities
+                }
+            ],
+            "session_id": "test-session-running-clarification-turn2-closed",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+        trip_status_filter = next(f for f in entities["filters"] if f.get("field") == "tripStatus")
+        assert trip_status_filter["value"] == "valid"
+
+
+@pytest.mark.asyncio
+async def test_running_trips_clarification_response_current_running_flow():
+    user_query = "current running"
+    prior_entities = {
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "select": []
+    }
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = ["Total 5 trips found"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [
+                {"role": "user", "content": "show running trips for Aug 2026"},
+                {
+                    "role": "assistant",
+                    "content": "Are you asking about closed and completed or current running (unclosed trips) trips?",
+                    "query_payload": prior_entities
+                }
+            ],
+            "session_id": "test-session-running-clarification-turn2-running",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+        trip_status_filter = next(f for f in entities["filters"] if f.get("field") == "tripStatus")
+        assert trip_status_filter["value"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_running_trips_this_month_does_not_ask_clarification():
+    user_query = "show running trips for this month"
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "running"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-running-this-month-no-clarify",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        reply = response.json()["reply"]
+        assert "Are you asking about closed and completed or current running" not in reply
 
 
 @pytest.mark.asyncio
@@ -7144,6 +7343,50 @@ async def test_route_trips_this_month_multi_turn_flow():
         assert filters_2[2] == {"field": "runDate", "operator": "gte", "value": first_day}
         assert filters_2[3] == {"field": "runDate", "operator": "lte", "value": last_day}
         assert filters_2[4] == {"field": "Route", "operator": "eq", "value": "ABL"}
+
+
+@pytest.mark.asyncio
+async def test_today_cancel_trip_report_flow():
+    user_query = "Get the Today cancel trip report"
+    import datetime
+    now = datetime.datetime.now()
+    today_start = now.strftime("%Y-%m-%d 00:00:00")
+    today_end = now.strftime("%Y-%m-%d 23:59:59")
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("Fallback")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 15}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-today-cancel-trip-report",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        expected_fields = ["groupId", "tripStatus", "runDate", "runDate"]
+        actual_fields = [f.get("field") for f in filters]
+        assert actual_fields == expected_fields
+
+        assert filters[0] == {"field": "groupId", "operator": "eq", "value": "0041"}
+        assert filters[1] == {"field": "tripStatus", "operator": "eq", "value": "cancel"}
+        assert filters[2] == {"field": "runDate", "operator": "gte", "value": today_start}
+        assert filters[3] == {"field": "runDate", "operator": "lte", "value": today_end}
+
 
 
 

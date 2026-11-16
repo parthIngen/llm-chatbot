@@ -463,7 +463,7 @@ def extract_route_code(text: str) -> str | None:
         "delivery", "air", "surface", "speed", "category", "type",
         "breakdown", "schedule", "trip", "trips", "count", "counts",
         "report", "reports", "details", "data", "for", "in", "of", "to", "from",
-        "the", "all", "valid", "closed", "running", "active", "cancelled", "canceled"
+        "the", "all", "valid", "closed", "running", "active", "cancelled", "canceled", "cancel"
     }
     m = re.search(r'\broute\s*(?:code|name)?[:\s]+([A-Za-z0-9_-]+)\b', text, re.IGNORECASE)
     if m:
@@ -471,6 +471,49 @@ def extract_route_code(text: str) -> str | None:
         if candidate.lower() not in _NON_ROUTE_WORDS:
             return candidate
     return None
+
+def should_ask_running_trips_clarification(message: str) -> bool:
+    """Checks whether the query is asking about running trips in a specific past period
+    (specific month, last month, last week), but NOT current period (this month, current month,
+    this week, present week, present month), and NOT past tense ('was running', 'were running').
+    """
+    msg_l = message.lower()
+
+    # Must mention running (present or ambiguous)
+    has_running = bool(re.search(r'\b(?:is\s+running|running|currently\s+running)\b', msg_l))
+    if not has_running:
+        return False
+
+    # Exclude past-tense intent like "was running", "were running", "had been running", "operated"
+    has_past_running = bool(re.search(r'\b(?:was\s+running|were\s+running|had\s+been\s+running|operated)\b', msg_l))
+    if has_past_running:
+        return False
+
+    # Exclude queries where closed/completed/valid is already explicitly specified
+    if bool(re.search(r'\b(?:closed|completed|valid)\b', msg_l)):
+        return False
+
+    # Exclude current/present period: current month, this month, this week, present week, present month, today
+    has_current_period = bool(re.search(
+        r'\b(?:this|current|present)\s+(?:month|week)\b|\btoday\b|\bthis\s+year\b|\bcurrent\s+year\b',
+        msg_l
+    ))
+    if has_current_period:
+        return False
+
+    # Must mention a past period: specific month name, last month, or last week
+    _SPECIFIC_MONTHS_PAT = (
+        r'\b(january|february|march|april|may|june|july|august|september|october|november|december'
+        r'|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b'
+    )
+    has_past_period = bool(
+        re.search(r'\blast\s+(?:month|week)\b|\bpast\s+(?:month|week)\b|\bprevious\s+(?:month|week)\b', msg_l)
+        or re.search(_SPECIFIC_MONTHS_PAT, msg_l)
+    )
+    if not has_past_period:
+        return False
+
+    return True
 
 def is_included_cancel_trips_query(message: str) -> bool:
     """Checks if the user is asking whether cancelled trips are included."""
@@ -816,6 +859,63 @@ class IntentDetector:
                 }
             }
 
+        # Check if this is a follow-up answer to a running trips clarification request
+        _RUNNING_CLARIFICATION_MARKER = "are you asking about closed and completed or current running"
+        is_running_follow_up = False
+        if history and len(history) >= 1:
+            last_assistant_msg = history[-1]
+            last_content = last_assistant_msg.get("content", "").lower() if isinstance(last_assistant_msg, dict) else getattr(last_assistant_msg, "content", "").lower()
+            last_role = last_assistant_msg.get("role") if isinstance(last_assistant_msg, dict) else getattr(last_assistant_msg, "role", None)
+            if (
+                last_role == "assistant"
+                and (_RUNNING_CLARIFICATION_MARKER in last_content or "cloased and completed" in last_content)
+            ):
+                is_running_follow_up = True
+
+        if is_running_follow_up and history:
+            prev_payload = None
+            for item in reversed(history):
+                payload = (
+                    item.get("query_payload")
+                    or item.get("entities")
+                    or getattr(item, "query_payload", None)
+                    or getattr(item, "entities", None)
+                )
+                if isinstance(payload, dict) and isinstance(payload.get("filters"), list):
+                    import copy
+                    prev_payload = copy.deepcopy(payload)
+                    break
+
+            msg_ans = message.strip().lower()
+            if re.search(r'\b(?:closed|completed|close|complete)\b', msg_ans):
+                chosen_status = "valid"
+            elif re.search(r'\b(?:current|running|unclosed)\b', msg_ans):
+                chosen_status = "running"
+            else:
+                chosen_status = "valid"
+
+            if prev_payload:
+                found_status = False
+                for f in prev_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") == "tripStatus":
+                        f["value"] = chosen_status
+                        f["operator"] = "eq"
+                        found_status = True
+                        break
+                if not found_status:
+                    prev_payload.setdefault("filters", []).append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": chosen_status
+                    })
+
+                log_intent_detected(session_id, "trip_report")
+                log_entities_extracted(session_id, prev_payload)
+                return {
+                    "intent": "trip_report",
+                    "entities": prev_payload
+                }
+
         # Check if this is a follow-up answer to a date range clarification request.
         # IMPORTANT: match ONLY the specific clarification question the bot asks when
         # it needs a date range from the user.  Do NOT match on ordinary result responses
@@ -825,7 +925,7 @@ class IntentDetector:
         is_follow_up = False
         prev_user_msg = None
         prev_filters = []
-        if history and len(history) >= 2:
+        if history and len(history) >= 1:
             last_assistant_msg = history[-1]
             if (
                 last_assistant_msg.get("role") == "assistant"
@@ -968,7 +1068,9 @@ class IntentDetector:
         has_status_keyword = False
         status_override = None
 
-        is_vendor_running_query = bool(
+        is_past_running = bool(re.search(r'\b(?:was\s+running|were\s+running|had\s+been\s+running|operated)\b', msg_lower))
+
+        is_vendor_running_query = (not is_past_running) and bool(
             re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
             or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
             or (
@@ -1439,7 +1541,9 @@ class IntentDetector:
                         "value": detected_regions[0]
                     })
 
-            is_vendor_running_query = bool(
+            is_past_running = bool(re.search(r'\b(?:was\s+running|were\s+running|had\s+been\s+running|operated)\b', msg_lower))
+
+            is_vendor_running_query = (not is_past_running) and bool(
                 re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
                 or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
                 or (
@@ -1449,7 +1553,10 @@ class IntentDetector:
                 )
             )
 
-            if is_vendor_running_query:
+            if is_past_running:
+                has_status_keyword = True
+                status_override = "valid"
+            elif is_vendor_running_query:
                 has_status_keyword = True
                 status_override = "running"
             elif _is_include_cancelled:
@@ -1511,6 +1618,9 @@ class IntentDetector:
             elif word_in_text(["cancelled", "canceled"], msg_lower) and not _is_non_cancelled:
                 has_status_keyword = True
                 status_override = "cancelled"
+            elif word_in_text(["cancel"], msg_lower) and not _is_include_cancelled and not _is_non_cancelled:
+                has_status_keyword = True
+                status_override = "cancel"
             elif word_in_text(["active", "open"], msg_lower):
                 # If "active" is present, check if it was only extracted for gps/lock filters
                 is_active_for_trip = True
@@ -1944,7 +2054,7 @@ class IntentDetector:
                     ])
                 ]
                 has_explicit_trip_status = bool(
-                    re.search(r'\b(?:valid\s+trips?|active\s+trips?|running\s+trips?|closed\s+trips?|completed\s+trips?|cancelled\s+trips?)\b', msg_lower)
+                    re.search(r'\b(?:valid\s+trips?|active\s+trips?|running\s+trips?|closed\s+trips?|completed\s+trips?|cancelled\s+trips?|cancel\s+trips?)\b', msg_lower)
                     or re.search(r'\bvalid\s+(?:\w+\s+)?trips?\b', msg_lower)
                     or re.search(r'\bvalid\b', msg_lower)
                     or re.search(r'\bnon[\s-]?cancell?ed\b', msg_lower)
@@ -2636,7 +2746,10 @@ class IntentDetector:
                         has_vehicle_mention
                         and has_count_unique_distinct
                         and not has_transporter_mention
-                        and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
+                        and bool(
+                            re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower)
+                            or re.search(r'\b(?:count\s+of\s+vehicles?|vehicles?\s+count|count\s+of\s+vehicle)\b', msg_lower)
+                        )
                     )
                     or _is_active_vehicle_query
                 )
@@ -3005,8 +3118,8 @@ class IntentDetector:
                         "operator": "eq",
                         "value": target_status
                     })
-                    if target_vendor and not _is_devices_together:
-                        query_payload["filters"].sort(key=_vendor_sort_key)
+                if target_vendor and not _is_devices_together:
+                    query_payload["filters"].sort(key=_vendor_sort_key)
 
             if is_vendor_running_query:
                 query_payload["filters"] = [
@@ -3108,6 +3221,36 @@ class IntentDetector:
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
                     query_payload["filters"].sort(key=_route_filter_sort_key)
+
+            def _standard_filter_sort_key(flt):
+                if not isinstance(flt, dict):
+                    return 99
+                field = flt.get("field")
+                op = flt.get("operator")
+                if field == "groupId":
+                    return 1
+                elif field == "tripStatus":
+                    return 2
+                elif field == "runDate" and op == "gte":
+                    return 3
+                elif field == "runDate" and op == "lte":
+                    return 4
+                elif field == "region":
+                    return 5
+                elif field in ("Route", "route", "RouteName", "routeName"):
+                    return 6
+                elif field in ("transporter", "Transporter"):
+                    return 7
+                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                    return 8
+                elif field == "shipmentMethod":
+                    return 9
+                elif field in ("routeCategory", "routeType", "tripType"):
+                    return 10
+                return 20
+
+            if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together)):
+                query_payload["filters"].sort(key=_standard_filter_sort_key)
 
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
@@ -3336,7 +3479,9 @@ class IntentDetector:
                     re.search(r'\b(?:active\s+vehicles?|vehicles?\s+(?:that\s+were\s+|that\s+are\s+)?active)\b', msg_lower)
                 )
 
-                fb_is_vendor_running_query = bool(
+                fb_is_past_running = bool(re.search(r'\b(?:was\s+running|were\s+running|had\s+been\s+running|operated)\b', msg_lower))
+
+                fb_is_vendor_running_query = (not fb_is_past_running) and bool(
                     re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
                     or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
                     or (
@@ -3346,7 +3491,15 @@ class IntentDetector:
                     )
                 )
 
-                if fb_is_vendor_running_query:
+                if fb_is_past_running:
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "valid"
+                    })
+                    has_status_keyword = True
+                    status_override = "valid"
+                elif fb_is_vendor_running_query:
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
                         "operator": "eq",
@@ -3424,7 +3577,15 @@ class IntentDetector:
                         "value": "cancelled"
                     })
                     has_status_keyword = True
-                    status_override = "cancelled" 
+                    status_override = "cancelled"
+                elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["cancel"]) and not fb_is_non_cancelled and not fb_is_include_cancelled:
+                    fallback_payload["filters"].append({
+                        "field": "tripStatus",
+                        "operator": "eq",
+                        "value": "cancel"
+                    })
+                    has_status_keyword = True
+                    status_override = "cancel" 
                 elif any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["active", "open"]):
                     fb_is_active_for_trip = True
                     has_active = re.search(r'\bactive\b', msg_lower) is not None
@@ -3754,7 +3915,7 @@ class IntentDetector:
                     ])
                 ]
                 has_explicit_trip_status = bool(
-                    re.search(r'\b(?:valid\s+trips?|active\s+trips?|running\s+trips?|closed\s+trips?|completed\s+trips?|cancelled\s+trips?)\b', msg_lower)
+                    re.search(r'\b(?:valid\s+trips?|active\s+trips?|running\s+trips?|closed\s+trips?|completed\s+trips?|cancelled\s+trips?|cancel\s+trips?)\b', msg_lower)
                     or re.search(r'\bvalid\s+(?:\w+\s+)?trips?\b', msg_lower)
                     or re.search(r'\bvalid\b', msg_lower)
                     or re.search(r'\bnon[\s-]?cancell?ed\b', msg_lower)
@@ -4329,7 +4490,10 @@ class IntentDetector:
                         fb_has_vehicle_mention
                         and fb_has_count_unique_distinct
                         and not fb_has_transporter_mention
-                        and bool(re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower))
+                        and bool(
+                            re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower)
+                            or re.search(r'\b(?:count\s+of\s+vehicles?|vehicles?\s+count|count\s+of\s+vehicle)\b', msg_lower)
+                        )
                     )
                     or fb_is_active_vehicle_query
                 )
@@ -4795,8 +4959,8 @@ class IntentDetector:
                         "operator": "eq",
                         "value": target_status
                     })
-                    if fb_target_vendor and not fb_is_devices_together:
-                        fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
+                if fb_target_vendor and not fb_is_devices_together:
+                    fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
 
             if fb_is_vendor_running_query:
                 fallback_payload["filters"] = [
@@ -4898,6 +5062,36 @@ class IntentDetector:
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
                     fallback_payload["filters"].sort(key=_fb_route_filter_sort_key)
+
+            def _fb_standard_filter_sort_key(flt):
+                if not isinstance(flt, dict):
+                    return 99
+                field = flt.get("field")
+                op = flt.get("operator")
+                if field == "groupId":
+                    return 1
+                elif field == "tripStatus":
+                    return 2
+                elif field == "runDate" and op == "gte":
+                    return 3
+                elif field == "runDate" and op == "lte":
+                    return 4
+                elif field == "region":
+                    return 5
+                elif field in ("Route", "route", "RouteName", "routeName"):
+                    return 6
+                elif field in ("transporter", "Transporter"):
+                    return 7
+                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                    return 8
+                elif field == "shipmentMethod":
+                    return 9
+                elif field in ("routeCategory", "routeType", "tripType"):
+                    return 10
+                return 20
+
+            if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query or fb_is_active_device_elock_query or fb_is_active_device_portable_query or fb_is_distinct_transporter_query or fb_is_portable_elock_trip_query or fb_is_fixed_elock_trip_query or fb_is_fixed_gps_combo or fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only or fb_is_trip_type_breakdown_query or fb_is_network_vs_local_query or fb_is_no_gps_vehicle_query or fb_is_gps_trip_query or (fb_target_vendor and not fb_is_devices_together)):
+                fallback_payload["filters"].sort(key=_fb_standard_filter_sort_key)
 
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:

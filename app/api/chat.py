@@ -12,6 +12,7 @@ from app.llm.intent_detector import (
     is_included_cancel_trips_query,
     check_has_valid_trip_status_filter,
     check_history_has_valid_status,
+    should_ask_running_trips_clarification,
 )
 from app.llm.response_generator import ResponseGenerator
 from app.tools.router import ToolRouter, UnsupportedIntentError
@@ -172,6 +173,26 @@ async def chat_endpoint(
                 query_payload=entities if entities else None
             )
 
+        # Check if we should ask for clarification between closed/completed and current running trips
+        if intent == "trip_report" and should_ask_running_trips_clarification(request.message):
+            is_answering_clarification = False
+            if request.history:
+                last_msg = request.history[-1]
+                last_content = last_msg.content.lower() if hasattr(last_msg, "content") else (last_msg.get("content", "").lower() if isinstance(last_msg, dict) else "")
+                if "are you asking about closed and completed or current running" in last_content or "cloased and completed" in last_content:
+                    is_answering_clarification = True
+
+            if not is_answering_clarification:
+                reply = "Are you asking about closed and completed or current running (unclosed trips) trips?"
+                return ChatMessageResponse(
+                    reply=reply,
+                    intent=intent,
+                    entities=entities,
+                    data=None,
+                    download_url=None,
+                    query_payload=entities if entities else None
+                )
+
         # Validate date range for trip report intent
         if intent == "trip_report":
             has_start_date = False
@@ -180,16 +201,19 @@ async def chat_endpoint(
 
             # Check if this is a currently-active/live trip query (tripStatus = "Active" or "Running").
             # Active trips are live by definition and do not require a historical date range.
-            is_active_trip_query = any(
-                isinstance(f, dict)
-                and f.get("field") == "tripStatus"
-                and str(f.get("value", "")).lower() in ("running", "active")
-                for f in filters
-            ) or bool(re.search(
-                r'\b(?:in[\s-]transit|transit|running|currently\s+active'
-                r'|sfc[\s-]+network[\s-]+schedule|sfc[\s-]+schedule)\b',
-                request.message.lower()
-            ))
+            is_past_running = bool(re.search(r'\b(?:was\s+running|were\s+running|had\s+been\s+running|operated)\b', request.message.lower()))
+            is_active_trip_query = (not is_past_running) and (
+                any(
+                    isinstance(f, dict)
+                    and f.get("field") == "tripStatus"
+                    and str(f.get("value", "")).lower() in ("running", "active")
+                    for f in filters
+                ) or bool(re.search(
+                    r'\b(?:in[\s-]transit|transit|running|currently\s+active'
+                    r'|sfc[\s-]+network[\s-]+schedule|sfc[\s-]+schedule)\b',
+                    request.message.lower()
+                ))
+            )
 
             if not is_active_trip_query:
                 for f in filters:
