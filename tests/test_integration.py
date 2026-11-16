@@ -4266,9 +4266,9 @@ async def test_unique_vehicles_used_by_transporter_flow():
                 "value": "0041"
             },
             {
-                "field": "transporter",
+                "field": "tripStatus",
                 "operator": "eq",
-                "value": "PRADEESH N V"
+                "value": "valid"
             },
             {
                 "field": "runDate",
@@ -4279,16 +4279,22 @@ async def test_unique_vehicles_used_by_transporter_flow():
                 "field": "runDate",
                 "operator": "lte",
                 "value": "2026-08-31 23:59:59"
+            },
+            {
+                "field": "Transporter",
+                "operator": "eq",
+                "value": "PRADEESH N V"
             }
         ],
+        "select": [],
         "groupBy": [
-            "transporter"
+            "Transporter"
         ],
         "metrics": [
             {
                 "field": "vehicleNo",
                 "function": "countDistinct",
-                "alias": "totalUniqueVehicleCount"
+                "alias": "uniqueVehicleCount"
             }
         ]
     })
@@ -4299,7 +4305,7 @@ async def test_unique_vehicles_used_by_transporter_flow():
         mock_generate.side_effect = [llm_payload, "Total 1 distinct vehicles used in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."]
         mock_api_res = MagicMock()
         mock_api_res.status_code = 200
-        mock_api_res.json.return_value = {"success": True, "data": [{"transporter": "PRADEESH N V", "totalUniqueVehicleCount": 1}]}
+        mock_api_res.json.return_value = {"success": True, "data": [{"Transporter": "PRADEESH N V", "uniqueVehicleCount": 1}]}
         mock_post.return_value = mock_api_res
 
         payload = {
@@ -4323,9 +4329,9 @@ async def test_unique_vehicles_used_by_transporter_flow():
                     "value": "0041"
                 },
                 {
-                    "field": "transporter",
+                    "field": "tripStatus",
                     "operator": "eq",
-                    "value": "PRADEESH N V"
+                    "value": "valid"
                 },
                 {
                     "field": "runDate",
@@ -4336,16 +4342,22 @@ async def test_unique_vehicles_used_by_transporter_flow():
                     "field": "runDate",
                     "operator": "lte",
                     "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "Transporter",
+                    "operator": "eq",
+                    "value": "PRADEESH N V"
                 }
             ],
+            "select": [],
             "groupBy": [
-                "transporter"
+                "Transporter"
             ],
             "metrics": [
                 {
                     "field": "vehicleNo",
                     "function": "countDistinct",
-                    "alias": "totalUniqueVehicleCount"
+                    "alias": "uniqueVehicleCount"
                 }
             ]
         }
@@ -4363,7 +4375,7 @@ async def test_unique_vehicles_used_by_transporter_fallback_flow():
         mock_generate.side_effect = Exception("LLM failure simulation")
         mock_api_res = MagicMock()
         mock_api_res.status_code = 200
-        mock_api_res.json.return_value = {"success": True, "data": [{"transporter": "PRADEESH N V", "totalUniqueVehicleCount": 1}]}
+        mock_api_res.json.return_value = {"success": True, "data": [{"Transporter": "PRADEESH N V", "uniqueVehicleCount": 1}]}
         mock_post.return_value = mock_api_res
 
         payload = {
@@ -4387,9 +4399,9 @@ async def test_unique_vehicles_used_by_transporter_fallback_flow():
                     "value": "0041"
                 },
                 {
-                    "field": "transporter",
+                    "field": "tripStatus",
                     "operator": "eq",
-                    "value": "PRADEESH N V"
+                    "value": "valid"
                 },
                 {
                     "field": "runDate",
@@ -4400,21 +4412,210 @@ async def test_unique_vehicles_used_by_transporter_fallback_flow():
                     "field": "runDate",
                     "operator": "lte",
                     "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "Transporter",
+                    "operator": "eq",
+                    "value": "PRADEESH N V"
                 }
             ],
+            "select": [],
             "groupBy": [
-                "transporter"
+                "Transporter"
             ],
             "metrics": [
                 {
                     "field": "vehicleNo",
                     "function": "countDistinct",
-                    "alias": "totalUniqueVehicleCount"
+                    "alias": "uniqueVehicleCount"
                 }
             ]
         }
         assert entities == expected_entities
         assert response.json()["reply"] == "Total 1 distinct vehicles used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
+@pytest.mark.asyncio
+async def test_unique_vehicles_used_by_transporter_instant_transport_flow():
+    user_query = "List all unique vehicles used by transporter INSTANT TRANSPORT SOLUTION (P) LTD in August 2026"
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-31 23:59:59"
+            },
+            {
+                "field": "Transporter",
+                "operator": "eq",
+                "value": "INSTANT TRANSPORT SOLUTION (P) LTD"
+            }
+        ],
+        "select": [],
+        "groupBy": [
+            "Transporter"
+        ],
+        "metrics": [
+            {
+                "field": "vehicleNo",
+                "function": "countDistinct",
+                "alias": "uniqueVehicleCount"
+            }
+        ]
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload, "Total 1 distinct vehicles used by transporter INSTANT TRANSPORT SOLUTION (P) LTD in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"Transporter": "INSTANT TRANSPORT SOLUTION (P) LTD", "uniqueVehicleCount": 1}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-instant-transport-vehicles",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "Transporter",
+                    "operator": "eq",
+                    "value": "INSTANT TRANSPORT SOLUTION (P) LTD"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "Transporter"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 1 distinct vehicles used by transporter INSTANT TRANSPORT SOLUTION (P) LTD in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
+
+
+@pytest.mark.asyncio
+async def test_unique_vehicles_used_by_transporter_instant_transport_fallback_flow():
+    user_query = "List all unique vehicles used by transporter INSTANT TRANSPORT SOLUTION (P) LTD in August 2026"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": [{"Transporter": "INSTANT TRANSPORT SOLUTION (P) LTD", "uniqueVehicleCount": 1}]}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-instant-transport-vehicles-fallback",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "Transporter",
+                    "operator": "eq",
+                    "value": "INSTANT TRANSPORT SOLUTION (P) LTD"
+                }
+            ],
+            "select": [],
+            "groupBy": [
+                "Transporter"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert response.json()["reply"] == "Total 1 distinct vehicles used by transporter INSTANT TRANSPORT SOLUTION (P) LTD in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
 
 
 @pytest.mark.asyncio

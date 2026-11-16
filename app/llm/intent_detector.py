@@ -377,17 +377,18 @@ def extract_specific_transporter(text: str) -> str | None:
     # not a filter for a specific transporter (unless explicitly named, e.g. 'named ...' or 'called ...')
     if (
         re.search(r'\b(?:unique|distinct|how\s+many|total\s+number|count\s+of|count)\b.*?\btransporters?\b', msg_l)
+        and not re.search(r'\b(?:unique|distinct|how\s+many|total\s+number|count\s+of|count)\b.*?\bvehicles?\b', msg_l)
         and not re.search(r'\btransporters?\s+(?:named|called|is|:|=)\b', msg_l)
     ):
         return None
 
-    pat = r'\btransporters?\s+(?:is\s+|as\s+|named\s+|called\s+|:\s*)?([A-Za-z0-9&._\-]+(?:\s+[A-Za-z0-9&._\-]+)*)'
+    pat = r'\btransporters?\s+(?:is\s+|as\s+|named\s+|called\s+|:\s*)?([A-Za-z0-9&._\-()]+(?:\s+[A-Za-z0-9&._\-()]+)*)'
     m = re.search(pat, text, re.IGNORECASE)
     if m:
         candidate = m.group(1).strip()
         candidate = re.sub(r'^(?:used\s+by|belonging\s+to|of)\s+', '', candidate, flags=re.IGNORECASE).strip()
         parts = re.split(r'\s+(?:in|for|from|during|between|with|having|on|where|whose|dated?)\b', candidate, flags=re.IGNORECASE)
-        candidate = parts[0].strip()
+        candidate = parts[0].strip(".,;: ")
         month_names = {"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"}
         cand_words = set(candidate.lower().split())
         if cand_words.intersection(month_names) or any(re.match(r'^(?:19|20)\d{2}$', w) for w in cand_words):
@@ -1113,22 +1114,6 @@ class IntentDetector:
                             specific_transporter = val.strip()
                             break
 
-            if specific_transporter:
-                has_transporter_flt = False
-                for f in query_payload.get("filters", []):
-                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
-                        f["field"] = "transporter"
-                        f["operator"] = "eq"
-                        f["value"] = specific_transporter
-                        has_transporter_flt = True
-                        break
-                if not has_transporter_flt:
-                    query_payload.setdefault("filters", []).append({
-                        "field": "transporter",
-                        "operator": "eq",
-                        "value": specific_transporter
-                    })
-
             has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
             has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
@@ -1140,6 +1125,23 @@ class IntentDetector:
                 and has_count_unique_distinct
                 and not has_vehicle_mention
             )
+
+            if specific_transporter:
+                transporter_field_name = "Transporter" if _is_transporter_unique_vehicles_query else "transporter"
+                has_transporter_flt = False
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                        f["field"] = transporter_field_name
+                        f["operator"] = "eq"
+                        f["value"] = specific_transporter
+                        has_transporter_flt = True
+                        break
+                if not has_transporter_flt:
+                    query_payload.setdefault("filters", []).append({
+                        "field": transporter_field_name,
+                        "operator": "eq",
+                        "value": specific_transporter
+                    })
 
             is_vendor_running_query = bool(
                 re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
@@ -1164,12 +1166,12 @@ class IntentDetector:
                 or re.search(r'\bdevice\s+(?:report|data)\b|\breport\s+for\s+(?:all\s+)?(?:\w+\s+)?devices?\b|\bdevices?\s+report\b', msg_lower)
                 or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
                 or _is_distinct_transporter_query
-                or (re.search(r'\btransporters?\b', msg_lower) and word_in_text(["used"], msg_lower) and not _is_transporter_unique_vehicles_query)
+                or _is_transporter_unique_vehicles_query
+                or (re.search(r'\btransporters?\b', msg_lower) and word_in_text(["used"], msg_lower))
                 or (
                     re.search(r'\bvehicles?\b', msg_lower)
                     and word_in_text(["used"], msg_lower)
                     and re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower)
-                    and not _is_transporter_unique_vehicles_query
                 )
                 or _is_active_vehicle_query
                 or _is_no_gps_vehicle_query
@@ -2263,26 +2265,41 @@ class IntentDetector:
 
             if _is_transporter_unique_vehicles_query:
                 # Query asks for unique vehicles used by a specific transporter
-                query_payload["groupBy"] = ["transporter"]
+                query_payload["groupBy"] = ["Transporter"]
                 query_payload["metrics"] = [
-                    {"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}
+                    {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
                 ]
-                query_payload.pop("select", None)
-                query_payload["filters"] = [
-                    f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") == "tripStatus")
-                ]
+                query_payload["select"] = []
+                if _is_include_cancelled:
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") == "tripStatus")
+                    ]
+                else:
+                    has_trip_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = "valid"
+                            f["operator"] = "eq"
+                            has_trip_status = True
+                            break
+                    if not has_trip_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": "valid"
+                        })
                 has_transporter_filter = False
                 for f in query_payload["filters"]:
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
-                        f["field"] = "transporter"
+                        f["field"] = "Transporter"
                         f["operator"] = "eq"
                         f["value"] = specific_transporter
                         has_transporter_filter = True
                         break
                 if not has_transporter_filter:
                     query_payload["filters"].append({
-                        "field": "transporter",
+                        "field": "Transporter",
                         "operator": "eq",
                         "value": specific_transporter
                     })
@@ -2341,15 +2358,18 @@ class IntentDetector:
                     op = flt.get("operator")
                     if field == "groupId":
                         return 1
-                    elif field in ["transporter", "Transporter"]:
+                    elif field == "tripStatus":
                         return 2
                     elif field == "runDate" and op == "gte":
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
+                    elif field in ["transporter", "Transporter"]:
+                        return 5
                     return 10
 
                 query_payload["filters"].sort(key=_transporter_unique_vehicles_sort_key)
+                query_payload["select"] = []
             elif _is_active_vehicle_query:
                 def _active_vehicle_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -2611,6 +2631,10 @@ class IntentDetector:
                 if target_vendor and not _is_devices_together:
                     query_payload["filters"].sort(key=_vendor_sort_key)
 
+            if _is_transporter_unique_vehicles_query:
+                query_payload["filters"].sort(key=_transporter_unique_vehicles_sort_key)
+                query_payload["select"] = []
+
             if _is_fixed_portable_elock_combo:
                 def _fixed_portable_combo_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -2754,17 +2778,18 @@ class IntentDetector:
             )
 
             if fb_specific_transporter:
+                transporter_field_name = "Transporter" if fb_is_transporter_unique_vehicles_query else "transporter"
                 has_fb_transporter_flt = False
                 for f in fallback_payload["filters"]:
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
-                        f["field"] = "transporter"
+                        f["field"] = transporter_field_name
                         f["operator"] = "eq"
                         f["value"] = fb_specific_transporter
                         has_fb_transporter_flt = True
                         break
                 if not has_fb_transporter_flt:
                     fallback_payload["filters"].append({
-                        "field": "transporter",
+                        "field": transporter_field_name,
                         "operator": "eq",
                         "value": fb_specific_transporter
                     })
@@ -2828,12 +2853,12 @@ class IntentDetector:
                     or re.search(r'\bdevice\s+(?:report|data)\b|\breport\s+for\s+(?:all\s+)?(?:\w+\s+)?devices?\b|\bdevices?\s+report\b', msg_lower)
                     or re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower)
                     or fb_is_distinct_transporter_query
-                    or (re.search(r'\btransporters?\b', msg_lower) and any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["used"]) and not fb_is_transporter_unique_vehicles_query)
+                    or fb_is_transporter_unique_vehicles_query
+                    or (re.search(r'\btransporters?\b', msg_lower) and any(re.search(r'\b' + re.escape(w) + r'\b', msg_lower) for w in ["used"]))
                     or (
                         re.search(r'\bvehicles?\b', msg_lower)
                         and re.search(r'\bused\b', msg_lower)
                         and re.search(r'\b(?:distinct|unique|list|all)\b', msg_lower)
-                        and not fb_is_transporter_unique_vehicles_query
                     )
                     or fb_is_active_vehicle_query
                     or fb_is_no_gps_vehicle_query
@@ -3774,11 +3799,11 @@ class IntentDetector:
             )
 
             if fb_is_transporter_unique_vehicles_query:
-                fallback_payload["groupBy"] = ["transporter"]
+                fallback_payload["groupBy"] = ["Transporter"]
                 fallback_payload["metrics"] = [
-                    {"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}
+                    {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
                 ]
-                fallback_payload.pop("select", None)
+                fallback_payload["select"] = []
                 if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
@@ -3802,14 +3827,14 @@ class IntentDetector:
                 has_fb_transporter_filter = False
                 for f in fallback_payload["filters"]:
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
-                        f["field"] = "transporter"
+                        f["field"] = "Transporter"
                         f["operator"] = "eq"
                         f["value"] = fb_specific_transporter
                         has_fb_transporter_filter = True
                         break
                 if not has_fb_transporter_filter:
                     fallback_payload["filters"].append({
-                        "field": "transporter",
+                        "field": "Transporter",
                         "operator": "eq",
                         "value": fb_specific_transporter
                     })
@@ -3965,15 +3990,18 @@ class IntentDetector:
                     op = flt.get("operator")
                     if field == "groupId":
                         return 1
-                    elif field in ["transporter", "Transporter"]:
+                    elif field == "tripStatus":
                         return 2
                     elif field == "runDate" and op == "gte":
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
+                    elif field in ["transporter", "Transporter"]:
+                        return 5
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_transporter_unique_vehicles_sort_key)
+                fallback_payload["select"] = []
             elif fb_is_active_vehicle_query:
                 def _fb_active_vehicle_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -4234,6 +4262,10 @@ class IntentDetector:
                 ]
                 if fb_target_vendor and not fb_is_devices_together:
                     fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
+
+            if fb_is_transporter_unique_vehicles_query:
+                fallback_payload["filters"].sort(key=_fb_transporter_unique_vehicles_sort_key)
+                fallback_payload["select"] = []
 
             if fb_is_fixed_portable_elock_combo:
                 def _fb_fixed_portable_combo_sort_key(flt):

@@ -328,15 +328,15 @@ CRITICAL RULES:
         * Do NOT include "select"
         * Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte
     - UNIQUE VEHICLES USED BY A SPECIFIC TRANSPORTER:
-      When the query asks to list or count unique or distinct vehicles used by a specific transporter (e.g. "List all unique vehicles used by transporter PRADEESH N V in August 2026", "unique vehicles for transporter <Name> in <Period>"):
+      When the query asks to list or count unique or distinct vehicles used by a specific transporter (e.g. "List all unique vehicles used by transporter INSTANT TRANSPORT SOLUTION (P) LTD in August 2026", "unique vehicles for transporter <Name> in <Period>"):
         * Include filter: groupId eq "0041"
-        * Include filter: transporter eq "<TransporterName>" (exact name from query, field is lowercase "transporter")
-        * Include runDate gte/lte filters for the specified period
         * Include filter: tripStatus eq "valid" unless a specific status is mentioned or cancelled trips are included
-        * Do NOT include "select"
-        * Include "groupBy": ["transporter"]
-        * Include "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}]
-        * Filter order: groupId first, then transporter, then runDate gte, then runDate lte
+        * Include runDate gte/lte filters for the specified period
+        * Include filter: Transporter eq "<TransporterName>" (exact name from query, field is capitalized "Transporter")
+        * Include "select": []
+        * Include "groupBy": ["Transporter"]
+        * Include "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        * Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte, then Transporter
     - VEHICLES WITHOUT GPS / WITH DEVICE EXCEPTIONS FOR A SPECIFIC TRANSPORTER:
       When the query asks to list or count vehicles used by a specific transporter that have no GPS or device exceptions (e.g. "List vehicles used by transporter PRADEESH N V in August 2026 that have no GPS device"):
         * Include filter: tripStatus eq "valid"
@@ -522,8 +522,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "PortableELock", "operator": "eq", "value": "existing"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "Count all active vehicles operating on the field during Aug 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
-- "List all unique vehicles used by transporter PRADEESH N V in August 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "transporter", "operator": "eq", "value": "PRADEESH N V"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["transporter"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "totalUniqueVehicleCount"}]}
+- "List all unique vehicles used by transporter INSTANT TRANSPORT SOLUTION (P) LTD in August 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "Transporter", "operator": "eq", "value": "INSTANT TRANSPORT SOLUTION (P) LTD"}], "select": [], "groupBy": ["Transporter"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "Total gps device in august 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
 - "Total gps NA or not available device in august 2026" ->
