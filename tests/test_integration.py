@@ -3833,6 +3833,107 @@ async def test_running_trips_clarification_response_current_running_flow():
 
 
 @pytest.mark.asyncio
+async def test_wheelseye_running_devices_aug_2026_clarification_current_running_flow():
+    turn1_query = "show the count of vehicle which running on wheelseye devices in Aug 2026"
+    turn2_query = "current running"
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "vendor", "operator": "contains", "value": "Wheelseye"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "groupBy": ["vehicleNo"],
+        "metrics": [
+            {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
+        ]
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        # Turn 1:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+
+        payload1 = {
+            "message": turn1_query,
+            "history": [],
+            "session_id": "test-session-wheelseye-running-aug-clarify",
+            "AccessToken": "mock-token"
+        }
+        res1 = client.post("/api/v1/chat", json=payload1)
+        assert res1.status_code == 200
+        assert "Are you asking about closed and completed or current running (unclosed trips) trips?" in res1.json()["reply"]
+
+        # Turn 2 (history has only role and content, no query_payload):
+        mock_generate.side_effect = [llm_payload_response, "Total 10 distinct vehicles found."]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "data": []}
+        mock_post.return_value = mock_api_res
+
+        payload2 = {
+            "message": turn2_query,
+            "history": [
+                {"role": "user", "content": turn1_query},
+                {"role": "assistant", "content": "Are you asking about closed and completed or current running (unclosed trips) trips?"}
+            ],
+            "session_id": "test-session-wheelseye-running-aug-clarify",
+            "AccessToken": "mock-token"
+        }
+        res2 = client.post("/api/v1/chat", json=payload2)
+        assert res2.status_code == 200
+        entities2 = res2.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "running"
+                },
+                {
+                    "field": "vendor",
+                    "operator": "contains",
+                    "value": "Wheelseye"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "groupBy": [
+                "vehicleNo"
+            ],
+            "metrics": [
+                {
+                    "field": "vehicleNo",
+                    "function": "countDistinct",
+                    "alias": "uniqueVehicleCount"
+                }
+            ]
+        }
+        assert entities2 == expected_entities
+
+
+@pytest.mark.asyncio
 async def test_running_trips_this_month_does_not_ask_clarification():
     user_query = "show running trips for this month"
     llm_payload_response = json.dumps({

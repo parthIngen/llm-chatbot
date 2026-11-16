@@ -894,6 +894,22 @@ class IntentDetector:
             else:
                 chosen_status = "valid"
 
+            prev_user_msg = None
+            for item in reversed(history):
+                r = item.get("role") if isinstance(item, dict) else getattr(item, "role", None)
+                c = item.get("content") if isinstance(item, dict) else getattr(item, "content", None)
+                if r == "user" and c:
+                    prev_user_msg = c
+                    break
+
+            if (not prev_payload or len(prev_payload.get("filters", [])) <= 2) and prev_user_msg:
+                # Re-detect entities from the previous user message
+                orig_res = await self.detect(message=prev_user_msg, history=[], session_id=session_id)
+                orig_payload = orig_res.get("entities")
+                if isinstance(orig_payload, dict) and isinstance(orig_payload.get("filters"), list):
+                    import copy
+                    prev_payload = copy.deepcopy(orig_payload)
+
             if prev_payload:
                 found_status = False
                 for f in prev_payload.get("filters", []):
@@ -908,6 +924,35 @@ class IntentDetector:
                         "operator": "eq",
                         "value": chosen_status
                     })
+
+                def _running_followup_sort_key(flt):
+                    if not isinstance(flt, dict):
+                        return 99
+                    field = flt.get("field")
+                    op = flt.get("operator")
+                    if field == "groupId":
+                        return 1
+                    elif field == "tripStatus":
+                        return 2
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                        return 3
+                    elif field == "runDate" and op == "gte":
+                        return 4
+                    elif field == "runDate" and op == "lte":
+                        return 5
+                    elif field in ("Route", "route", "RouteName", "routeName"):
+                        return 6
+                    elif field in ("transporter", "Transporter"):
+                        return 7
+                    elif field == "region":
+                        return 8
+                    elif field == "shipmentMethod":
+                        return 9
+                    elif field in ("routeCategory", "routeType", "tripType"):
+                        return 10
+                    return 20
+
+                prev_payload["filters"].sort(key=_running_followup_sort_key)
 
                 log_intent_detected(session_id, "trip_report")
                 log_entities_extracted(session_id, prev_payload)
@@ -1234,8 +1279,14 @@ class IntentDetector:
                         elif f.get("operator") == "lte":
                             f["value"] = f"{val} 23:59:59"
 
+            has_date_specified = bool(
+                (extracted_start and extracted_end)
+                or re.search(r'\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\b', msg_lower)
+                or re.search(r'\b(?:today|yesterday|this\s+week|last\s+week|this\s+month|last\s+month)\b', msg_lower)
+            )
+
             # Apply regex-extracted date ranges as override
-            if is_vendor_running_query:
+            if is_vendor_running_query and not has_date_specified:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "runDate")
@@ -1260,7 +1311,7 @@ class IntentDetector:
 
             # If no runDate filter was extracted by regex or LLM, check for relative date keywords in user query
             has_run_date = any(isinstance(f, dict) and f.get("field") == "runDate" for f in query_payload["filters"])
-            if not has_run_date and not is_vendor_running_query:
+            if not has_run_date and not (is_vendor_running_query and not has_date_specified):
                 if re.search(r'\btoday\b', msg_lower):
                     query_payload["filters"].append({"field": "runDate", "operator": "gte", "value": today_start})
                     query_payload["filters"].append({"field": "runDate", "operator": "lte", "value": today_end})
@@ -2740,6 +2791,10 @@ class IntentDetector:
             has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
             has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
+            has_explicit_vehicle_count = bool(
+                re.search(r'\b(?:count\s+of\s+vehicles?|vehicles?\s+count|count\s+of\s+vehicle)\b', msg_lower)
+                or (has_vehicle_mention and bool(re.search(r'\b(?:distinct|unique)\b', msg_lower)))
+            )
             _is_distinct_vehicle_query = (
                 (
                     (
@@ -2753,7 +2808,7 @@ class IntentDetector:
                     )
                     or _is_active_vehicle_query
                 )
-                and not is_vendor_running_query
+                and ((not is_vendor_running_query) or has_explicit_vehicle_count)
             )
             _is_distinct_transporter_query = (
                 has_transporter_mention
@@ -2840,13 +2895,15 @@ class IntentDetector:
                     ]
 
             if is_vendor_running_query:
-                query_payload["filters"] = [
-                    f for f in query_payload.get("filters", [])
-                    if not (isinstance(f, dict) and f.get("field") == "runDate")
-                ]
-                query_payload.pop("groupBy", None)
-                query_payload.pop("metrics", None)
-                query_payload["select"] = []
+                if not has_date_specified:
+                    query_payload["filters"] = [
+                        f for f in query_payload.get("filters", [])
+                        if not (isinstance(f, dict) and f.get("field") == "runDate")
+                    ]
+                if not _is_distinct_vehicle_query:
+                    query_payload.pop("groupBy", None)
+                    query_payload.pop("metrics", None)
+                    query_payload["select"] = []
 
             if _is_transporter_unique_vehicles_query:
                 def _transporter_unique_vehicles_sort_key(flt):
@@ -3121,13 +3178,13 @@ class IntentDetector:
                 if target_vendor and not _is_devices_together:
                     query_payload["filters"].sort(key=_vendor_sort_key)
 
-            if is_vendor_running_query:
+            if is_vendor_running_query and not has_date_specified:
                 query_payload["filters"] = [
                     f for f in query_payload.get("filters", [])
                     if not (isinstance(f, dict) and f.get("field") == "runDate")
                 ]
-                if target_vendor and not _is_devices_together:
-                    query_payload["filters"].sort(key=_vendor_sort_key)
+            if is_vendor_running_query and target_vendor and not _is_devices_together:
+                query_payload["filters"].sort(key=_vendor_sort_key)
 
             if _is_transporter_unique_vehicles_query:
                 query_payload["filters"].sort(key=_transporter_unique_vehicles_sort_key)
@@ -3642,7 +3699,12 @@ class IntentDetector:
                     })
                     has_status_keyword = False
                     status_override = "valid"
-            if fb_is_vendor_running_query:
+            fb_has_date_specified = bool(
+                (extracted_start and extracted_end)
+                or re.search(r'\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\b', msg_lower)
+                or re.search(r'\b(?:today|yesterday|this\s+week|last\s+week|this\s+month|last\s+month)\b', msg_lower)
+            )
+            if fb_is_vendor_running_query and not fb_has_date_specified:
                 pass
             elif extracted_start and extracted_end:
                 fallback_payload["filters"].append({
@@ -4484,6 +4546,10 @@ class IntentDetector:
             fb_has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
             fb_has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             fb_has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
+            fb_has_explicit_vehicle_count = bool(
+                re.search(r'\b(?:count\s+of\s+vehicles?|vehicles?\s+count|count\s+of\s+vehicle)\b', msg_lower)
+                or (fb_has_vehicle_mention and bool(re.search(r'\b(?:distinct|unique)\b', msg_lower)))
+            )
             fb_is_distinct_vehicle_query = (
                 (
                     (
@@ -4497,7 +4563,7 @@ class IntentDetector:
                     )
                     or fb_is_active_vehicle_query
                 )
-                and not fb_is_vendor_running_query
+                and ((not fb_is_vendor_running_query) or fb_has_explicit_vehicle_count)
             )
             fb_is_distinct_transporter_query = (
                 fb_has_transporter_mention
@@ -4681,13 +4747,15 @@ class IntentDetector:
                     })
 
             if fb_is_vendor_running_query:
-                fallback_payload["filters"] = [
-                    f for f in fallback_payload.get("filters", [])
-                    if not (isinstance(f, dict) and f.get("field") == "runDate")
-                ]
-                fallback_payload.pop("groupBy", None)
-                fallback_payload.pop("metrics", None)
-                fallback_payload["select"] = []
+                if not fb_has_date_specified:
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload.get("filters", [])
+                        if not (isinstance(f, dict) and f.get("field") == "runDate")
+                    ]
+                if not fb_is_distinct_vehicle_query:
+                    fallback_payload.pop("groupBy", None)
+                    fallback_payload.pop("metrics", None)
+                    fallback_payload["select"] = []
 
             if fb_is_transporter_unique_vehicles_query:
                 def _fb_transporter_unique_vehicles_sort_key(flt):
@@ -4962,13 +5030,13 @@ class IntentDetector:
                 if fb_target_vendor and not fb_is_devices_together:
                     fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
 
-            if fb_is_vendor_running_query:
+            if fb_is_vendor_running_query and not fb_has_date_specified:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload.get("filters", [])
                     if not (isinstance(f, dict) and f.get("field") == "runDate")
                 ]
-                if fb_target_vendor and not fb_is_devices_together:
-                    fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
+            if fb_is_vendor_running_query and fb_target_vendor and not fb_is_devices_together:
+                fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
 
             if fb_is_transporter_unique_vehicles_query:
                 fallback_payload["filters"].sort(key=_fb_transporter_unique_vehicles_sort_key)
