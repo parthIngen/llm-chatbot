@@ -7489,6 +7489,142 @@ async def test_today_cancel_trip_report_flow():
         assert filters[3] == {"field": "runDate", "operator": "lte", "value": today_end}
 
 
+@pytest.mark.asyncio
+async def test_region_breakdown_aug_2026_flow():
+    user_query = "How many trips occurred in each region in Aug 2026?"
+    from unittest.mock import MagicMock
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "groupBy": ["region"],
+        "metrics": [
+            {"field": "shipmentNo", "function": "countDistinct", "alias": "uniqueShipment"}
+        ]
+    })
+
+    api_response_data = {
+        "success": True,
+        "data": [
+            {"region": "WEST", "uniqueShipment": 54116},
+            {"region": "", "uniqueShipment": 580},
+            {"region": None, "uniqueShipment": 2},
+            {"region": "EAST", "uniqueShipment": 14766},
+            {"region": "NORTH", "uniqueShipment": 60308},
+            {"region": "SOUTH", "uniqueShipment": 43677}
+        ]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.return_value = llm_payload
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-region-breakdown-aug-2026",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert "select" not in entities
+        assert entities["groupBy"] == ["region"]
+        assert entities["metrics"] == [
+            {"field": "shipmentNo", "function": "countDistinct", "alias": "uniqueShipment"}
+        ]
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ]
+
+        expected_text = (
+            "Trip counts by region in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: "
+            "North is 60308, West is 54116, South is 43677, East is 14766, and Unassigned is 582. "
+            "It does not include cancelled trips."
+        )
+        assert data["response"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_region_breakdown_aug_2026_fallback_flow():
+    user_query = "How many trips occurred in each region in Aug 2026?"
+    from unittest.mock import MagicMock
+
+    api_response_data = {
+        "success": True,
+        "data": [
+            {"region": "WEST", "uniqueShipment": 54116},
+            {"region": "", "uniqueShipment": 580},
+            {"region": None, "uniqueShipment": 2},
+            {"region": "EAST", "uniqueShipment": 14766},
+            {"region": "NORTH", "uniqueShipment": 60308},
+            {"region": "SOUTH", "uniqueShipment": 43677}
+        ]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure triggering fallback")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-region-breakdown-aug-2026-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert "select" not in entities
+        assert entities["groupBy"] == ["region"]
+        assert entities["metrics"] == [
+            {"field": "shipmentNo", "function": "countDistinct", "alias": "uniqueShipment"}
+        ]
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ]
+
+        expected_text = (
+            "Trip counts by region in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: "
+            "North is 60308, West is 54116, South is 43677, East is 14766, and Unassigned is 582. "
+            "It does not include cancelled trips."
+        )
+        assert data["response"] == expected_text
+
+
+
 
 
 

@@ -1125,6 +1125,13 @@ class IntentDetector:
             )
         )
 
+        _is_each_region_query = bool(
+            re.search(
+                r'\b(?:in\s+each\s+region|for\s+each\s+region|across\s+(?:each|all)\s+regions?|per\s+region|each\s+region|by\s+region|region[\s-]wise|region\s+breakdown|breakdown\s+by\s+region|breakdown\s+across\s+regions?|breakdown\s+of\s+regions?)\b',
+                msg_lower
+            )
+        )
+
         _is_network_vs_local_query = bool(
             re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
             or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
@@ -1578,7 +1585,12 @@ class IntentDetector:
                             f["value"] = val.capitalize()
                     break
 
-            if not has_region_flt and detected_regions:
+            if _is_each_region_query:
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "region")
+                ]
+            elif not has_region_flt and detected_regions:
                 if len(detected_regions) > 1:
                     query_payload.setdefault("filters", []).append({
                         "field": "region",
@@ -1631,6 +1643,7 @@ class IntentDetector:
                 or _is_no_gps_vehicle_query
                 or _is_network_vs_local_query
                 or _is_trip_type_breakdown_query
+                or _is_each_region_query
             ):
                 has_status_keyword = True
                 status_override = "valid"
@@ -2816,7 +2829,17 @@ class IntentDetector:
                 and not has_vehicle_mention
             )
 
-            if _is_transporter_unique_vehicles_query:
+            if _is_each_region_query:
+                query_payload["groupBy"] = ["region"]
+                query_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "countDistinct",
+                        "alias": "uniqueShipment"
+                    }
+                ]
+                query_payload.pop("select", None)
+            elif _is_transporter_unique_vehicles_query:
                 # Query asks for unique vehicles used by a specific transporter
                 query_payload["groupBy"] = ["Transporter"]
                 query_payload["metrics"] = [
@@ -3373,6 +3396,12 @@ class IntentDetector:
                     and re.search(r'\blocal\b', msg_lower)
                 )
             )
+            fb_is_each_region_query = bool(
+                re.search(
+                    r'\b(?:in\s+each\s+region|for\s+each\s+region|across\s+(?:each|all)\s+regions?|per\s+region|each\s+region|by\s+region|region[\s-]wise|region\s+breakdown|breakdown\s+by\s+region|breakdown\s+across\s+regions?|breakdown\s+of\s+regions?)\b',
+                    msg_lower
+                )
+            )
             fb_is_trip_type_breakdown_query = bool(
                 re.search(r'\bbreakdown\b', msg_lower)
                 and (
@@ -3466,7 +3495,12 @@ class IntentDetector:
                             f["value"] = fb_detected_regions[0]
                     break
 
-            if not has_fb_region_flt and fb_detected_regions:
+            if fb_is_each_region_query:
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "region")
+                ]
+            elif not has_fb_region_flt and fb_detected_regions:
                 if len(fb_detected_regions) > 1:
                     fallback_payload.setdefault("filters", []).append({
                         "field": "region",
@@ -3585,6 +3619,7 @@ class IntentDetector:
                     or fb_is_no_gps_vehicle_query
                     or fb_is_network_vs_local_query
                     or fb_is_trip_type_breakdown_query
+                    or fb_is_each_region_query
                 ):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
@@ -4571,7 +4606,17 @@ class IntentDetector:
                 and not fb_has_vehicle_mention
             )
 
-            if fb_is_transporter_unique_vehicles_query:
+            if fb_is_each_region_query:
+                fallback_payload["groupBy"] = ["region"]
+                fallback_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "countDistinct",
+                        "alias": "uniqueShipment"
+                    }
+                ]
+                fallback_payload.pop("select", None)
+            elif fb_is_transporter_unique_vehicles_query:
                 fallback_payload["groupBy"] = ["Transporter"]
                 fallback_payload["metrics"] = [
                     {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}

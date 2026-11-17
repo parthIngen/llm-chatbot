@@ -563,6 +563,55 @@ class ResponseGenerator:
             else:
                 return f"{prefix}{date_clause}: Network (Intercity Trip) count is {network_count} and Local (Intracity Trip) count is {local_count}."
 
+        # Detect region breakdown grouped result (e.g. How many trips occurred in each region):
+        _is_region_breakdown_result = (
+            isinstance(api_data, list)
+            and len(api_data) > 0
+            and any(isinstance(row, dict) and "region" in row for row in api_data)
+            and any(isinstance(row, dict) and ("uniqueShipment" in row or "count" in row or "trip_count" in row) for row in api_data)
+        )
+        if _is_region_breakdown_result:
+            region_counts: Dict[str, int] = {}
+            unassigned_count = 0
+            total_region_trips = 0
+
+            for row in api_data:
+                if not isinstance(row, dict):
+                    continue
+                cnt = row.get("uniqueShipment") or row.get("count") or row.get("trip_count") or row.get("total_count") or 0
+                total_region_trips += cnt
+                raw_region = row.get("region")
+                if raw_region is None or str(raw_region).strip() == "" or str(raw_region).lower() in ("null", "none", "unassigned", "blank", "unknown"):
+                    unassigned_count += cnt
+                else:
+                    reg_name = str(raw_region).strip().title()
+                    region_counts[reg_name] = region_counts.get(reg_name, 0) + cnt
+
+            # Sort named regions by count descending
+            sorted_regions = sorted(region_counts.items(), key=lambda x: x[1], reverse=True)
+
+            breakdown_items = [f"{reg} is {cnt}" for reg, cnt in sorted_regions]
+            if unassigned_count > 0:
+                breakdown_items.append(f"Unassigned is {unassigned_count}")
+
+            if len(breakdown_items) > 1:
+                breakdown_str = ", ".join(breakdown_items[:-1]) + f", and {breakdown_items[-1]}"
+            elif breakdown_items:
+                breakdown_str = breakdown_items[0]
+            else:
+                breakdown_str = "no trips found"
+
+            date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+            trip_status = "valid"
+            if entities and "filters" in entities:
+                for f in entities["filters"]:
+                    if isinstance(f, dict) and f.get("field") == "tripStatus":
+                        trip_status = str(f.get("value", "valid")).lower()
+                        break
+
+            status_note = " It does not include cancelled trips." if trip_status == "valid" else ""
+            return f"Trip counts by region{date_clause}: {breakdown_str}.{status_note}"
+
         # Format natural language response converting all filter fields
         natural_formatted_response = build_natural_response(
             total_count=total_trips,

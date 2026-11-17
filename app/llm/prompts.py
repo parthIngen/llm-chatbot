@@ -203,6 +203,13 @@ CRITICAL RULES:
         - Do NOT include select.
         - Do NOT include groupBy or metrics (as this query specifies a single trip type, not across both).
         - Filter order: groupId first, then GPS, then runDate gte, then runDate lte, then routeCategory
+    - REGION BREAKDOWN / EACH REGION / REGION-WISE: When the query asks for trip counts across regions or breakdown by region (e.g. "How many trips occurred in each region in Aug 2026?", "Show trips for each region", "region wise trips in Aug 2026", "breakdown of trips across regions"):
+        * Include filters: groupId eq "0041", tripStatus eq "valid", runDate gte, runDate lte
+        * Do NOT add a "region" filter (as the query asks across each/all regions).
+        * Do NOT include select.
+        * Include groupBy: ["region"]
+        * Include metrics: [{"field": "shipmentNo", "function": "countDistinct", "alias": "uniqueShipment"}]
+        * Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte
     - NON-GPS TRIPS / TRIPS WITHOUT GPS / NO-GPS TRIPS / NO ANY GPS: When the query asks about trips without GPS or "No Any GPS" (e.g. "Count total trips listed under No Any GPS device in Aug 2026", "Show total count of trips without any GPS devices attached in Aug 2026", "Show total count of trips without any GPS devices attached", "non-GPS trips", "no-GPS trips", "trips without GPS", "nogps trips"):
          * Include top-level: "analytics": [{"type": "gpsna"}]
          * Do NOT add a "GPS" filter in "filters" (do NOT use field "GPS" or value "nogps" or "nogps ").
@@ -541,6 +548,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}], "select": []}
 - "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
+- "How many trips occurred in each region in Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["region"], "metrics": [{"field": "shipmentNo", "function": "countDistinct", "alias": "uniqueShipment"}]}
 - "Show active Fixed GPS device count across Intercity trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}]}
 - "Show active device status for Fixed GPS units on Valid Intercity trips during Aug 2026" ->
@@ -652,6 +661,9 @@ Rules:
        "Active Fixed GPS device counts in date range from <start_date> to <end_date>: Network (Intercity Trip) count is <X> and Local (Intracity Trip) count is <Y>."
      * For general device or trip counts across trip types:
        "<Device condition / Trip> counts in date range from <start_date> to <end_date>: Network (Intercity Trip) count is <X> and Local (Intracity Trip) count is <Y>."
+5. Region Breakdown Results (API Results have "region" and "uniqueShipment" / "count"):
+   - Output the counts for each region (e.g. North, West, South, East) sorted descending, followed by Unassigned (null or blank region):
+     "Trip counts by region in date range from <start_date> to <end_date>: North is <count>, West is <count>, South is <count>, East is <count>, and Unassigned is <count>. It does not include cancelled trips."
 
 Example outputs:
 - "Total 1 distinct vehicles used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
@@ -660,6 +672,7 @@ Example outputs:
 - "Total 50 trips without GPS found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
 - "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120 and Local (Intracity Trip) count is 80."
 - "Active Fixed GPS device counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 28020 and Local (Intracity Trip) count is 90041."
+- "Trip counts by region in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: North is 60308, West is 54116, South is 43677, East is 14766, and Unassigned is 582. It does not include cancelled trips."
 - "Total 28020 valid intercity trips with active Fixed GPS found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. It does not include cancelled trips."
 - "Total 150 trips found for date range from 2026-09-08 00:00:00 to 2026-09-08 23:59:59."
 """
