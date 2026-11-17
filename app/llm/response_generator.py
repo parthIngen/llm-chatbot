@@ -177,6 +177,7 @@ def build_natural_response(
     fixed_gps = str(filter_map.get("FixedGPS") or filter_map.get("fixedgps", "") or filter_map.get("fixed-gps-status", "")).lower().strip()
     fixed_elock = str(filter_map.get("FixedELock") or filter_map.get("fixedelock", "") or filter_map.get("fixed-elock-status", "")).lower().strip()
     portable_elock = str(filter_map.get("PortableELock") or filter_map.get("portableelock", "") or filter_map.get("portable-elock-status", "")).lower().strip()
+    priority = str(filter_map.get("priority", "")).lower().strip()
 
     prefix_parts = []
     if trip_status in ("running", "active"):
@@ -216,6 +217,10 @@ def build_natural_response(
         device_qualifiers.append("closed via web")
     elif close_remarks:
         device_qualifiers.append(f"closed with {close_remarks} remark")
+
+    # Priority
+    if priority:
+        device_qualifiers.append(f"marked as {priority} priority")
 
     # Devices
     if gps in ("nogps", "nogps ") or filter_map.get("gpsna"):
@@ -568,7 +573,7 @@ class ResponseGenerator:
             isinstance(api_data, list)
             and len(api_data) > 0
             and any(isinstance(row, dict) and "region" in row for row in api_data)
-            and any(isinstance(row, dict) and ("uniqueShipment" in row or "count" in row or "trip_count" in row) for row in api_data)
+            and any(isinstance(row, dict) and ("Shipments" in row or "shipments" in row or "uniqueShipment" in row or "count" in row or "trip_count" in row) for row in api_data)
         )
         if _is_region_breakdown_result:
             region_counts: Dict[str, int] = {}
@@ -578,7 +583,7 @@ class ResponseGenerator:
             for row in api_data:
                 if not isinstance(row, dict):
                     continue
-                cnt = row.get("uniqueShipment") or row.get("count") or row.get("trip_count") or row.get("total_count") or 0
+                cnt = row.get("Shipments") or row.get("shipments") or row.get("uniqueShipment") or row.get("count") or row.get("trip_count") or row.get("total_count") or 0
                 total_region_trips += cnt
                 raw_region = row.get("region")
                 if raw_region is None or str(raw_region).strip() == "" or str(raw_region).lower() in ("null", "none", "unassigned", "blank", "unknown"):

@@ -950,6 +950,8 @@ class IntentDetector:
                         return 9
                     elif field in ("routeCategory", "routeType", "tripType"):
                         return 10
+                    elif field == "priority":
+                        return 11
                     return 20
 
                 prev_payload["filters"].sort(key=_running_followup_sort_key)
@@ -1130,6 +1132,10 @@ class IntentDetector:
                 r'\b(?:in\s+each\s+region|for\s+each\s+region|across\s+(?:each|all)\s+regions?|per\s+region|each\s+region|by\s+region|region[\s-]wise|region\s+breakdown|breakdown\s+by\s+region|breakdown\s+across\s+regions?|breakdown\s+of\s+regions?)\b',
                 msg_lower
             )
+        )
+
+        _is_priority_query = bool(
+            re.search(r'\bpriorit(?:y|ies)\b', msg_lower)
         )
 
         _is_network_vs_local_query = bool(
@@ -1644,6 +1650,7 @@ class IntentDetector:
                 or _is_network_vs_local_query
                 or _is_trip_type_breakdown_query
                 or _is_each_region_query
+                or _is_priority_query
             ):
                 has_status_keyword = True
                 status_override = "valid"
@@ -2757,6 +2764,27 @@ class IntentDetector:
                     "value": remark_val
                 })
 
+            # --- Priority Post-Processing ---
+            # Rule: There are only two priorities: "low" and "high".
+            # If the question explicitly mentions high priority, pass "high"; else in all other priority cases, pass "low".
+            if _is_priority_query or any(isinstance(f, dict) and f.get("field") == "priority" for f in query_payload.get("filters", [])):
+                is_high_priority = bool(
+                    re.search(r'\b(?:high|critical|urgent)\s+priority\b', msg_lower)
+                    or re.search(r'\bpriority\s+(?:is\s+|as\s+|to\s+)?(?:high|critical|urgent)\b', msg_lower)
+                    or re.search(r'\bmarked\s+as\s+(?:high|critical|urgent)\s+priority\b', msg_lower)
+                    or re.search(r'\bmarked\s+(?:as\s+)?priority\s+(?:high|critical|urgent)\b', msg_lower)
+                )
+                priority_val = "high" if is_high_priority else "low"
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "priority")
+                ]
+                query_payload["filters"].append({
+                    "field": "priority",
+                    "operator": "eq",
+                    "value": priority_val
+                })
+
             # --- ATD / ATA Post-Processing ---
             # Normalize ATD/ATA field values to canonical forms
             _ATD_ATA_VALUE_MAP = {
@@ -2834,8 +2862,8 @@ class IntentDetector:
                 query_payload["metrics"] = [
                     {
                         "field": "shipmentNo",
-                        "function": "countDistinct",
-                        "alias": "uniqueShipment"
+                        "function": "count",
+                        "alias": "Shipments"
                     }
                 ]
                 query_payload.pop("select", None)
@@ -3266,6 +3294,8 @@ class IntentDetector:
                         return 9
                     elif field in ("routeCategory", "routeType", "tripType"):
                         return 10
+                    elif field == "priority":
+                        return 11
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
@@ -3297,6 +3327,8 @@ class IntentDetector:
                         return 9
                     elif field in ("routeCategory", "routeType", "tripType"):
                         return 10
+                    elif field == "priority":
+                        return 11
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
@@ -3327,6 +3359,8 @@ class IntentDetector:
                     return 9
                 elif field in ("routeCategory", "routeType", "tripType"):
                     return 10
+                elif field == "priority":
+                    return 11
                 return 20
 
             if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together)):
@@ -3401,6 +3435,9 @@ class IntentDetector:
                     r'\b(?:in\s+each\s+region|for\s+each\s+region|across\s+(?:each|all)\s+regions?|per\s+region|each\s+region|by\s+region|region[\s-]wise|region\s+breakdown|breakdown\s+by\s+region|breakdown\s+across\s+regions?|breakdown\s+of\s+regions?)\b',
                     msg_lower
                 )
+            )
+            fb_is_priority_query = bool(
+                re.search(r'\bpriorit(?:y|ies)\b', msg_lower)
             )
             fb_is_trip_type_breakdown_query = bool(
                 re.search(r'\bbreakdown\b', msg_lower)
@@ -3620,6 +3657,7 @@ class IntentDetector:
                     or fb_is_network_vs_local_query
                     or fb_is_trip_type_breakdown_query
                     or fb_is_each_region_query
+                    or fb_is_priority_query
                 ):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
@@ -4611,8 +4649,8 @@ class IntentDetector:
                 fallback_payload["metrics"] = [
                     {
                         "field": "shipmentNo",
-                        "function": "countDistinct",
-                        "alias": "uniqueShipment"
+                        "function": "count",
+                        "alias": "Shipments"
                     }
                 ]
                 fallback_payload.pop("select", None)
@@ -5140,6 +5178,8 @@ class IntentDetector:
                         return 9
                     elif field in ("routeCategory", "routeType", "tripType"):
                         return 10
+                    elif field == "priority":
+                        return 11
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
@@ -5171,10 +5211,33 @@ class IntentDetector:
                         return 9
                     elif field in ("routeCategory", "routeType", "tripType"):
                         return 10
+                    elif field == "priority":
+                        return 11
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
                     fallback_payload["filters"].sort(key=_fb_route_filter_sort_key)
+
+            # --- Priority Fallback Post-Processing ---
+            # Rule: There are only two priorities: "low" and "high".
+            # If the question explicitly mentions high priority, pass "high"; else in all other priority cases, pass "low".
+            if fb_is_priority_query or any(isinstance(f, dict) and f.get("field") == "priority" for f in fallback_payload.get("filters", [])):
+                fb_is_high = bool(
+                    re.search(r'\b(?:high|critical|urgent)\s+priority\b', msg_lower)
+                    or re.search(r'\bpriority\s+(?:is\s+|as\s+|to\s+)?(?:high|critical|urgent)\b', msg_lower)
+                    or re.search(r'\bmarked\s+as\s+(?:high|critical|urgent)\s+priority\b', msg_lower)
+                    or re.search(r'\bmarked\s+(?:as\s+)?priority\s+(?:high|critical|urgent)\b', msg_lower)
+                )
+                fb_priority_val = "high" if fb_is_high else "low"
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "priority")
+                ]
+                fallback_payload["filters"].append({
+                    "field": "priority",
+                    "operator": "eq",
+                    "value": fb_priority_val
+                })
 
             def _fb_standard_filter_sort_key(flt):
                 if not isinstance(flt, dict):
@@ -5201,6 +5264,8 @@ class IntentDetector:
                     return 9
                 elif field in ("routeCategory", "routeType", "tripType"):
                     return 10
+                elif field == "priority":
+                    return 11
                 return 20
 
             if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query or fb_is_active_device_elock_query or fb_is_active_device_portable_query or fb_is_distinct_transporter_query or fb_is_portable_elock_trip_query or fb_is_fixed_elock_trip_query or fb_is_fixed_gps_combo or fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only or fb_is_trip_type_breakdown_query or fb_is_network_vs_local_query or fb_is_no_gps_vehicle_query or fb_is_gps_trip_query or (fb_target_vendor and not fb_is_devices_together)):
