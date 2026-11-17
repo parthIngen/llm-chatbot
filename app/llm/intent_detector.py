@@ -952,6 +952,8 @@ class IntentDetector:
                         return 10
                     elif field == "priority":
                         return 11
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 12
                     return 20
 
                 prev_payload["filters"].sort(key=_running_followup_sort_key)
@@ -1136,6 +1138,41 @@ class IntentDetector:
 
         _is_priority_query = bool(
             re.search(r'\bpriorit(?:y|ies)\b', msg_lower)
+        )
+
+        _is_priority_vs_query = bool(
+            re.search(r'\b(?:high\s+priority\s+(?:vs\.?|versus|and|or|to)\s+(?:standard|normal|low)(?:\s+priority)?)\b', msg_lower)
+            or re.search(r'\b(?:(?:standard|normal|low)\s+(?:priority\s+)?(?:vs\.?|versus|and|or|to)\s+high\s+priority)\b', msg_lower)
+            or (
+                re.search(r'\b(?:compare|comparison|versus|vs\.?|difference|ratio)\b', msg_lower)
+                and re.search(r'\bhigh\s+priority\b', msg_lower)
+                and re.search(r'\b(?:standard|normal|low)\b', msg_lower)
+            )
+            or re.search(r'\b(?:in\s+each\s+priority|per\s+priority|by\s+priority|priority[\s-]wise|priority\s+breakdown|breakdown\s+by\s+priority|breakdown\s+across\s+priorit(?:y|ies))\b', msg_lower)
+        )
+
+        _REMARK_MAP = {
+            "manual": "manual",
+            "manually": "manual",
+            "forcefully": "forcefully",
+            "forcefull": "forcefully",
+            "forceful": "forcefully",
+            "geofence": "geofence",
+            "geo-fence": "geofence",
+            "geo fence": "geofence",
+            "polygon": "polygon",
+            "api": "api",
+            "backend": "backend",
+            "web": "web",
+        }
+
+        _is_closeremark_query = bool(
+            re.search(r'\b(?:closed|close|closing)\s+(?:automatically\s+)?(?:via\s+|by\s+|through\s+)?(?:manual|manually|forcefully|forcefull|forceful|geofence|geo[\s-]fence|polygon|api|backend|web)\b', msg_lower)
+            or re.search(r'\b(?:close\s*remark[s]?|closeremark[s]?|remark[s]?)\s*[:=]?\s*(?:manual|manually|forcefully|forcefull|forceful|geofence|geo[\s-]fence|polygon|api|backend|web)\b', msg_lower)
+            or re.search(r'\b(?:closed|close|closing)\s+(?:with\s+(?:remark\s+)?)?(?:manual|manually|forcefully|forcefull|forceful|geofence|geo[\s-]fence|polygon|api|backend|web)\b', msg_lower)
+            or re.search(r'\bvia\s+(?:forcefull|forcefully|forceful|geofence|geo[\s-]fence|polygon)\b', msg_lower)
+            or re.search(r'\b(?:forcefully|forcefull|forceful|geofence|polygon)\s+(?:closed|remark)\b', msg_lower)
+            or ((re.search(r'\b(?:forcefully|forcefull|forceful|geofence|polygon)\b', msg_lower) is not None) and (re.search(r'\b(?:closed|close)\b', msg_lower) is not None))
         )
 
         _is_network_vs_local_query = bool(
@@ -1651,6 +1688,7 @@ class IntentDetector:
                 or _is_trip_type_breakdown_query
                 or _is_each_region_query
                 or _is_priority_query
+                or _is_closeremark_query
             ):
                 has_status_keyword = True
                 status_override = "valid"
@@ -2169,7 +2207,7 @@ class IntentDetector:
                 if _is_across_trip_types:
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
-                        if not (isinstance(f, dict) and (f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"] or (f.get("field") in ["GPS", "FixedGPS"] and f.get("value") == "active")))
+                        if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"])
                     ]
                     query_payload.pop("select", None)
                     query_payload["groupBy"] = ["tripType"]
@@ -2209,10 +2247,10 @@ class IntentDetector:
                     if fld in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 3
                     if _is_across_trip_types:
-                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 4
                         if fld == "runDate":
-                            return 5 if flt.get("operator") == "gte" else 6
+                            return 4 if flt.get("operator") == "gte" else 5
+                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                            return 6
                     elif dev_single_route_category:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
                             return 4
@@ -2740,34 +2778,47 @@ class IntentDetector:
                     "value": route_category_value
                 })
 
-            # --- closeRemarks Post-Processing ---
-            _VALID_REMARKS = {"manual", "forcefully", "geofence", "api", "backend", "web"}
-            remark_match = re.search(
-                r'\b(manual|forcefully|geofence|api|backend|web)\b(?:\s+remark)?',
-                msg_lower
-            )
-            if not remark_match:
-                remark_match = re.search(
-                    r'\bremark[s]?\s+(manual|forcefully|geofence|api|backend|web)\b',
-                    msg_lower
-                )
-            if remark_match:
-                remark_val = remark_match.group(1)
-                # Remove any existing closeRemarks filter from LLM output first
-                query_payload["filters"] = [
-                    f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") == "closeRemarks")
-                ]
-                query_payload["filters"].append({
-                    "field": "closeRemarks",
-                    "operator": "eq",
-                    "value": remark_val
-                })
+            # --- closeremark Post-Processing ---
+            if _is_closeremark_query or any(isinstance(f, dict) and f.get("field") in ("closeremark", "closeRemarks", "closeRemark", "close_remark") for f in query_payload.get("filters", [])):
+                detected_remark_val = None
+                remark_pattern = r'\b(manual|manually|forcefully|forcefull|forceful|geofence|geo[\s-]fence|polygon|api|backend|web)\b'
+                rm_match = re.search(remark_pattern, msg_lower)
+                if rm_match:
+                    raw_val = rm_match.group(1).replace("-", "").replace(" ", "")
+                    detected_remark_val = _REMARK_MAP.get(raw_val, raw_val)
+                else:
+                    for f in query_payload.get("filters", []):
+                        if isinstance(f, dict) and f.get("field") in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                            v = str(f.get("value", "")).lower().strip()
+                            detected_remark_val = _REMARK_MAP.get(v, v)
+                            break
+                if detected_remark_val:
+                    query_payload["filters"] = [
+                        f for f in query_payload.get("filters", [])
+                        if not (isinstance(f, dict) and f.get("field") in ("closeremark", "closeRemarks", "closeRemark", "close_remark"))
+                    ]
+                    query_payload["filters"].append({
+                        "field": "closeremark",
+                        "operator": "eq",
+                        "value": detected_remark_val
+                    })
 
             # --- Priority Post-Processing ---
-            # Rule: There are only two priorities: "low" and "high".
-            # If the question explicitly mentions high priority, pass "high"; else in all other priority cases, pass "low".
-            if _is_priority_query or any(isinstance(f, dict) and f.get("field") == "priority" for f in query_payload.get("filters", [])):
+            if _is_priority_vs_query:
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "priority")
+                ]
+                query_payload["groupBy"] = ["priority"]
+                query_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "uniqueShipment"
+                    }
+                ]
+                query_payload.pop("select", None)
+            elif _is_priority_query or any(isinstance(f, dict) and f.get("field") == "priority" for f in query_payload.get("filters", [])):
                 is_high_priority = bool(
                     re.search(r'\b(?:high|critical|urgent)\s+priority\b', msg_lower)
                     or re.search(r'\bpriority\s+(?:is\s+|as\s+|to\s+)?(?:high|critical|urgent)\b', msg_lower)
@@ -3296,6 +3347,8 @@ class IntentDetector:
                         return 10
                     elif field == "priority":
                         return 11
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 12
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
@@ -3329,6 +3382,8 @@ class IntentDetector:
                         return 10
                     elif field == "priority":
                         return 11
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 12
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
@@ -3438,6 +3493,24 @@ class IntentDetector:
             )
             fb_is_priority_query = bool(
                 re.search(r'\bpriorit(?:y|ies)\b', msg_lower)
+            )
+            fb_is_priority_vs_query = bool(
+                re.search(r'\b(?:high\s+priority\s+(?:vs\.?|versus|and|or|to)\s+(?:standard|normal|low)(?:\s+priority)?)\b', msg_lower)
+                or re.search(r'\b(?:(?:standard|normal|low)\s+(?:priority\s+)?(?:vs\.?|versus|and|or|to)\s+high\s+priority)\b', msg_lower)
+                or (
+                    re.search(r'\b(?:compare|comparison|versus|vs\.?|difference|ratio)\b', msg_lower)
+                    and re.search(r'\bhigh\s+priority\b', msg_lower)
+                    and re.search(r'\b(?:standard|normal|low)\b', msg_lower)
+                )
+                or re.search(r'\b(?:in\s+each\s+priority|per\s+priority|by\s+priority|priority[\s-]wise|priority\s+breakdown|breakdown\s+by\s+priority|breakdown\s+across\s+priorit(?:y|ies))\b', msg_lower)
+            )
+            fb_is_closeremark_query = bool(
+                re.search(r'\b(?:closed|close|closing)\s+(?:automatically\s+)?(?:via\s+|by\s+|through\s+)?(?:manual|manually|forcefully|forcefull|forceful|geofence|geo[\s-]fence|polygon|api|backend|web)\b', msg_lower)
+                or re.search(r'\b(?:close\s*remark[s]?|closeremark[s]?|remark[s]?)\s*[:=]?\s*(?:manual|manually|forcefully|forcefull|forceful|geofence|geo[\s-]fence|polygon|api|backend|web)\b', msg_lower)
+                or re.search(r'\b(?:closed|close|closing)\s+(?:with\s+(?:remark\s+)?)?(?:manual|manually|forcefully|forcefull|forceful|geofence|geo[\s-]fence|polygon|api|backend|web)\b', msg_lower)
+                or re.search(r'\bvia\s+(?:forcefull|forcefully|forceful|geofence|geo[\s-]fence|polygon)\b', msg_lower)
+                or re.search(r'\b(?:forcefully|forcefull|forceful|geofence|polygon)\s+(?:closed|remark)\b', msg_lower)
+                or ((re.search(r'\b(?:forcefully|forcefull|forceful|geofence|polygon)\b', msg_lower) is not None) and (re.search(r'\b(?:closed|close)\b', msg_lower) is not None))
             )
             fb_is_trip_type_breakdown_query = bool(
                 re.search(r'\bbreakdown\b', msg_lower)
@@ -3658,6 +3731,7 @@ class IntentDetector:
                     or fb_is_trip_type_breakdown_query
                     or fb_is_each_region_query
                     or fb_is_priority_query
+                    or fb_is_closeremark_query
                 ):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
@@ -4085,7 +4159,7 @@ class IntentDetector:
                 if fb_is_across_trip_types:
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
-                        if not (isinstance(f, dict) and (f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"] or (f.get("field") in ["GPS", "FixedGPS"] and f.get("value") == "active")))
+                        if not (isinstance(f, dict) and f.get("field") in ["routeType", "routeCategory", "tripType", "shipmentMethod"])
                     ]
                     fallback_payload.pop("select", None)
                     fallback_payload["groupBy"] = ["tripType"]
@@ -4125,10 +4199,10 @@ class IntentDetector:
                     if fld in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 3
                     if fb_is_across_trip_types:
-                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 4
                         if fld == "runDate":
-                            return 5 if flt.get("operator") == "gte" else 6
+                            return 4 if flt.get("operator") == "gte" else 5
+                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                            return 6
                     elif fb_single_route_category:
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
                             return 4
@@ -5180,6 +5254,8 @@ class IntentDetector:
                         return 10
                     elif field == "priority":
                         return 11
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 12
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
@@ -5213,15 +5289,29 @@ class IntentDetector:
                         return 10
                     elif field == "priority":
                         return 11
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 12
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
                     fallback_payload["filters"].sort(key=_fb_route_filter_sort_key)
 
             # --- Priority Fallback Post-Processing ---
-            # Rule: There are only two priorities: "low" and "high".
-            # If the question explicitly mentions high priority, pass "high"; else in all other priority cases, pass "low".
-            if fb_is_priority_query or any(isinstance(f, dict) and f.get("field") == "priority" for f in fallback_payload.get("filters", [])):
+            if fb_is_priority_vs_query:
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") == "priority")
+                ]
+                fallback_payload["groupBy"] = ["priority"]
+                fallback_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "uniqueShipment"
+                    }
+                ]
+                fallback_payload.pop("select", None)
+            elif fb_is_priority_query or any(isinstance(f, dict) and f.get("field") == "priority" for f in fallback_payload.get("filters", [])):
                 fb_is_high = bool(
                     re.search(r'\b(?:high|critical|urgent)\s+priority\b', msg_lower)
                     or re.search(r'\bpriority\s+(?:is\s+|as\s+|to\s+)?(?:high|critical|urgent)\b', msg_lower)
@@ -5238,6 +5328,31 @@ class IntentDetector:
                     "operator": "eq",
                     "value": fb_priority_val
                 })
+
+            # --- closeremark Fallback Post-Processing ---
+            if fb_is_closeremark_query or any(isinstance(f, dict) and f.get("field") in ("closeremark", "closeRemarks", "closeRemark", "close_remark") for f in fallback_payload.get("filters", [])):
+                fb_detected_remark = None
+                remark_pattern = r'\b(manual|manually|forcefully|forcefull|forceful|geofence|geo[\s-]fence|polygon|api|backend|web)\b'
+                rm_match = re.search(remark_pattern, msg_lower)
+                if rm_match:
+                    raw_val = rm_match.group(1).replace("-", "").replace(" ", "")
+                    fb_detected_remark = _REMARK_MAP.get(raw_val, raw_val)
+                else:
+                    for f in fallback_payload.get("filters", []):
+                        if isinstance(f, dict) and f.get("field") in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                            v = str(f.get("value", "")).lower().strip()
+                            fb_detected_remark = _REMARK_MAP.get(v, v)
+                            break
+                if fb_detected_remark:
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload.get("filters", [])
+                        if not (isinstance(f, dict) and f.get("field") in ("closeremark", "closeRemarks", "closeRemark", "close_remark"))
+                    ]
+                    fallback_payload["filters"].append({
+                        "field": "closeremark",
+                        "operator": "eq",
+                        "value": fb_detected_remark
+                    })
 
             def _fb_standard_filter_sort_key(flt):
                 if not isinstance(flt, dict):
@@ -5266,6 +5381,8 @@ class IntentDetector:
                     return 10
                 elif field == "priority":
                     return 11
+                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                    return 12
                 return 20
 
             if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query or fb_is_active_device_elock_query or fb_is_active_device_portable_query or fb_is_distinct_transporter_query or fb_is_portable_elock_trip_query or fb_is_fixed_elock_trip_query or fb_is_fixed_gps_combo or fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only or fb_is_trip_type_breakdown_query or fb_is_network_vs_local_query or fb_is_no_gps_vehicle_query or fb_is_gps_trip_query or (fb_target_vendor and not fb_is_devices_together)):

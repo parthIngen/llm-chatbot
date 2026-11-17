@@ -170,7 +170,7 @@ def build_natural_response(
     route = filter_map.get("Route") or filter_map.get("RouteName") or filter_map.get("route")
     from_loc = filter_map.get("From")
     to_loc = filter_map.get("To")
-    close_remarks = str(filter_map.get("closeRemarks", "")).lower()
+    close_remarks = str(filter_map.get("closeremark") or filter_map.get("closeRemarks", "")).lower().strip()
     atd = str(filter_map.get("ATD", "")).lower()
     ata = str(filter_map.get("ATA", "")).lower()
     gps = str(filter_map.get("GPS") or filter_map.get("gps", "") or filter_map.get("fixed-gps-status", "")).lower().strip()
@@ -203,12 +203,14 @@ def build_natural_response(
 
     device_qualifiers = []
     # Remarks
-    if close_remarks == "manual":
+    if close_remarks in ("manual", "manually"):
         device_qualifiers.append("closed manually")
-    elif close_remarks == "forcefully":
+    elif close_remarks in ("forcefully", "forcefull", "forceful"):
         device_qualifiers.append("closed forcefully")
     elif close_remarks == "geofence":
         device_qualifiers.append("closed by geofence")
+    elif close_remarks == "polygon":
+        device_qualifiers.append("closed by polygon")
     elif close_remarks == "api":
         device_qualifiers.append("closed via API")
     elif close_remarks == "backend":
@@ -616,6 +618,48 @@ class ResponseGenerator:
 
             status_note = " It does not include cancelled trips." if trip_status == "valid" else ""
             return f"Trip counts by region{date_clause}: {breakdown_str}.{status_note}"
+
+        # Detect priority breakdown/comparison grouped result (e.g. High Priority vs Standard / Normal):
+        _is_priority_breakdown_result = (
+            isinstance(api_data, list)
+            and len(api_data) > 0
+            and any(isinstance(row, dict) and ("priority" in row or "tripPriorityName" in row) for row in api_data)
+            and any(isinstance(row, dict) and ("uniqueShipment" in row or "Shipments" in row or "shipments" in row or "count" in row or "trip_count" in row) for row in api_data)
+        )
+        if _is_priority_breakdown_result:
+            high_count = 0
+            normal_count = 0
+            has_high = False
+            has_normal = False
+            priority_items = []
+
+            for row in api_data:
+                if not isinstance(row, dict):
+                    continue
+                cnt = row.get("uniqueShipment") or row.get("Shipments") or row.get("shipments") or row.get("count") or row.get("trip_count") or row.get("total_count") or 0
+                name = str(row.get("tripPriorityName") or "").strip()
+                p_val = row.get("priority")
+
+                if "high" in name.lower() or p_val == 1 or str(p_val).lower() == "high":
+                    high_count += cnt
+                    has_high = True
+                elif "normal" in name.lower() or "standard" in name.lower() or "low" in name.lower() or p_val is None or str(p_val).lower() in ("null", "none", "0", "2", "low"):
+                    normal_count += cnt
+                    has_normal = True
+                else:
+                    label = name if name else f"Priority {p_val}"
+                    priority_items.append(f"{label} trips are {cnt}")
+
+            if has_high and has_normal:
+                return f"High Priority trips are {high_count} and Normal Priority trips are {normal_count}."
+            elif has_high and not has_normal:
+                return f"High Priority trips are {high_count}."
+            elif has_normal and not has_high:
+                return f"Normal Priority trips are {normal_count}."
+            elif priority_items:
+                return " and ".join(priority_items) + "."
+            else:
+                return f"High Priority trips are {high_count} and Normal Priority trips are {normal_count}."
 
         # Format natural language response converting all filter fields
         natural_formatted_response = build_natural_response(

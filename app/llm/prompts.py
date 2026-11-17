@@ -80,8 +80,8 @@ FIELD REFERENCE (use these exact API field names and allowed values):
   Portable ELock Exception -> field: "PortableELock"  (also accepted as "portableelock")
                               values: "inactive", "nogps", "gpsInactive", "NA", "Active"
 
-  Remarks       -> field: "closeRemarks"
-                   values: "manual", "forcefully", "geofence", "api", "backend", "web"
+  Remarks       -> field: "closeremark"
+                   values: "manual", "forcefully", "geofence", "polygon", "api", "backend", "web"
 
   ATD (Actual Time of Departure) -> field: "ATD"
                    values: "notcaptured", "Captured", "missing", "NotMissing"
@@ -128,7 +128,7 @@ CRITICAL RULES:
    - "ATA is not captured" -> ATA eq "notcaptured"
    - "GPS is active but ATD is not captured/missing" -> FixedGPS eq "Active", ATD eq "missing"
    - "GPS is active but ATA is missing" -> FixedGPS eq "Active", ATA eq "missing"
-   - "closed with remark manual/forcefully/geofence/api/backend/web" -> closeRemarks eq "<remark>"
+   - "closed automatically via forcefull/geofence", "closed with remark manual/forcefully/geofence/polygon/api/backend/web" -> closeremark eq "<remark>", tripStatus eq "valid"
    - "marked as high priority", "high priority trips" -> priority eq "high", select: []
    - "marked as low priority", "low priority", "standard priority", "normal priority", "medium priority", or any priority query without explicit "high" -> priority eq "low", select: []
    - "departure/arrival was delayed" -> analytics: [{"type": "departureDelayed"/"arrivalDelayed"}]
@@ -371,8 +371,13 @@ CRITICAL RULES:
     - "captured" -> value: "Captured"
     - "missing" -> value: "missing"
     - "not missing" / "notmissing" -> value: "NotMissing"
-13. For Remarks queries: use field "closeRemarks". Valid values are: "manual", "forcefully", "geofence", "api", "backend", "web".
-13b. For Priority queries: there are ONLY two priorities: "high" and "low". If the query explicitly mentions high priority (e.g. "high priority", "marked as high priority"), use field "priority" with operator "eq" and value "high". In ALL other priority queries (e.g. "standard priority", "normal priority", "medium priority", "low priority", or general "priority"), value MUST be "low". Filter order: groupId first, then tripStatus (default "valid"), then runDate gte, then runDate lte, then priority. Include select: [].
+13. For Remarks queries (e.g. "closed automatically via forcefull", "closed automatically via geofence", "closed by polygon"): use field "closeremark" (operator "eq"). Allowed values are: "manual", "forcefully", "geofence", "polygon", "api", "backend", "web". Note: "forcefull" or "forceful" maps to "forcefully". Even if the query mentions "closed", set tripStatus to "valid". Filter order: groupId (0041) first, then tripStatus ("valid"), then runDate gte, then runDate lte, then closeremark. Include select: [].
+13b. For Priority queries:
+    - Comparison / Breakdown (e.g. "How many trips were marked as high priority vs. standard in aug 2026?", "high priority vs standard", "priority breakdown"):
+      Do NOT include a "priority" filter in "filters".
+      Include "groupBy": ["priority"], and "metrics": [{"field": "shipmentNo", "function": "count", "alias": "uniqueShipment"}].
+      Filters MUST only contain: groupId (0041), tripStatus ("valid"), runDate gte, runDate lte. Do NOT include select: [].
+    - Specific Priority: There are ONLY two priorities: "high" and "low". If the query explicitly mentions high priority (e.g. "high priority", "marked as high priority"), use field "priority" with operator "eq" and value "high", select: []. In ALL other specific priority queries (e.g. "standard priority", "normal priority", "medium priority", "low priority", or general "priority"), value MUST be "low", select: []. Filter order: groupId first, then tripStatus (default "valid"), then runDate gte, then runDate lte, then priority.
 14. DEVICE / GPS / ELOCK ANALYTICS PAYLOAD RULES (BASIC Question availability/na/inactive/active/only):
    When querying counts/trips related to GPS, Fixed E-Lock, or Portable E-Lock:
    A. FIXED GPS / GPS:
@@ -458,7 +463,7 @@ Reference Examples:
 - "Show empty trips for last month" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_MONTH_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_MONTH_END"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "empty"}], "select": []}
 - "Count speed trips closed with geofence remark in January 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "closed"}, {"field": "shipmentMethod", "operator": "eq", "value": "speed"}, {"field": "closeRemarks", "operator": "eq", "value": "geofence"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "shipmentMethod", "operator": "eq", "value": "speed"}, {"field": "closeremark", "operator": "eq", "value": "geofence"}], "select": []}
 - "Show delivery trips where ATD is not captured" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "shipmentMethod", "operator": "eq", "value": "delivery"}, {"field": "ATD", "operator": "eq", "value": "notcaptured"}], "select": []}
 - "Show network trips with FixedGPS as nogps" ->
@@ -554,7 +559,7 @@ Reference Examples:
 - "GPS with active GPS August 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}], "select": []}
 - "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026" ->
-  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "How many trips occurred in each region in Aug 2026?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["region"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "Shipments"}]}
 - "How many trips were marked as high priority in aug 2026?" ->
@@ -563,6 +568,12 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "priority", "operator": "eq", "value": "low"}], "select": []}
 - "How many trips were marked as standard priority in aug 2026?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "priority", "operator": "eq", "value": "low"}], "select": []}
+- "How many trips were marked as high priority vs. standard in aug 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["priority"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "uniqueShipment"}]}
+- "How many trips were closed automatically via forcefull in Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "closeremark", "operator": "eq", "value": "forcefully"}], "select": []}
+- "How many trips were closed automatically via Geofence in Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "closeremark", "operator": "eq", "value": "geofence"}], "select": []}
 - "Show active Fixed GPS device count across Intercity trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}]}
 - "Show active device status for Fixed GPS units on Valid Intercity trips during Aug 2026" ->
@@ -677,6 +688,9 @@ Rules:
 5. Region Breakdown Results (API Results have "region" and "Shipments" / "uniqueShipment" / "count"):
    - Output the counts for each region (e.g. North, West, South, East) sorted descending, followed by Unassigned (null or blank region):
      "Trip counts by region in date range from <start_date> to <end_date>: North is <count>, West is <count>, South is <count>, East is <count>, and Unassigned is <count>. It does not include cancelled trips."
+6. Priority Comparison Results (API Results have "priority" / "tripPriorityName" and "uniqueShipment"):
+   - Output the natural language comparison:
+     "High Priority trips are <high_count> and Normal Priority trips are <normal_count>."
 
 Example outputs:
 - "Total 1 distinct vehicles used by transporter PRADEESH N V in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59."
@@ -686,6 +700,7 @@ Example outputs:
 - "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120 and Local (Intracity Trip) count is 80."
 - "Active Fixed GPS device counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 28020 and Local (Intracity Trip) count is 90041."
 - "Trip counts by region in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: North is 60308, West is 54116, South is 43677, East is 14766, and Unassigned is 582. It does not include cancelled trips."
+- "High Priority trips are 7533 and Normal Priority trips are 166006."
 - "Total 28020 valid intercity trips with active Fixed GPS found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. It does not include cancelled trips."
 - "Total 42 valid trips marked as high priority found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. It does not include cancelled trips."
 - "Total 150 trips found for date range from 2026-09-08 00:00:00 to 2026-09-08 23:59:59."

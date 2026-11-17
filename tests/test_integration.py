@@ -6221,7 +6221,8 @@ async def test_active_fixed_gps_across_intercity_and_intracity_flow():
                 {"field": "groupId", "operator": "eq", "value": "0041"},
                 {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
-                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "GPS", "operator": "eq", "value": "active"}
             ],
             "groupBy": ["tripType"],
             "metrics": [
@@ -6279,7 +6280,8 @@ async def test_active_fixed_gps_across_intercity_and_intracity_fallback_flow():
                 {"field": "groupId", "operator": "eq", "value": "0041"},
                 {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
-                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "GPS", "operator": "eq", "value": "active"}
             ],
             "groupBy": ["tripType"],
             "metrics": [
@@ -7925,6 +7927,349 @@ async def test_standard_priority_trips_aug_2026_fallback_flow():
             "It does not include cancelled trips."
         )
         assert data["response"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_closed_automatically_forcefull_flow():
+    user_query = "How many trips were closed automatically via forcefull in Aug 2026?"
+    from unittest.mock import MagicMock
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "closeremark", "operator": "eq", "value": "forcefully"}
+        ],
+        "select": []
+    })
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.return_value = llm_payload
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 42}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-closed-forcefull-aug-2026",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "closeremark", "operator": "eq", "value": "forcefully"}
+        ]
+
+        expected_text = (
+            "Total 42 valid trips closed forcefully found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. "
+            "It does not include cancelled trips."
+        )
+        assert data["response"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_closed_automatically_forcefull_fallback_flow():
+    user_query = "How many trips were closed automatically via forcefull in Aug 2026?"
+    from unittest.mock import MagicMock
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM fallback triggered")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 42}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-closed-forcefull-aug-2026-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "closeremark", "operator": "eq", "value": "forcefully"}
+        ]
+
+        expected_text = (
+            "Total 42 valid trips closed forcefully found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. "
+            "It does not include cancelled trips."
+        )
+        assert data["response"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_closed_automatically_geofence_flow():
+    user_query = "How many trips were closed automatically via Geofence in Aug 2026?"
+    from unittest.mock import MagicMock
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "closeremark", "operator": "eq", "value": "geofence"}
+        ],
+        "select": []
+    })
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.return_value = llm_payload
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 42}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-closed-geofence-aug-2026",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "closeremark", "operator": "eq", "value": "geofence"}
+        ]
+
+        expected_text = (
+            "Total 42 valid trips closed by geofence found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. "
+            "It does not include cancelled trips."
+        )
+        assert data["response"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_closed_automatically_geofence_fallback_flow():
+    user_query = "How many trips were closed automatically via Geofence in Aug 2026?"
+    from unittest.mock import MagicMock
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM fallback triggered")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 42}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-closed-geofence-aug-2026-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "closeremark", "operator": "eq", "value": "geofence"}
+        ]
+
+        expected_text = (
+            "Total 42 valid trips closed by geofence found in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59. "
+            "It does not include cancelled trips."
+        )
+        assert data["response"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_high_priority_vs_standard_aug_2026_flow():
+    user_query = "How many trips were marked as high priority vs. standard in aug 2026?"
+    from unittest.mock import MagicMock
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "groupBy": ["priority"],
+        "metrics": [
+            {
+                "field": "shipmentNo",
+                "function": "count",
+                "alias": "uniqueShipment"
+            }
+        ]
+    })
+
+    api_response_data = {
+        "success": True,
+        "data": [
+            {
+                "uniqueShipment": 7533,
+                "priority": 1,
+                "tripPriorityName": "High Priority"
+            },
+            {
+                "uniqueShipment": 166006,
+                "priority": None,
+                "tripPriorityName": "Normal Priority"
+            }
+        ]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.return_value = llm_payload
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-priority-vs-aug-2026",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert "select" not in entities
+        assert entities["groupBy"] == ["priority"]
+        assert entities["metrics"] == [
+            {"field": "shipmentNo", "function": "count", "alias": "uniqueShipment"}
+        ]
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ]
+
+        expected_text = "High Priority trips are 7533 and Normal Priority trips are 166006."
+        assert data["response"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_high_priority_vs_standard_aug_2026_fallback_flow():
+    user_query = "How many trips were marked as high priority vs. standard in aug 2026?"
+    from unittest.mock import MagicMock
+
+    api_response_data = {
+        "success": True,
+        "data": [
+            {
+                "uniqueShipment": 7533,
+                "priority": 1,
+                "tripPriorityName": "High Priority"
+            },
+            {
+                "uniqueShipment": 166006,
+                "priority": None,
+                "tripPriorityName": "Normal Priority"
+            }
+        ]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM fallback triggered")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-priority-vs-aug-2026-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert "select" not in entities
+        assert entities["groupBy"] == ["priority"]
+        assert entities["metrics"] == [
+            {"field": "shipmentNo", "function": "count", "alias": "uniqueShipment"}
+        ]
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ]
+
+        expected_text = "High Priority trips are 7533 and Normal Priority trips are 166006."
+        assert data["response"] == expected_text
+
+
 
 
 
