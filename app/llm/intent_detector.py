@@ -827,7 +827,8 @@ _STOP_LOCATION_WORDS = {
     "active", "running", "closed", "completed", "cancelled", "cancel", "location", "locations",
     "is", "are", "was", "were", "be", "been", "being", "as", "at", "in", "on", "of", "for",
     "to", "from", "with", "where", "which", "that", "and", "or", "not", "show", "get", "give",
-    "list", "find", "trip", "trips", "secutrak", "icici", "ilgic", "thirdparty"
+    "list", "find", "trip", "trips", "secutrak", "icici", "ilgic", "thirdparty",
+    "total", "na", "fixed", "portable", "fixedgps", "fixedelock", "portableelock", "status", "count", "tal"
 }
 
 _ATD_ATA_VALUE_MAP = {
@@ -3080,7 +3081,7 @@ class IntentDetector:
 
             has_source_filter = any(isinstance(f, dict) and f.get("field") == "source" for f in query_payload.get("filters", []))
             if not has_source_filter:
-                src_match = re.search(r'\b(?:(?:source|origin)\s*(?:is|from|as)?|starting\s+(?:from|at)?|\bfrom)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                src_match = re.search(r'\b(?:(?:source|origin)\s*(?:is|from|as)?|starting\s+(?:from|at)?|\bfrom\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
                 if src_match:
                     val = src_match.group(1).strip()
                     if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
@@ -3092,7 +3093,7 @@ class IntentDetector:
 
             has_dest_filter = any(isinstance(f, dict) and f.get("field") == "destination" for f in query_payload.get("filters", []))
             if not has_dest_filter:
-                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
                 if dest_match:
                     val = dest_match.group(1).strip()
                     if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
@@ -5907,7 +5908,7 @@ class IntentDetector:
 
             fb_has_source = any(isinstance(f, dict) and f.get("field") == "source" for f in fallback_payload.get("filters", []))
             if not fb_has_source:
-                src_match = re.search(r'\b(?:(?:source|origin)\s*(?:is|from|as)?|starting\s+(?:from|at)?|\bfrom)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                src_match = re.search(r'\b(?:(?:source|origin)\s*(?:is|from|as)?|starting\s+(?:from|at)?|\bfrom\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
                 if src_match:
                     val = src_match.group(1).strip()
                     if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
@@ -5919,7 +5920,7 @@ class IntentDetector:
 
             fb_has_dest = any(isinstance(f, dict) and f.get("field") == "destination" for f in fallback_payload.get("filters", []))
             if not fb_has_dest:
-                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
                 if dest_match:
                     val = dest_match.group(1).strip()
                     if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():

@@ -9001,17 +9001,17 @@ async def test_active_trips_from_nga_last_week_fallback_flow():
         ]
 
 
-def test_fallback_location_with_gps_and_atd_missing_groq_rate_limit(client):
+def test_fallback_location_with_gps_and_atd_missing_groq_rate_limit():
     """
     Test fallback execution when LLM call fails (e.g. Groq 413 / rate limit exceeded).
     Ensures _STOP_LOCATION_WORDS and _ATD_ATA_VALUE_MAP do not trigger UnboundLocalError.
     """
-    from app.core.exceptions import LLMClientError
+    from app.llm.client import LLMClientError
 
     user_query = "Show trips from NGA location where GPS is active but ATD is missing of august"
 
-    with patch("app.llm.groq_client.GroqClient.complete", new_callable=AsyncMock) as mock_complete:
-        mock_complete.side_effect = LLMClientError("LLM Provider (groq) returned status code 413: Rate limit exceeded")
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_complete:
+        mock_complete.side_effect = LLMClientError("LLM Provider returned status code 413: Rate limit exceeded")
 
         payload = {
             "message": user_query,
@@ -9037,6 +9037,48 @@ def test_fallback_location_with_gps_and_atd_missing_groq_rate_limit(client):
         assert {"field": "atd", "operator": "eq", "value": "missing"} in filters
         assert any(f.get("field") == "runDate" and f.get("operator") == "gte" and "2026-08-01" in f.get("value") for f in filters)
         assert any(f.get("field") == "runDate" and f.get("operator") == "lte" and "2026-08-31" in f.get("value") for f in filters)
+
+
+def test_total_fixed_gps_na_trips():
+    """
+    Test that 'Total Fixed GPS GPS NA trips in August 2026' produces:
+    - analytics: [{'type': 'gpsna'}]
+    - filters: groupId eq 0041, tripStatus eq valid, runDate 2026-08-01 to 2026-08-31
+    - no bogus destination filter from 'Total' ('tal')
+    """
+    mock_trip_resp = {
+        "status": 1,
+        "msg": "Data Found",
+        "data": [{"TotalTrips": 42}]
+    }
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=mock_trip_resp)
+        )
+
+        payload = {
+            "message": "Total Fixed GPS GPS NA trips in August 2026",
+            "session_id": "sess-gpsna-test",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["intent"] == "trip_report"
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "gpsna"}]
+
+        filters = entities["filters"]
+        assert {"field": "groupId", "operator": "eq", "value": "0041"} in filters
+        assert {"field": "tripStatus", "operator": "eq", "value": "valid"} in filters
+        assert any(f.get("field") == "runDate" and f.get("operator") == "gte" and "2026-08-01" in f.get("value") for f in filters)
+        assert any(f.get("field") == "runDate" and f.get("operator") == "lte" and "2026-08-31" in f.get("value") for f in filters)
+        assert not any(f.get("field") == "destination" for f in filters)
+
 
 
 
