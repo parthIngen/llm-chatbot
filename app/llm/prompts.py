@@ -147,8 +147,8 @@ CRITICAL RULES:
    - "vehicles belonging to transporter <Transporter>" -> Transporter eq "<Transporter>", select: ["vehicle_no"]
    - "fleet <Fleet>" -> Fleet eq "<Fleet>"
    - "DL01HU5859" -> vehicleNo eq "DL01HU5859"
-   - "from <Location>", "origin <Location>", "source <Location>", "start from <Location>", "departure <Location>" -> source eq "<Location>"
-   - "to <Location>", "destination <Location>", "reaching <Location>", "end on <Location>", "ends <Location>", "arrival <Location>", "destination is <Location>" -> destination eq "<Location>"
+   - "from <Location>", "origin <Location>", "source <Location>", "start from <Location>", "departure <Location>", "source is <Location>", "origin is <Location>" -> source eq "<Location>" (e.g. "source is DEL" -> source eq "DEL", NEVER set value to "is")
+   - "to <Location>", "destination <Location>", "reaching <Location>", "end on <Location>", "ends <Location>", "arrival <Location>", "destination is <Location>" -> destination eq "<Location>" (e.g. "destination is BIB" -> destination eq "BIB", NEVER set value to "is")
    - "valid trips", "valid trip", "valid", "non-cancelled" / "not cancelled", or "completed and closed" / "closed and completed" -> tripStatus eq "valid"
    - "completed, closed, finished, or inactive trips" (unless query says "completed and closed") -> tripStatus eq "closed"
    - "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" -> tripStatus eq "running"
@@ -401,8 +401,8 @@ CRITICAL RULES:
       Include "groupBy": ["priority"], and "metrics": [{"field": "shipmentNo", "function": "count", "alias": "uniqueShipment"}].
       Filters MUST only contain: groupId (0041), tripStatus ("valid"), runDate gte, runDate lte. Do NOT include select: [].
     - Specific Priority: There are ONLY two priorities: "high" and "low". If the query explicitly mentions high priority (e.g. "high priority", "marked as high priority"), use field "priority" with operator "eq" and value "high", select: []. In ALL other specific priority queries (e.g. "standard priority", "normal priority", "medium priority", "low priority", or general "priority"), value MUST be "low", select: []. Filter order: groupId first, then tripStatus (default "valid"), then runDate gte, then runDate lte, then priority.
-13c. For Origin / Source queries (e.g. "from <Location>", "source <Location>", "origin <Location>", "starting from <Location>", "from NGA location"): ALWAYS use field "source" (operator "eq").
-     For Destination queries (e.g. "to <Location>", "destination <Location>", "reaching <Location>", "ends at <Location>"): ALWAYS use field "destination" (operator "eq").
+13c. For Origin / Source queries (e.g. "from <Location>", "source <Location>", "origin <Location>", "starting from <Location>", "from NGA location", "source is DEL"): ALWAYS use field "source" (operator "eq", value "<Location>", NEVER "is").
+     For Destination queries (e.g. "to <Location>", "destination <Location>", "reaching <Location>", "ends at <Location>", "destination is BIB"): ALWAYS use field "destination" (operator "eq", value "<Location>", NEVER "is").
      Never use "From" or "To". Filter order: groupId (0041) first, then tripStatus, then runDate gte, then runDate lte, then source / destination, select: [].
 14. DEVICE / GPS / ELOCK ANALYTICS PAYLOAD RULES (BASIC Question availability/na/inactive/active/only):
    When querying counts/trips related to GPS, Fixed E-Lock, or Portable E-Lock:

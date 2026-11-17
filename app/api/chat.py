@@ -103,6 +103,9 @@ async def chat_endpoint(
             return ChatMessageResponse(
                 reply=reply,
                 intent="greeting",
+                source="rule",
+                llm_status="bypassed",
+                debug={"source": "rule", "mode": "greeting", "llm_attempted": False, "error": None},
                 entities={},
                 data=None,
                 download_url=None,
@@ -138,6 +141,9 @@ async def chat_endpoint(
             return ChatMessageResponse(
                 reply=reply,
                 intent="cancel_trips_check",
+                source="rule",
+                llm_status="bypassed",
+                debug={"source": "rule", "mode": "cancel_trips_check", "llm_attempted": False, "error": None},
                 entities={"has_valid_trip_status": has_valid, "reply": reply},
                 data=None,
                 download_url=None,
@@ -160,6 +166,12 @@ async def chat_endpoint(
 
         intent = extraction.get("intent", "unknown")
         entities = extraction.get("entities", {})
+        source = extraction.get("source", "llm")
+        llm_status = extraction.get("llm_status", "success")
+        debug_info = extraction.get("debug", {
+            "source": source,
+            "llm_status": llm_status
+        })
 
         # If LLM classified intent as unknown/unrecognized, raise or return generic response
         if intent == "unknown":
@@ -167,6 +179,9 @@ async def chat_endpoint(
             return ChatMessageResponse(
                 reply=reply,
                 intent=intent,
+                source=source,
+                llm_status=llm_status,
+                debug=debug_info,
                 entities=entities,
                 data=None,
                 download_url=None,
@@ -187,6 +202,9 @@ async def chat_endpoint(
                 return ChatMessageResponse(
                     reply=reply,
                     intent=intent,
+                    source=source,
+                    llm_status=llm_status,
+                    debug=debug_info,
                     entities=entities,
                     data=None,
                     download_url=None,
@@ -229,6 +247,9 @@ async def chat_endpoint(
                     return ChatMessageResponse(
                         reply=reply,
                         intent=intent,
+                        source=source,
+                        llm_status=llm_status,
+                        debug=debug_info,
                         entities=entities,
                         data=None,
                         download_url=None,
@@ -248,6 +269,9 @@ async def chat_endpoint(
             return ChatMessageResponse(
                 reply=f"I recognized the intent as '{intent}', but that capability is not enabled on this backend yet.",
                 intent=intent,
+                source=source,
+                llm_status=llm_status,
+                debug=debug_info,
                 entities=entities,
                 data=None,
                 download_url=None,
@@ -313,15 +337,29 @@ async def chat_endpoint(
         return ChatMessageResponse(
             reply=reply,
             intent=intent,
+            source=source,
+            llm_status=llm_status,
+            debug=debug_info,
             entities=entities,
             data=api_data,
             download_url=download_url,
             query_payload=entities if entities else None
         )
-    except LLMRateLimitError:
+    except LLMRateLimitError as rle:
         return ChatMessageResponse(
             reply="Server is busy , please retry in a few seconds",
             intent="error",
+            source="llm",
+            llm_status="rate_limit_exceeded",
+            debug={
+                "source": "llm",
+                "fallback": False,
+                "llm_attempted": True,
+                "llm_success": False,
+                "llm_status": "rate_limit_exceeded",
+                "error_type": "rate_limit_exceeded",
+                "error": str(rle)
+            },
             entities={},
             data=None,
             download_url=None,

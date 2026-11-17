@@ -1676,6 +1676,41 @@ async def test_destination_location_mapping_flow():
 
 
 @pytest.mark.asyncio
+async def test_destination_is_location_flow():
+    # Test "Show all trips where the destination is BIB of august"
+    user_query = "Show all trips where the destination is BIB of august"
+
+    from app.llm.intent_detector import IntentDetector
+    detector = IntentDetector()
+    entities_result = await detector.detect(user_query, [], "test-session-dest-bib")
+    assert entities_result["intent"] == "trip_report"
+    entities = entities_result["entities"]
+    assert entities["entity"] == "trip"
+    assert entities["operation"] == "count"
+    filters = entities["filters"]
+
+    assert len(filters) == 5
+    fields = [f["field"] for f in filters]
+    assert "groupId" in fields
+    assert "tripStatus" in fields
+    assert "runDate" in fields
+    assert "destination" in fields
+
+    for f in filters:
+        if f["field"] == "destination":
+            assert f["value"] == "BIB"
+            assert f["operator"] == "eq"
+        elif f["field"] == "tripStatus":
+            assert f["value"] == "valid"
+        elif f["field"] == "groupId":
+            assert f["value"] == "0041"
+        elif f["field"] == "runDate" and f["operator"] == "gte":
+            assert f["value"].startswith("2026-08-01")
+        elif f["field"] == "runDate" and f["operator"] == "lte":
+            assert f["value"].startswith("2026-08-31")
+
+
+@pytest.mark.asyncio
 async def test_inactive_location_mapping_flow():
     # Test "Show all inactive trips from NGA location from 2026-07-14 to 2026-07-20"
     # This query specifies an origin location (from NGA) and maps to From eq "NGA", and inactive status mapping to "InActive"

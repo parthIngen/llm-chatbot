@@ -820,11 +820,14 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
     return None
 
 _STOP_LOCATION_WORDS = {
-    "the", "a", "an", "all", "device", "devices", "gps", "elock", "vendor",
+    "the", "a", "an", "all", "device", "devices", "gps", "elock", "vendor", "vendors",
     "january", "february", "march", "april", "may", "june", "july", "august",
     "september", "october", "november", "december", "today", "yesterday", "tomorrow",
     "last", "this", "next", "week", "month", "year", "date", "days", "day", "valid",
-    "active", "running", "closed", "completed", "cancelled", "cancel", "location", "locations"
+    "active", "running", "closed", "completed", "cancelled", "cancel", "location", "locations",
+    "is", "are", "was", "were", "be", "been", "being", "as", "at", "in", "on", "of", "for",
+    "to", "from", "with", "where", "which", "that", "and", "or", "not", "show", "get", "give",
+    "list", "find", "trip", "trips", "secutrak", "icici", "ilgic", "thirdparty"
 }
 
 _ATD_ATA_VALUE_MAP = {
@@ -873,6 +876,17 @@ class IntentDetector:
                 "entities": {
                     "has_valid_trip_status": has_valid,
                     "reply": "no" if has_valid else "yes"
+                },
+                "source": "rule",
+                "llm_status": "bypassed",
+                "debug": {
+                    "source": "rule",
+                    "fallback": False,
+                    "llm_attempted": False,
+                    "llm_success": None,
+                    "llm_status": "bypassed",
+                    "error_type": None,
+                    "error": None
                 }
             }
 
@@ -983,7 +997,18 @@ class IntentDetector:
                 log_entities_extracted(session_id, prev_payload)
                 return {
                     "intent": "trip_report",
-                    "entities": prev_payload
+                    "entities": prev_payload,
+                    "source": "rule",
+                    "llm_status": "bypassed",
+                    "debug": {
+                        "source": "rule",
+                        "fallback": False,
+                        "llm_attempted": False,
+                        "llm_success": None,
+                        "llm_status": "bypassed",
+                        "error_type": None,
+                        "error": None
+                    }
                 }
 
         # Check if this is a follow-up answer to a date range clarification request.
@@ -3021,12 +3046,27 @@ class IntentDetector:
                     elif fld_lower in ("to", "dest", "destination"):
                         f["field"] = "destination"
 
+            # Remove any source/destination filters with invalid values (stop words, numeric years/dates, etc.)
+            query_payload["filters"] = [
+                f for f in query_payload.get("filters", [])
+                if not (
+                    isinstance(f, dict)
+                    and f.get("field") in ("source", "destination")
+                    and (
+                        not str(f.get("value", "")).strip()
+                        or str(f.get("value", "")).strip().lower() in _STOP_LOCATION_WORDS
+                        or str(f.get("value", "")).strip().isdigit()
+                        or bool(re.match(r'^\d{1,4}[-/.].*', str(f.get("value", "")).strip()))
+                    )
+                )
+            ]
+
             has_source_filter = any(isinstance(f, dict) and f.get("field") == "source" for f in query_payload.get("filters", []))
             if not has_source_filter:
-                src_match = re.search(r'\b(?:from|origin|source|starting\s+(?:from|at)?)\s+([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                src_match = re.search(r'\b(?:(?:source|origin)\s*(?:is|from|as)?|starting\s+(?:from|at)?|\bfrom)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
                 if src_match:
                     val = src_match.group(1).strip()
-                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val):
+                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
                         query_payload["filters"].append({
                             "field": "source",
                             "operator": "eq",
@@ -3035,12 +3075,10 @@ class IntentDetector:
 
             has_dest_filter = any(isinstance(f, dict) and f.get("field") == "destination" for f in query_payload.get("filters", []))
             if not has_dest_filter:
-                dest_match = re.search(r'\b(?:to|destination|reaching|ends?\s+(?:at|on)?)\s+([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
-                if not dest_match:
-                    dest_match = re.search(r'\b(?:destination\s+is|destination|reaching)\s+([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
+                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
                 if dest_match:
                     val = dest_match.group(1).strip()
-                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val):
+                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
                         query_payload["filters"].append({
                             "field": "destination",
                             "operator": "eq",
@@ -3643,24 +3681,26 @@ class IntentDetector:
                     return 3
                 elif field == "runDate" and op == "lte":
                     return 4
-                elif field == "region":
+                elif field in ("source", "destination", "From", "To"):
                     return 5
-                elif field in ("Route", "route", "RouteName", "routeName"):
+                elif field == "region":
                     return 6
-                elif field in ("transporter", "Transporter"):
+                elif field in ("Route", "route", "RouteName", "routeName"):
                     return 7
-                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                elif field in ("transporter", "Transporter"):
                     return 8
-                elif field == "shipmentMethod":
+                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                     return 9
-                elif field in ("routeCategory", "routeType", "tripType"):
+                elif field == "shipmentMethod":
                     return 10
-                elif field == "priority":
+                elif field in ("routeCategory", "routeType", "tripType"):
                     return 11
-                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                elif field == "priority":
                     return 12
-                elif field in ("atd", "ata", "ATD", "ATA"):
+                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
                     return 13
+                elif field in ("atd", "ata", "ATD", "ATA"):
+                    return 14
                 return 20
 
             if not (_is_fixed_portable_elock_combo or _is_multi_device_trip_query or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together) or bool(detect_device_analytics(message))):
@@ -3679,15 +3719,40 @@ class IntentDetector:
             log_intent_detected(session_id, "trip_report")
             log_entities_extracted(session_id, query_payload)
 
+            print(f"[DEBUG_QUERY] Session: {session_id} | Source: llm | LLM Status: success | Provider: {getattr(self.llm_client, 'provider', 'unknown')} | Model: {getattr(self.llm_client, 'model', 'unknown')}")
+
             return {
                 "intent": "trip_report",
-                "entities": query_payload
+                "entities": query_payload,
+                "source": "llm",
+                "llm_status": "success",
+                "debug": {
+                    "source": "llm",
+                    "fallback": False,
+                    "llm_attempted": True,
+                    "llm_success": True,
+                    "llm_provider": getattr(self.llm_client, "provider", "unknown"),
+                    "llm_model": getattr(self.llm_client, "model", "unknown"),
+                    "llm_status": "success",
+                    "error_type": None,
+                    "error": None
+                }
             }
             
         except LLMRateLimitError as rle:
             raise rle
         except Exception as exc:
             log_error(session_id, "INTENT_DETECTION_FAILED", str(exc))
+            fb_error_str = str(exc)
+            is_rate_limit = (
+                isinstance(exc, LLMRateLimitError)
+                or "rate_limit_exceeded" in fb_error_str.lower()
+                or "429" in fb_error_str
+                or "itpm" in fb_error_str.lower()
+                or "tokens per minute" in fb_error_str.lower()
+            )
+            fb_error_type = "rate_limit_exceeded" if is_rate_limit else ("timeout" if "timeout" in fb_error_str.lower() else "llm_error")
+            fb_llm_status = "rate_limit_exceeded" if is_rate_limit else "error"
             # Fallback structure
             fallback_payload = {
                 "entity": "trip",
@@ -5791,12 +5856,27 @@ class IntentDetector:
                     elif fld_lower in ("to", "dest", "destination"):
                         f["field"] = "destination"
 
+            # Remove any source/destination filters with invalid values (stop words, numeric years/dates, etc.)
+            fallback_payload["filters"] = [
+                f for f in fallback_payload.get("filters", [])
+                if not (
+                    isinstance(f, dict)
+                    and f.get("field") in ("source", "destination")
+                    and (
+                        not str(f.get("value", "")).strip()
+                        or str(f.get("value", "")).strip().lower() in _STOP_LOCATION_WORDS
+                        or str(f.get("value", "")).strip().isdigit()
+                        or bool(re.match(r'^\d{1,4}[-/.].*', str(f.get("value", "")).strip()))
+                    )
+                )
+            ]
+
             fb_has_source = any(isinstance(f, dict) and f.get("field") == "source" for f in fallback_payload.get("filters", []))
             if not fb_has_source:
-                src_match = re.search(r'\b(?:from|origin|source|starting\s+(?:from|at)?)\s+([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                src_match = re.search(r'\b(?:(?:source|origin)\s*(?:is|from|as)?|starting\s+(?:from|at)?|\bfrom)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
                 if src_match:
                     val = src_match.group(1).strip()
-                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val):
+                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
                         fallback_payload["filters"].append({
                             "field": "source",
                             "operator": "eq",
@@ -5805,12 +5885,10 @@ class IntentDetector:
 
             fb_has_dest = any(isinstance(f, dict) and f.get("field") == "destination" for f in fallback_payload.get("filters", []))
             if not fb_has_dest:
-                dest_match = re.search(r'\b(?:to|destination|reaching|ends?\s+(?:at|on)?)\s+([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
-                if not dest_match:
-                    dest_match = re.search(r'\b(?:destination\s+is|destination|reaching)\s+([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
+                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
                 if dest_match:
                     val = dest_match.group(1).strip()
-                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val):
+                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
                         fallback_payload["filters"].append({
                             "field": "destination",
                             "operator": "eq",
@@ -5865,7 +5943,22 @@ class IntentDetector:
             fallback_payload.clear()
             fallback_payload.update(reordered)
 
+            print(f"[DEBUG_QUERY] Session: {session_id} | Source: regex | LLM Status: {fb_llm_status or 'fallback'} | Error Type: {fb_error_type} | Details: {str(fb_error_str)[:120] if fb_error_str else 'None'}")
+
             return {
                 "intent": "trip_report",
-                "entities": fallback_payload
+                "entities": fallback_payload,
+                "source": "regex",
+                "llm_status": fb_llm_status or "fallback",
+                "debug": {
+                    "source": "regex",
+                    "fallback": True,
+                    "llm_attempted": True,
+                    "llm_success": False,
+                    "llm_provider": getattr(self.llm_client, "provider", "unknown"),
+                    "llm_model": getattr(self.llm_client, "model", "unknown"),
+                    "llm_status": fb_llm_status or "fallback",
+                    "error_type": fb_error_type,
+                    "error": fb_error_str
+                }
             }
