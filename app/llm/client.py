@@ -41,7 +41,7 @@ class LLMClient:
             self.max_tokens = settings.LLM_MAX_TOKENS
             self.temperature = settings.LLM_TEMPERATURE
 
-        self.timeout = settings.LLM_TIMEOUT
+        self.timeout = settings.LOCAL_LLM_TIMEOUT if selected_provider in ["ollama", "local", "lmstudio"] else settings.LLM_TIMEOUT
 
         # Retry settings for 429 rate-limit responses
         self.max_retries = 3

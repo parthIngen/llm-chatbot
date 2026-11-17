@@ -1498,6 +1498,23 @@ class IntentDetector:
                     if alias in field_alias_map:
                         f["field"] = field_alias_map[alias]
 
+            # Remove hallucinated device analytics & device filters if query has no device mention
+            has_device_query = bool(
+                detect_device_analytics(message)
+                or re.search(r'\b(?:gps|elock|e-lock|lock|device|devices)\b', msg_lower)
+            )
+            if not has_device_query:
+                query_payload.pop("analytics", None)
+                _DEVICE_FIELD_NAMES = {
+                    "fixedgps", "fixedelock", "portableelock", "gps", "fixed-gps-status",
+                    "fixed-elock-status", "portable-elock-status", "vendorgps",
+                    "vendorfixedelock", "vendorportableelock"
+                }
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and str(f.get("field", "")).lower() in _DEVICE_FIELD_NAMES)
+                ]
+
             # Normalize FixedELock and PortableELock values to empty string unless a known status is requested
             _ELOCK_KNOWN_VALUES = {"active", "inactive", "nogps", "gpsinactive", "na", "existing"}
             for f in query_payload["filters"]:
@@ -3141,6 +3158,21 @@ class IntentDetector:
                 and not has_vehicle_mention
             )
 
+            # --- Vehicle Number Post-Processing ---
+            has_vehicle_filter = any(isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no") for f in query_payload.get("filters", []))
+            if not has_vehicle_filter and not _is_distinct_vehicle_query and not _is_active_vehicle_query and not _is_no_gps_vehicle_query:
+                veh_match = re.search(r'\b(?:vehicle(?:\s*(?:no|number|num))?\s*[:=]?\s*|trips\s+of\s+)?([A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4})\b', message, re.IGNORECASE)
+                if not veh_match:
+                    veh_match = re.search(r'\bvehicle\s*(?:no|number|num)?\s*[:=]?\s*([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
+                if veh_match:
+                    v_val = re.sub(r'\s+', '', veh_match.group(1)).strip().upper()
+                    if v_val.lower() not in _STOP_LOCATION_WORDS and not v_val.isdigit():
+                        query_payload["filters"].append({
+                            "field": "vehicleNo",
+                            "operator": "eq",
+                            "value": v_val
+                        })
+
             if _is_each_region_query:
                 query_payload["groupBy"] = ["region"]
                 query_payload["metrics"] = [
@@ -3685,22 +3717,24 @@ class IntentDetector:
                     return 5
                 elif field == "region":
                     return 6
-                elif field in ("Route", "route", "RouteName", "routeName"):
+                elif field in ("vehicleNo", "vehicle_no", "vehicle"):
                     return 7
-                elif field in ("transporter", "Transporter"):
+                elif field in ("Route", "route", "RouteName", "routeName"):
                     return 8
-                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                elif field in ("transporter", "Transporter"):
                     return 9
-                elif field == "shipmentMethod":
+                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                     return 10
-                elif field in ("routeCategory", "routeType", "tripType"):
+                elif field == "shipmentMethod":
                     return 11
-                elif field == "priority":
+                elif field in ("routeCategory", "routeType", "tripType"):
                     return 12
-                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                elif field == "priority":
                     return 13
-                elif field in ("atd", "ata", "ATD", "ATA"):
+                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
                     return 14
+                elif field in ("atd", "ata", "ATD", "ATA"):
+                    return 15
                 return 20
 
             if not (_is_fixed_portable_elock_combo or _is_multi_device_trip_query or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together) or bool(detect_device_analytics(message))):
@@ -5895,6 +5929,21 @@ class IntentDetector:
                             "value": val
                         })
 
+            # --- Vehicle Number Fallback Post-Processing ---
+            fb_has_vehicle = any(isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no") for f in fallback_payload.get("filters", []))
+            if not fb_has_vehicle and not fb_is_distinct_vehicle_query and not fb_is_active_vehicle_query and not fb_is_no_gps_vehicle_query:
+                veh_match = re.search(r'\b(?:vehicle(?:\s*(?:no|number|num))?\s*[:=]?\s*|trips\s+of\s+)?([A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4})\b', message, re.IGNORECASE)
+                if not veh_match:
+                    veh_match = re.search(r'\bvehicle\s*(?:no|number|num)?\s*[:=]?\s*([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
+                if veh_match:
+                    v_val = re.sub(r'\s+', '', veh_match.group(1)).strip().upper()
+                    if v_val.lower() not in _STOP_LOCATION_WORDS and not v_val.isdigit():
+                        fallback_payload["filters"].append({
+                            "field": "vehicleNo",
+                            "operator": "eq",
+                            "value": v_val
+                        })
+
             def _fb_standard_filter_sort_key(flt):
                 if not isinstance(flt, dict):
                     return 99
@@ -5912,22 +5961,24 @@ class IntentDetector:
                     return 5
                 elif field == "region":
                     return 6
-                elif field in ("Route", "route", "RouteName", "routeName"):
+                elif field in ("vehicleNo", "vehicle_no", "vehicle"):
                     return 7
-                elif field in ("transporter", "Transporter"):
+                elif field in ("Route", "route", "RouteName", "routeName"):
                     return 8
-                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                elif field in ("transporter", "Transporter"):
                     return 9
-                elif field == "shipmentMethod":
+                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                     return 10
-                elif field in ("routeCategory", "routeType", "tripType"):
+                elif field == "shipmentMethod":
                     return 11
-                elif field == "priority":
+                elif field in ("routeCategory", "routeType", "tripType"):
                     return 12
-                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                elif field == "priority":
                     return 13
-                elif field in ("atd", "ata", "ATD", "ATA"):
+                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
                     return 14
+                elif field in ("atd", "ata", "ATD", "ATA"):
+                    return 15
                 return 20
 
             if not (fb_is_fixed_portable_elock_combo or fb_is_multi_device_trip_query or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query or fb_is_active_device_elock_query or fb_is_active_device_portable_query or fb_is_distinct_transporter_query or fb_is_portable_elock_trip_query or fb_is_fixed_elock_trip_query or fb_is_fixed_gps_combo or fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only or fb_is_trip_type_breakdown_query or fb_is_network_vs_local_query or fb_is_no_gps_vehicle_query or fb_is_gps_trip_query or (fb_target_vendor and not fb_is_devices_together) or bool(detect_device_analytics(message))):
