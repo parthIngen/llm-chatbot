@@ -57,8 +57,8 @@ FIELD REFERENCE (use these exact API field names and allowed values):
 
   Region        -> field: "region"   (e.g. "North", "South", "East", "West")
 
-  Origin        -> field: "From"     (city/hub code — e.g. "NGA", "DEL")
-  Destination   -> field: "To"       (city/hub code — e.g. "BIB", "MUM")
+  Origin / Source     -> field: "source"       (city/hub code or location — e.g. "NGA", "DEL")
+  Destination         -> field: "destination"  (city/hub code or location — e.g. "BIB", "MUM")
 
   Vehicle       -> field: "vehicleNo" (e.g. "DL01HU5859")
 
@@ -83,16 +83,16 @@ FIELD REFERENCE (use these exact API field names and allowed values):
   Remarks       -> field: "closeremark"
                    values: "manual", "forcefully", "geofence", "polygon", "api", "backend", "web"
 
-  ATD (Actual Time of Departure) -> field: "ATD"
-                   values: "notcaptured", "Captured", "missing", "NotMissing"
-                   Natural language: "ATD not captured" -> ATD eq "notcaptured"
-                                     "ATD captured"     -> ATD eq "Captured"
-                                     "ATD missing"      -> ATD eq "missing"
-                                     "ATD not missing"  -> ATD eq "NotMissing"
+  ATD (Actual Time of Departure) -> field: "atd"
+                   values: "notcaptured", "captured", "missing", "notmissing"
+                   Natural language: "ATD not captured" -> atd eq "notcaptured"
+                                     "ATD captured"     -> atd eq "captured"
+                                     "ATD missing"      -> atd eq "missing"
+                                     "ATD not missing"  -> atd eq "notmissing"
 
-  ATA (Actual Time of Arrival)   -> field: "ATA"
-                   values: "notcaptured", "Captured", "missing", "NotMissing"
-                   Natural language: same pattern as ATD above
+  ATA (Actual Time of Arrival)   -> field: "ata"
+                   values: "notcaptured", "captured", "missing", "notmissing"
+                   Natural language: same pattern as atd above
 
   Priority      -> field: "priority"
                    values: "high", "low" (ONLY two allowed values)
@@ -122,12 +122,13 @@ CRITICAL RULES:
    - "Portable E-Lock (trips) where GPS is NA/na/not applicable/not captured/inactive" -> PortableELock eq "inactive" (do not include FixedGPS filter)
    - "GPS is active" -> FixedGPS eq "Active"
    - "Portable Lock is active" -> PortableELock eq "Active"
-   - "ATD is missing" -> ATD eq "missing"
-   - "ATD is not captured" -> ATD eq "notcaptured"
-   - "ATA is missing" -> ATA eq "missing"
-   - "ATA is not captured" -> ATA eq "notcaptured"
-   - "GPS is active but ATD is not captured/missing" -> FixedGPS eq "Active", ATD eq "missing"
-   - "GPS is active but ATA is missing" -> FixedGPS eq "Active", ATA eq "missing"
+   - "ATD is missing" -> atd eq "missing"
+   - "ATD is not captured" -> atd eq "notcaptured"
+   - "ATA is missing" -> ata eq "missing"
+   - "ATA is not captured" -> ata eq "notcaptured"
+   - "GPS is active but ATD is not captured" -> analytics: [{"type": "gps"}], tripStatus eq "valid", GPS eq "active", atd eq "notcaptured", select: []
+   - "GPS is active but ATD is missing" -> analytics: [{"type": "gps"}], tripStatus eq "valid", GPS eq "active", atd eq "missing", select: []
+   - "GPS is active but ATA is missing/not captured" -> analytics: [{"type": "gps"}], tripStatus eq "valid", GPS eq "active", ata eq "missing"/"notcaptured", select: []
    - "closed automatically via forcefull/geofence", "closed with remark manual/forcefully/geofence/polygon/api/backend/web" -> closeremark eq "<remark>", tripStatus eq "valid"
    - "marked as high priority", "high priority trips" -> priority eq "high", select: []
    - "marked as low priority", "low priority", "standard priority", "normal priority", "medium priority", or any priority query without explicit "high" -> priority eq "low", select: []
@@ -136,9 +137,8 @@ CRITICAL RULES:
    - "vehicles belonging to transporter <Transporter>" -> Transporter eq "<Transporter>", select: ["vehicle_no"]
    - "fleet <Fleet>" -> Fleet eq "<Fleet>"
    - "DL01HU5859" -> vehicleNo eq "DL01HU5859"
-   - "destination is BIB" -> To eq "BIB"
-   - "from <Location>", "origin <Location>", "start from <Location>", "departure <Location>" -> From eq "<Location>"
-   - "to <Location>", "destination <Location>", "end on <Location>", "ends <Location>", "arrival <Location>" -> To eq "<Location>"
+   - "from <Location>", "origin <Location>", "source <Location>", "start from <Location>", "departure <Location>" -> source eq "<Location>"
+   - "to <Location>", "destination <Location>", "reaching <Location>", "end on <Location>", "ends <Location>", "arrival <Location>", "destination is <Location>" -> destination eq "<Location>"
    - "valid trips", "valid trip", "valid", "non-cancelled" / "not cancelled", or "completed and closed" / "closed and completed" -> tripStatus eq "valid"
    - "completed, closed, finished, or inactive trips" (unless query says "completed and closed") -> tripStatus eq "closed"
    - "running trips", "scheduled", "sceduled", "live", "open", "in transit", "transit", "moving", "ongoing" -> tripStatus eq "running"
@@ -192,8 +192,20 @@ CRITICAL RULES:
         - Include groupBy: ["tripType"]
         - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
         - Filter order: tripStatus first, then groupId, then runDate gte, then runDate lte, then tripType
-      * When the query asks to compare Network vs Local trip counts (e.g. "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026", "Compare Network vs Local trip counts"):
-        - Same as above, but without a specific tripType filter (so both trip types are grouped).
+      * When the query asks to compare Network vs Local or Intracity vs Intercity trip counts (e.g. "How many trips were Intracity vs. Intercity in August 2026?", "Compare Network vs Local trip counts"):
+        - Include filters: groupId eq "0041", tripStatus eq "valid", runDate gte, runDate lte
+        - Do NOT include select.
+        - Include groupBy: ["tripType"]
+        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
+        - Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte
+        - Do NOT include routeCategory, routeType, or tripType filters.
+      * When the query asks to compare Network vs Local trip counts for Non-GPS trips (e.g. "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026"):
+        - Include top-level: "analytics": [{"type": "gpsna"}]
+        - Include filters: tripStatus eq "valid", groupId eq "0041", runDate gte, runDate lte
+        - Include select: []
+        - Include groupBy: ["tripType"]
+        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
+        - Filter order: tripStatus first, then groupId, then runDate gte, then runDate lte
       * When the query asks for device count across Intercity and Intracity trips (e.g. "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026"):
         - Include top-level: "analytics": [{"type": "gps"}]
         - Include filters: groupId eq "0041", tripStatus eq "valid", runDate gte, runDate lte
@@ -366,11 +378,12 @@ CRITICAL RULES:
         * Include groupBy: ["vehicleNo"]
         * Include metrics: [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
         * Filter order: tripStatus first, then groupId, then transporter, then GPS, then runDate gte, then runDate lte
-12. For ATD / ATA queries: use field "ATD" / "ATA" (uppercase). Map natural language as follows:
+12. For ATD / ATA queries: use field "atd" / "ata" (lowercase). Map natural language as follows:
     - "not captured" / "notcaptured" -> value: "notcaptured"
-    - "captured" -> value: "Captured"
+    - "captured" -> value: "captured"
     - "missing" -> value: "missing"
-    - "not missing" / "notmissing" -> value: "NotMissing"
+    - "not missing" / "notmissing" -> value: "notmissing"
+    When paired with GPS active (e.g. "GPS is active but ATD is not captured"), include analytics: [{"type": "gps"}], tripStatus eq "valid", and filter order: groupId (0041), tripStatus ("valid"), runDate gte, runDate lte, GPS ("active"), atd ("notcaptured"), select: [].
 13. For Remarks queries (e.g. "closed automatically via forcefull", "closed automatically via geofence", "closed by polygon"): use field "closeremark" (operator "eq"). Allowed values are: "manual", "forcefully", "geofence", "polygon", "api", "backend", "web". Note: "forcefull" or "forceful" maps to "forcefully". Even if the query mentions "closed", set tripStatus to "valid". Filter order: groupId (0041) first, then tripStatus ("valid"), then runDate gte, then runDate lte, then closeremark. Include select: [].
 13b. For Priority queries:
     - Comparison / Breakdown (e.g. "How many trips were marked as high priority vs. standard in aug 2026?", "high priority vs standard", "priority breakdown"):
@@ -378,6 +391,9 @@ CRITICAL RULES:
       Include "groupBy": ["priority"], and "metrics": [{"field": "shipmentNo", "function": "count", "alias": "uniqueShipment"}].
       Filters MUST only contain: groupId (0041), tripStatus ("valid"), runDate gte, runDate lte. Do NOT include select: [].
     - Specific Priority: There are ONLY two priorities: "high" and "low". If the query explicitly mentions high priority (e.g. "high priority", "marked as high priority"), use field "priority" with operator "eq" and value "high", select: []. In ALL other specific priority queries (e.g. "standard priority", "normal priority", "medium priority", "low priority", or general "priority"), value MUST be "low", select: []. Filter order: groupId first, then tripStatus (default "valid"), then runDate gte, then runDate lte, then priority.
+13c. For Origin / Source queries (e.g. "from <Location>", "source <Location>", "origin <Location>", "starting from <Location>", "from NGA location"): ALWAYS use field "source" (operator "eq").
+     For Destination queries (e.g. "to <Location>", "destination <Location>", "reaching <Location>", "ends at <Location>"): ALWAYS use field "destination" (operator "eq").
+     Never use "From" or "To". Filter order: groupId (0041) first, then tripStatus, then runDate gte, then runDate lte, then source / destination, select: [].
 14. DEVICE / GPS / ELOCK ANALYTICS PAYLOAD RULES (BASIC Question availability/na/inactive/active/only):
    When querying counts/trips related to GPS, Fixed E-Lock, or Portable E-Lock:
    A. FIXED GPS / GPS:
@@ -455,7 +471,7 @@ Reference Examples:
 - "Download all trips from January 2026 where ATA was not captured" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "2026-01-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-01-31 23:59:59"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "ATA", "operator": "eq", "value": "notcaptured"}], "select": []}
 - "Show all active trips from NGA location during the last week" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "runDate", "operator": "gte", "value": "LAST_WEEK_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_WEEK_END"}, {"field": "tripStatus", "operator": "eq", "value": "active"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "From", "operator": "eq", "value": "NGA"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "LAST_WEEK_START"}, {"field": "runDate", "operator": "lte", "value": "LAST_WEEK_END"}, {"field": "source", "operator": "eq", "value": "NGA"}], "select": []}
 - "Show all currently active trips" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "active"}], "select": []}
 - "What trips are currently in transit?" ->
@@ -530,6 +546,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "Give me the total count of non gps vehicles in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "How many trips were Intracity vs. Intercity in August 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?" ->
@@ -574,6 +592,8 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "closeremark", "operator": "eq", "value": "forcefully"}], "select": []}
 - "How many trips were closed automatically via Geofence in Aug 2026?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "closeremark", "operator": "eq", "value": "geofence"}], "select": []}
+- "Download all trips where GPS is active but ATD is not captured of august" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "atd", "operator": "eq", "value": "notcaptured"}], "select": []}
 - "Show active Fixed GPS device count across Intercity trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}]}
 - "Show active device status for Fixed GPS units on Valid Intercity trips during Aug 2026" ->

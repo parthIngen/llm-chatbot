@@ -1208,7 +1208,7 @@ async def test_origin_location_mapping_flow():
                 "value": "active"
             },
             {
-                "field": "From",
+                "field": "source",
                 "operator": "eq",
                 "value": "NGA"
             }
@@ -1244,19 +1244,19 @@ async def test_origin_location_mapping_flow():
         
         entities = data["entities"]
         assert entities["entity"] == "trip"
-        assert entities["operation"] == "find"
+        assert entities["operation"] == "count"
         
         filters = entities["filters"]
-        # Filters should contain runDate (gte), runDate (lte), groupId, tripStatus, From
+        # Filters should contain runDate (gte), runDate (lte), groupId, tripStatus, source
         assert len(filters) == 5
         fields = [f["field"] for f in filters]
         assert "groupId" in fields
-        assert "From" in fields
+        assert "source" in fields
         assert "tripStatus" in fields
         assert "runDate" in fields
         
         for f in filters:
-            if f["field"] == "From":
+            if f["field"] == "source":
                 assert f["value"] == "NGA"
             elif f["field"] == "tripStatus":
                 assert f["value"] == "active"
@@ -1291,7 +1291,7 @@ async def test_destination_location_mapping_flow():
                 "value": "active"
             },
             {
-                "field": "To",
+                "field": "destination",
                 "operator": "eq",
                 "value": "Bangalore"
             }
@@ -1327,19 +1327,19 @@ async def test_destination_location_mapping_flow():
         
         entities = data["entities"]
         assert entities["entity"] == "trip"
-        assert entities["operation"] == "find"
+        assert entities["operation"] == "count"
         
         filters = entities["filters"]
-        # Filters should contain runDate (gte), runDate (lte), groupId, tripStatus, To
+        # Filters should contain runDate (gte), runDate (lte), groupId, tripStatus, destination
         assert len(filters) == 5
         fields = [f["field"] for f in filters]
         assert "groupId" in fields
-        assert "To" in fields
+        assert "destination" in fields
         assert "tripStatus" in fields
         assert "runDate" in fields
         
         for f in filters:
-            if f["field"] == "To":
+            if f["field"] == "destination":
                 assert f["value"] == "Bangalore"
             elif f["field"] == "tripStatus":
                 assert f["value"] == "active"
@@ -1374,7 +1374,7 @@ async def test_inactive_location_mapping_flow():
                 "value": "InActive"
             },
             {
-                "field": "From",
+                "field": "source",
                 "operator": "eq",
                 "value": "NGA"
             }
@@ -1410,19 +1410,19 @@ async def test_inactive_location_mapping_flow():
         
         entities = data["entities"]
         assert entities["entity"] == "trip"
-        assert entities["operation"] == "find"
+        assert entities["operation"] == "count"
         
         filters = entities["filters"]
-        # Filters should contain runDate (gte), runDate (lte), groupId, tripStatus, From
+        # Filters should contain runDate (gte), runDate (lte), groupId, tripStatus, source
         assert len(filters) == 5
         fields = [f["field"] for f in filters]
         assert "groupId" in fields
-        assert "From" in fields
+        assert "source" in fields
         assert "tripStatus" in fields
         assert "runDate" in fields
         
         for f in filters:
-            if f["field"] == "From":
+            if f["field"] == "source":
                 assert f["value"] == "NGA"
             elif f["field"] == "tripStatus":
                 assert f["value"] == "InActive"
@@ -5615,6 +5615,183 @@ async def test_compare_network_vs_local_non_gps_flow():
 
 
 @pytest.mark.asyncio
+async def test_intracity_vs_intercity_august_2026_flow():
+    user_query = "How many trips were Intracity vs. Intercity in August 2026?"
+
+    llm_payload = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-31 23:59:59"
+            }
+        ],
+        "groupBy": [
+            "tripType"
+        ],
+        "metrics": [
+            {
+                "field": "shipmentNo",
+                "function": "count",
+                "alias": "count"
+            }
+        ]
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload, "Trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Intercity Trip count is 120 and Intracity Trip count is 80."]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {
+            "success": True,
+            "data": [
+                {"tripType": 1, "tripTypeName": "Intercity Trip", "count": 120},
+                {"tripType": 2, "tripTypeName": "Intracity Trip", "count": 80}
+            ]
+        }
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-intracity-intercity-aug-2026",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "groupBy": [
+                "tripType"
+            ],
+            "metrics": [
+                {
+                    "field": "shipmentNo",
+                    "function": "count",
+                    "alias": "count"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert "select" not in entities
+
+
+@pytest.mark.asyncio
+async def test_intracity_vs_intercity_august_2026_fallback_flow():
+    user_query = "How many trips were Intracity vs. Intercity in August 2026?"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM failure simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {
+            "success": True,
+            "data": [
+                {"tripType": 1, "tripTypeName": "Intercity Trip", "count": 120},
+                {"tripType": 2, "tripTypeName": "Intracity Trip", "count": 80}
+            ]
+        }
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-intracity-intercity-aug-2026-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                }
+            ],
+            "groupBy": [
+                "tripType"
+            ],
+            "metrics": [
+                {
+                    "field": "shipmentNo",
+                    "function": "count",
+                    "alias": "count"
+                }
+            ]
+        }
+        assert entities == expected_entities
+        assert "select" not in entities
+
+
+@pytest.mark.asyncio
 async def test_compare_network_vs_local_non_gps_fallback_flow():
     user_query = "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026"
 
@@ -5684,7 +5861,6 @@ async def test_compare_network_vs_local_non_gps_fallback_flow():
         }
         assert entities == expected_entities
         assert response.json()["reply"] == "Non-GPS trip counts in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59: Network (Intercity Trip) count is 120 and Local (Intracity Trip) count is 80."
-
 
 
 @pytest.mark.asyncio
@@ -8268,6 +8444,198 @@ async def test_high_priority_vs_standard_aug_2026_fallback_flow():
 
         expected_text = "High Priority trips are 7533 and Normal Priority trips are 166006."
         assert data["response"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_gps_active_atd_not_captured_august_flow():
+    user_query = "Download all trips where GPS is active but ATD is not captured of august"
+    from unittest.mock import MagicMock
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [{"type": "gps"}],
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "GPS", "operator": "eq", "value": "active"},
+            {"field": "atd", "operator": "eq", "value": "notcaptured"}
+        ],
+        "select": []
+    })
+    llm_natural_response = "Here are the trips where GPS is active but ATD is not captured in August 2026."
+    api_response_data = {"success": True, "data": 125}
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, llm_natural_response]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-gps-active-atd-not-captured",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "gps"}]
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "GPS", "operator": "eq", "value": "active"},
+            {"field": "atd", "operator": "eq", "value": "notcaptured"}
+        ]
+
+
+@pytest.mark.asyncio
+async def test_gps_active_atd_not_captured_august_fallback_flow():
+    user_query = "Download all trips where GPS is active but ATD is not captured of august"
+    from unittest.mock import MagicMock
+
+    api_response_data = {"success": True, "data": 125}
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM fallback triggered")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-gps-active-atd-not-captured-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "gps"}]
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "GPS", "operator": "eq", "value": "active"},
+            {"field": "atd", "operator": "eq", "value": "notcaptured"}
+        ]
+
+
+@pytest.mark.asyncio
+async def test_active_trips_from_nga_last_week_flow():
+    user_query = "Show all active trips from NGA location during the last week."
+    from unittest.mock import MagicMock
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "active"},
+            {"field": "runDate", "operator": "gte", "value": "2026-11-03 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-11-09 23:59:59"},
+            {"field": "source", "operator": "eq", "value": "NGA"}
+        ],
+        "select": []
+    })
+    llm_natural_response = "Here are the active trips from NGA during last week."
+    api_response_data = {"success": True, "data": 42}
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, llm_natural_response]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-active-trips-nga-last-week",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "active"},
+            {"field": "runDate", "operator": "gte", "value": "2026-11-03 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-11-09 23:59:59"},
+            {"field": "source", "operator": "eq", "value": "NGA"}
+        ]
+
+
+@pytest.mark.asyncio
+async def test_active_trips_from_nga_last_week_fallback_flow():
+    user_query = "Show all active trips from NGA location during the last week."
+    from unittest.mock import MagicMock
+
+    api_response_data = {"success": True, "data": 42}
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM fallback triggered")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = api_response_data
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-active-trips-nga-last-week-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["select"] == []
+
+        filters = entities["filters"]
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "active"},
+            {"field": "runDate", "operator": "gte", "value": "2026-11-03 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-11-09 23:59:59"},
+            {"field": "source", "operator": "eq", "value": "NGA"}
+        ]
 
 
 

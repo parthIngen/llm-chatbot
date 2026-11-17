@@ -940,20 +940,24 @@ class IntentDetector:
                         return 4
                     elif field == "runDate" and op == "lte":
                         return 5
-                    elif field in ("Route", "route", "RouteName", "routeName"):
+                    elif field in ("source", "destination", "From", "To"):
                         return 6
-                    elif field in ("transporter", "Transporter"):
+                    elif field in ("Route", "route", "RouteName", "routeName"):
                         return 7
-                    elif field == "region":
+                    elif field in ("transporter", "Transporter"):
                         return 8
-                    elif field == "shipmentMethod":
+                    elif field == "region":
                         return 9
-                    elif field in ("routeCategory", "routeType", "tripType"):
+                    elif field == "shipmentMethod":
                         return 10
-                    elif field == "priority":
+                    elif field in ("routeCategory", "routeType", "tripType"):
                         return 11
-                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                    elif field == "priority":
                         return 12
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 13
+                    elif field in ("atd", "ata", "ATD", "ATA"):
+                        return 14
                     return 20
 
                 prev_payload["filters"].sort(key=_running_followup_sort_key)
@@ -1175,14 +1179,23 @@ class IntentDetector:
             or ((re.search(r'\b(?:forcefully|forcefull|forceful|geofence|polygon)\b', msg_lower) is not None) and (re.search(r'\b(?:closed|close)\b', msg_lower) is not None))
         )
 
+        _is_atd_ata_query = bool(
+            re.search(r'\b(?:atd|ata)\b', msg_lower)
+        )
+
         _is_network_vs_local_query = bool(
             re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
             or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
+            or re.search(r'\bintercity\s+(?:vs\.?|versus|and|or|to)\s+intracity\b', msg_lower)
+            or re.search(r'\bintracity\s+(?:vs\.?|versus|and|or|to)\s+intercity\b', msg_lower)
             or (
                 re.search(r'\b(?:compare|comparison|versus|vs\.?|difference|ratio)\b', msg_lower)
-                and re.search(r'\bnetwork\b', msg_lower)
-                and re.search(r'\blocal\b', msg_lower)
+                and (
+                    (re.search(r'\bnetwork\b', msg_lower) and re.search(r'\blocal\b', msg_lower))
+                    or (re.search(r'\bintercity\b', msg_lower) and re.search(r'\bintracity\b', msg_lower))
+                )
             )
+            or (re.search(r'\bintercity\b', msg_lower) and re.search(r'\bintracity\b', msg_lower))
         )
         _is_trip_type_breakdown_query = bool(
             re.search(r'\bbreakdown\b', msg_lower)
@@ -1399,10 +1412,16 @@ class IntentDetector:
                 "fixedelock": "FixedELock",
                 "portableelock": "PortableELock",
                 "gps": "FixedGPS",
-                "atd": "ATD",
-                "ata": "ATA",
+                "atd": "atd",
+                "ata": "ata",
                 "route": "Route",
                 "routename": "Route",
+                "from": "source",
+                "origin": "source",
+                "source": "source",
+                "to": "destination",
+                "dest": "destination",
+                "destination": "destination",
             }
             for f in query_payload["filters"]:
                 if isinstance(f, dict):
@@ -1411,6 +1430,15 @@ class IntentDetector:
                         continue
                     if raw_field.lower() == "gps" and f.get("value") == "existing":
                         f["field"] = "GPS"
+                        continue
+                    if raw_field.lower() in ("atd", "ata"):
+                        f["field"] = raw_field.lower()
+                        continue
+                    if raw_field.lower() in ("from", "origin", "source"):
+                        f["field"] = "source"
+                        continue
+                    if raw_field.lower() in ("to", "dest", "destination"):
+                        f["field"] = "destination"
                         continue
                     alias = raw_field.lower()
                     if alias in field_alias_map:
@@ -1689,6 +1717,7 @@ class IntentDetector:
                 or _is_each_region_query
                 or _is_priority_query
                 or _is_closeremark_query
+                or _is_atd_ata_query
             ):
                 has_status_keyword = True
                 status_override = "valid"
@@ -2132,7 +2161,9 @@ class IntentDetector:
                 query_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
                 if is_non_gps:
                     query_payload["analytics"] = [{"type": "gpsna"}]
-                query_payload["select"] = []
+                    query_payload["select"] = []
+                else:
+                    query_payload.pop("select", None)
                 query_payload["groupBy"] = ["tripType"]
                 query_payload["metrics"] = [
                     {
@@ -2142,7 +2173,8 @@ class IntentDetector:
                     }
                 ]
                 reordered = {}
-                for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                key_order = ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"] if is_non_gps else ["entity", "operation", "filters", "groupBy", "metrics"]
+                for k in key_order:
                     if k in query_payload:
                         reordered[k] = query_payload[k]
                 for k, v in query_payload.items():
@@ -2267,7 +2299,9 @@ class IntentDetector:
                             return 6
                     if fld == "shipmentMethod":
                         return 7
-                    return 8
+                    if str(fld).lower() in ("atd", "ata"):
+                        return 8
+                    return 9
 
                 query_payload["filters"].sort(key=_device_analytics_sort_key)
                 reordered = {}
@@ -2837,20 +2871,109 @@ class IntentDetector:
                 })
 
             # --- ATD / ATA Post-Processing ---
-            # Normalize ATD/ATA field values to canonical forms
+            # Normalize ATD/ATA field values to canonical lowercase forms
             _ATD_ATA_VALUE_MAP = {
                 "notcaptured": "notcaptured",
                 "not captured": "notcaptured",
-                "captured": "Captured",
+                "captured": "captured",
                 "missing": "missing",
-                "notmissing": "NotMissing",
-                "not missing": "NotMissing",
+                "notmissing": "notmissing",
+                "not missing": "notmissing",
             }
-            for f in query_payload["filters"]:
-                if isinstance(f, dict) and f.get("field") in ["ATD", "ATA"]:
-                    raw_val = str(f.get("value", "")).lower().strip()
-                    if raw_val in _ATD_ATA_VALUE_MAP:
-                        f["value"] = _ATD_ATA_VALUE_MAP[raw_val]
+            if _is_atd_ata_query or any(isinstance(f, dict) and str(f.get("field", "")).lower() in ("atd", "ata") for f in query_payload.get("filters", [])):
+                detected_atd_val = None
+                detected_ata_val = None
+                if re.search(r'\batd\b', msg_lower):
+                    if re.search(r'\b(?:not\s*captured|notcaptured)\b', msg_lower):
+                        detected_atd_val = "notcaptured"
+                    elif re.search(r'\b(?:not\s*missing|notmissing)\b', msg_lower):
+                        detected_atd_val = "notmissing"
+                    elif re.search(r'\bmissing\b', msg_lower):
+                        detected_atd_val = "missing"
+                    elif re.search(r'\bcaptured\b', msg_lower):
+                        detected_atd_val = "captured"
+                    else:
+                        detected_atd_val = "notcaptured"
+
+                if re.search(r'\bata\b', msg_lower):
+                    if re.search(r'\b(?:not\s*captured|notcaptured)\b', msg_lower):
+                        detected_ata_val = "notcaptured"
+                    elif re.search(r'\b(?:not\s*missing|notmissing)\b', msg_lower):
+                        detected_ata_val = "notmissing"
+                    elif re.search(r'\bmissing\b', msg_lower):
+                        detected_ata_val = "missing"
+                    elif re.search(r'\bcaptured\b', msg_lower):
+                        detected_ata_val = "captured"
+                    else:
+                        detected_ata_val = "notcaptured"
+
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and str(f.get("field", "")).lower() in ("atd", "ata"):
+                        f["field"] = str(f["field"]).lower()
+                        raw_val = str(f.get("value", "")).lower().replace(" ", "").replace("_", "")
+                        f["value"] = _ATD_ATA_VALUE_MAP.get(raw_val, raw_val)
+                        if f["field"] == "atd":
+                            detected_atd_val = f["value"]
+                        elif f["field"] == "ata":
+                            detected_ata_val = f["value"]
+
+                if detected_atd_val and not any(isinstance(f, dict) and f.get("field") == "atd" for f in query_payload.get("filters", [])):
+                    query_payload["filters"].append({
+                        "field": "atd",
+                        "operator": "eq",
+                        "value": detected_atd_val
+                    })
+                if detected_ata_val and not any(isinstance(f, dict) and f.get("field") == "ata" for f in query_payload.get("filters", [])):
+                    query_payload["filters"].append({
+                        "field": "ata",
+                        "operator": "eq",
+                        "value": detected_ata_val
+                    })
+
+                if detect_device_analytics(message):
+                    query_payload["filters"].sort(key=_device_analytics_sort_key)
+
+            # --- Source / Destination Post-Processing ---
+            _STOP_LOCATION_WORDS = {
+                "the", "a", "an", "all", "device", "devices", "gps", "elock", "vendor",
+                "january", "february", "march", "april", "may", "june", "july", "august",
+                "september", "october", "november", "december", "today", "yesterday", "tomorrow",
+                "last", "this", "next", "week", "month", "year", "date", "days", "day", "valid",
+                "active", "running", "closed", "completed", "cancelled", "cancel", "location", "locations"
+            }
+            for f in query_payload.get("filters", []):
+                if isinstance(f, dict):
+                    fld_lower = str(f.get("field", "")).lower()
+                    if fld_lower in ("from", "origin", "source"):
+                        f["field"] = "source"
+                    elif fld_lower in ("to", "dest", "destination"):
+                        f["field"] = "destination"
+
+            has_source_filter = any(isinstance(f, dict) and f.get("field") == "source" for f in query_payload.get("filters", []))
+            if not has_source_filter:
+                src_match = re.search(r'\b(?:from|origin|source|starting\s+(?:from|at)?)\s+([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                if src_match:
+                    val = src_match.group(1).strip()
+                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val):
+                        query_payload["filters"].append({
+                            "field": "source",
+                            "operator": "eq",
+                            "value": val
+                        })
+
+            has_dest_filter = any(isinstance(f, dict) and f.get("field") == "destination" for f in query_payload.get("filters", []))
+            if not has_dest_filter:
+                dest_match = re.search(r'\b(?:to|destination|reaching|ends?\s+(?:at|on)?)\s+([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                if not dest_match:
+                    dest_match = re.search(r'\b(?:destination\s+is|destination|reaching)\s+([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
+                if dest_match:
+                    val = dest_match.group(1).strip()
+                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val):
+                        query_payload["filters"].append({
+                            "field": "destination",
+                            "operator": "eq",
+                            "value": val
+                        })
 
             # --- ShipmentMethod Post-Processing ---
             # Full list of recognized shipmentMethod values.
@@ -3173,22 +3296,31 @@ class IntentDetector:
 
                 query_payload["filters"].sort(key=_trip_type_breakdown_sort_key)
             elif _is_network_vs_local_query:
+                is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
                 def _network_vs_local_sort_key(flt):
                     if not isinstance(flt, dict):
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "tripStatus":
-                        return 1
-                    elif field == "groupId":
-                        return 2
-                    elif field == "runDate" and op == "gte":
+                    if is_non_gps:
+                        if field == "tripStatus":
+                            return 1
+                        elif field == "groupId":
+                            return 2
+                    else:
+                        if field == "groupId":
+                            return 1
+                        elif field == "tripStatus":
+                            return 2
+                    if field == "runDate" and op == "gte":
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
                     return 10
 
                 query_payload["filters"].sort(key=_network_vs_local_sort_key)
+                if not is_non_gps:
+                    query_payload.pop("select", None)
             elif _is_no_gps_vehicle_query:
                 def _no_gps_vehicle_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -3333,22 +3465,26 @@ class IntentDetector:
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
-                    elif field == "region":
+                    elif field in ("source", "destination", "From", "To"):
                         return 5
-                    elif field in ("Route", "route", "RouteName", "routeName"):
+                    elif field == "region":
                         return 6
-                    elif field in ("transporter", "Transporter"):
+                    elif field in ("Route", "route", "RouteName", "routeName"):
                         return 7
-                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                    elif field in ("transporter", "Transporter"):
                         return 8
-                    elif field == "shipmentMethod":
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 9
-                    elif field in ("routeCategory", "routeType", "tripType"):
+                    elif field == "shipmentMethod":
                         return 10
-                    elif field == "priority":
+                    elif field in ("routeCategory", "routeType", "tripType"):
                         return 11
-                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                    elif field == "priority":
                         return 12
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 13
+                    elif field in ("atd", "ata", "ATD", "ATA"):
+                        return 14
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
@@ -3368,22 +3504,26 @@ class IntentDetector:
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
-                    elif field == "region":
+                    elif field in ("source", "destination", "From", "To"):
                         return 5
-                    elif field in ("Route", "route", "RouteName", "routeName"):
+                    elif field == "region":
                         return 6
-                    elif field in ("transporter", "Transporter"):
+                    elif field in ("Route", "route", "RouteName", "routeName"):
                         return 7
-                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                    elif field in ("transporter", "Transporter"):
                         return 8
-                    elif field == "shipmentMethod":
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 9
-                    elif field in ("routeCategory", "routeType", "tripType"):
+                    elif field == "shipmentMethod":
                         return 10
-                    elif field == "priority":
+                    elif field in ("routeCategory", "routeType", "tripType"):
                         return 11
-                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                    elif field == "priority":
                         return 12
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 13
+                    elif field in ("atd", "ata", "ATD", "ATA"):
+                        return 14
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
@@ -3416,9 +3556,13 @@ class IntentDetector:
                     return 10
                 elif field == "priority":
                     return 11
+                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                    return 12
+                elif field in ("atd", "ata", "ATD", "ATA"):
+                    return 13
                 return 20
 
-            if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together)):
+            if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together) or bool(detect_device_analytics(message))):
                 query_payload["filters"].sort(key=_standard_filter_sort_key)
 
             reordered = {}
@@ -3479,11 +3623,16 @@ class IntentDetector:
             fb_is_network_vs_local_query = bool(
                 re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
                 or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
+                or re.search(r'\bintercity\s+(?:vs\.?|versus|and|or|to)\s+intracity\b', msg_lower)
+                or re.search(r'\bintracity\s+(?:vs\.?|versus|and|or|to)\s+intercity\b', msg_lower)
                 or (
                     re.search(r'\b(?:compare|comparison|versus|vs\.?|difference|ratio)\b', msg_lower)
-                    and re.search(r'\bnetwork\b', msg_lower)
-                    and re.search(r'\blocal\b', msg_lower)
+                    and (
+                        (re.search(r'\bnetwork\b', msg_lower) and re.search(r'\blocal\b', msg_lower))
+                        or (re.search(r'\bintercity\b', msg_lower) and re.search(r'\bintracity\b', msg_lower))
+                    )
                 )
+                or (re.search(r'\bintercity\b', msg_lower) and re.search(r'\bintracity\b', msg_lower))
             )
             fb_is_each_region_query = bool(
                 re.search(
@@ -3511,6 +3660,9 @@ class IntentDetector:
                 or re.search(r'\bvia\s+(?:forcefull|forcefully|forceful|geofence|geo[\s-]fence|polygon)\b', msg_lower)
                 or re.search(r'\b(?:forcefully|forcefull|forceful|geofence|polygon)\s+(?:closed|remark)\b', msg_lower)
                 or ((re.search(r'\b(?:forcefully|forcefull|forceful|geofence|polygon)\b', msg_lower) is not None) and (re.search(r'\b(?:closed|close)\b', msg_lower) is not None))
+            )
+            fb_is_atd_ata_query = bool(
+                re.search(r'\b(?:atd|ata)\b', msg_lower)
             )
             fb_is_trip_type_breakdown_query = bool(
                 re.search(r'\bbreakdown\b', msg_lower)
@@ -3732,6 +3884,7 @@ class IntentDetector:
                     or fb_is_each_region_query
                     or fb_is_priority_query
                     or fb_is_closeremark_query
+                    or fb_is_atd_ata_query
                 ):
                     fallback_payload["filters"].append({
                         "field": "tripStatus",
@@ -4093,7 +4246,9 @@ class IntentDetector:
                 fallback_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
                 if fb_is_non_gps:
                     fallback_payload["analytics"] = [{"type": "gpsna"}]
-                fallback_payload["select"] = []
+                    fallback_payload["select"] = []
+                else:
+                    fallback_payload.pop("select", None)
                 fallback_payload["groupBy"] = ["tripType"]
                 fallback_payload["metrics"] = [
                     {
@@ -4103,7 +4258,8 @@ class IntentDetector:
                     }
                 ]
                 reordered = {}
-                for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+                key_order = ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"] if fb_is_non_gps else ["entity", "operation", "filters", "groupBy", "metrics"]
+                for k in key_order:
                     if k in fallback_payload:
                         reordered[k] = fallback_payload[k]
                 for k, v in fallback_payload.items():
@@ -4219,7 +4375,9 @@ class IntentDetector:
                             return 6
                     if fld == "shipmentMethod":
                         return 7
-                    return 8
+                    if str(fld).lower() in ("atd", "ata"):
+                        return 8
+                    return 9
 
                 fallback_payload["filters"].sort(key=_fb_device_analytics_sort_key)
                 reordered = {}
@@ -5080,22 +5238,31 @@ class IntentDetector:
 
                 fallback_payload["filters"].sort(key=_fb_trip_type_breakdown_sort_key)
             elif fb_is_network_vs_local_query:
+                fb_is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
                 def _fb_network_vs_local_sort_key(flt):
                     if not isinstance(flt, dict):
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "tripStatus":
-                        return 1
-                    elif field == "groupId":
-                        return 2
-                    elif field == "runDate" and op == "gte":
+                    if fb_is_non_gps:
+                        if field == "tripStatus":
+                            return 1
+                        elif field == "groupId":
+                            return 2
+                    else:
+                        if field == "groupId":
+                            return 1
+                        elif field == "tripStatus":
+                            return 2
+                    if field == "runDate" and op == "gte":
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_network_vs_local_sort_key)
+                if not fb_is_non_gps:
+                    fallback_payload.pop("select", None)
             elif fb_is_no_gps_vehicle_query:
                 def _fb_no_gps_vehicle_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -5240,22 +5407,26 @@ class IntentDetector:
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
-                    elif field == "region":
+                    elif field in ("source", "destination", "From", "To"):
                         return 5
-                    elif field in ("Route", "route", "RouteName", "routeName"):
+                    elif field == "region":
                         return 6
-                    elif field in ("transporter", "Transporter"):
+                    elif field in ("Route", "route", "RouteName", "routeName"):
                         return 7
-                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                    elif field in ("transporter", "Transporter"):
                         return 8
-                    elif field == "shipmentMethod":
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 9
-                    elif field in ("routeCategory", "routeType", "tripType"):
+                    elif field == "shipmentMethod":
                         return 10
-                    elif field == "priority":
+                    elif field in ("routeCategory", "routeType", "tripType"):
                         return 11
-                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                    elif field == "priority":
                         return 12
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 13
+                    elif field in ("atd", "ata", "ATD", "ATA"):
+                        return 14
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
@@ -5275,22 +5446,26 @@ class IntentDetector:
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
-                    elif field == "region":
+                    elif field in ("source", "destination", "From", "To"):
                         return 5
-                    elif field in ("Route", "route", "RouteName", "routeName"):
+                    elif field == "region":
                         return 6
-                    elif field in ("transporter", "Transporter"):
+                    elif field in ("Route", "route", "RouteName", "routeName"):
                         return 7
-                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                    elif field in ("transporter", "Transporter"):
                         return 8
-                    elif field == "shipmentMethod":
+                    elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 9
-                    elif field in ("routeCategory", "routeType", "tripType"):
+                    elif field == "shipmentMethod":
                         return 10
-                    elif field == "priority":
+                    elif field in ("routeCategory", "routeType", "tripType"):
                         return 11
-                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                    elif field == "priority":
                         return 12
+                    elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                        return 13
+                    elif field in ("atd", "ata", "ATD", "ATA"):
+                        return 14
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
@@ -5354,6 +5529,95 @@ class IntentDetector:
                         "value": fb_detected_remark
                     })
 
+            # --- ATD / ATA Fallback Post-Processing ---
+            if fb_is_atd_ata_query or any(isinstance(f, dict) and str(f.get("field", "")).lower() in ("atd", "ata") for f in fallback_payload.get("filters", [])):
+                fb_detected_atd_val = None
+                fb_detected_ata_val = None
+                if re.search(r'\batd\b', msg_lower):
+                    if re.search(r'\b(?:not\s*captured|notcaptured)\b', msg_lower):
+                        fb_detected_atd_val = "notcaptured"
+                    elif re.search(r'\b(?:not\s*missing|notmissing)\b', msg_lower):
+                        fb_detected_atd_val = "notmissing"
+                    elif re.search(r'\bmissing\b', msg_lower):
+                        fb_detected_atd_val = "missing"
+                    elif re.search(r'\bcaptured\b', msg_lower):
+                        fb_detected_atd_val = "captured"
+                    else:
+                        fb_detected_atd_val = "notcaptured"
+
+                if re.search(r'\bata\b', msg_lower):
+                    if re.search(r'\b(?:not\s*captured|notcaptured)\b', msg_lower):
+                        fb_detected_ata_val = "notcaptured"
+                    elif re.search(r'\b(?:not\s*missing|notmissing)\b', msg_lower):
+                        fb_detected_ata_val = "notmissing"
+                    elif re.search(r'\bmissing\b', msg_lower):
+                        fb_detected_ata_val = "missing"
+                    elif re.search(r'\bcaptured\b', msg_lower):
+                        fb_detected_ata_val = "captured"
+                    else:
+                        fb_detected_ata_val = "notcaptured"
+
+                for f in fallback_payload.get("filters", []):
+                    if isinstance(f, dict) and str(f.get("field", "")).lower() in ("atd", "ata"):
+                        f["field"] = str(f["field"]).lower()
+                        raw_val = str(f.get("value", "")).lower().replace(" ", "").replace("_", "")
+                        f["value"] = _ATD_ATA_VALUE_MAP.get(raw_val, raw_val)
+                        if f["field"] == "atd":
+                            fb_detected_atd_val = f["value"]
+                        elif f["field"] == "ata":
+                            fb_detected_ata_val = f["value"]
+
+                if fb_detected_atd_val and not any(isinstance(f, dict) and f.get("field") == "atd" for f in fallback_payload.get("filters", [])):
+                    fallback_payload["filters"].append({
+                        "field": "atd",
+                        "operator": "eq",
+                        "value": fb_detected_atd_val
+                    })
+                if fb_detected_ata_val and not any(isinstance(f, dict) and f.get("field") == "ata" for f in fallback_payload.get("filters", [])):
+                    fallback_payload["filters"].append({
+                        "field": "ata",
+                        "operator": "eq",
+                        "value": fb_detected_ata_val
+                    })
+
+                if detect_device_analytics(message):
+                    fallback_payload["filters"].sort(key=_fb_device_analytics_sort_key)
+
+            # --- Source / Destination Fallback Post-Processing ---
+            for f in fallback_payload.get("filters", []):
+                if isinstance(f, dict):
+                    fld_lower = str(f.get("field", "")).lower()
+                    if fld_lower in ("from", "origin", "source"):
+                        f["field"] = "source"
+                    elif fld_lower in ("to", "dest", "destination"):
+                        f["field"] = "destination"
+
+            fb_has_source = any(isinstance(f, dict) and f.get("field") == "source" for f in fallback_payload.get("filters", []))
+            if not fb_has_source:
+                src_match = re.search(r'\b(?:from|origin|source|starting\s+(?:from|at)?)\s+([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                if src_match:
+                    val = src_match.group(1).strip()
+                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val):
+                        fallback_payload["filters"].append({
+                            "field": "source",
+                            "operator": "eq",
+                            "value": val
+                        })
+
+            fb_has_dest = any(isinstance(f, dict) and f.get("field") == "destination" for f in fallback_payload.get("filters", []))
+            if not fb_has_dest:
+                dest_match = re.search(r'\b(?:to|destination|reaching|ends?\s+(?:at|on)?)\s+([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                if not dest_match:
+                    dest_match = re.search(r'\b(?:destination\s+is|destination|reaching)\s+([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
+                if dest_match:
+                    val = dest_match.group(1).strip()
+                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val):
+                        fallback_payload["filters"].append({
+                            "field": "destination",
+                            "operator": "eq",
+                            "value": val
+                        })
+
             def _fb_standard_filter_sort_key(flt):
                 if not isinstance(flt, dict):
                     return 99
@@ -5367,25 +5631,29 @@ class IntentDetector:
                     return 3
                 elif field == "runDate" and op == "lte":
                     return 4
-                elif field == "region":
+                elif field in ("source", "destination", "From", "To"):
                     return 5
-                elif field in ("Route", "route", "RouteName", "routeName"):
+                elif field == "region":
                     return 6
-                elif field in ("transporter", "Transporter"):
+                elif field in ("Route", "route", "RouteName", "routeName"):
                     return 7
-                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+                elif field in ("transporter", "Transporter"):
                     return 8
-                elif field == "shipmentMethod":
+                elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                     return 9
-                elif field in ("routeCategory", "routeType", "tripType"):
+                elif field == "shipmentMethod":
                     return 10
-                elif field == "priority":
+                elif field in ("routeCategory", "routeType", "tripType"):
                     return 11
-                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                elif field == "priority":
                     return 12
+                elif field in ("closeremark", "closeRemarks", "closeRemark", "close_remark"):
+                    return 13
+                elif field in ("atd", "ata", "ATD", "ATA"):
+                    return 14
                 return 20
 
-            if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query or fb_is_active_device_elock_query or fb_is_active_device_portable_query or fb_is_distinct_transporter_query or fb_is_portable_elock_trip_query or fb_is_fixed_elock_trip_query or fb_is_fixed_gps_combo or fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only or fb_is_trip_type_breakdown_query or fb_is_network_vs_local_query or fb_is_no_gps_vehicle_query or fb_is_gps_trip_query or (fb_target_vendor and not fb_is_devices_together)):
+            if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query or fb_is_active_device_elock_query or fb_is_active_device_portable_query or fb_is_distinct_transporter_query or fb_is_portable_elock_trip_query or fb_is_fixed_elock_trip_query or fb_is_fixed_gps_combo or fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only or fb_is_trip_type_breakdown_query or fb_is_network_vs_local_query or fb_is_no_gps_vehicle_query or fb_is_gps_trip_query or (fb_target_vendor and not fb_is_devices_together) or bool(detect_device_analytics(message))):
                 fallback_payload["filters"].sort(key=_fb_standard_filter_sort_key)
 
             reordered = {}
