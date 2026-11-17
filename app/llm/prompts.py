@@ -129,6 +129,16 @@ CRITICAL RULES:
    - "GPS is active but ATD is not captured" -> analytics: [{"type": "gps"}], tripStatus eq "valid", GPS eq "active", atd eq "notcaptured", select: []
    - "GPS is active but ATD is missing" -> analytics: [{"type": "gps"}], tripStatus eq "valid", GPS eq "active", atd eq "missing", select: []
    - "GPS is active but ATA is missing/not captured" -> analytics: [{"type": "gps"}], tripStatus eq "valid", GPS eq "active", ata eq "missing"/"notcaptured", select: []
+   - "when query about gps, PortableELock, FixedELock together or any two" (e.g. "GPS and Fixed Lock are active", "GPS and Portable Lock are active"):
+     Include top-level: "analytics": [{"type": "withgps"}]
+     Include filters for each mentioned device:
+     - Fixed Lock / Fixed E-Lock -> field: "FixedELock", operator: "eq", value: "active" (or specified status)
+     - Portable Lock / Portable E-Lock -> field: "PortableELock", operator: "eq", value: "active" (or specified status)
+     - GPS -> field: "GPS", operator: "eq", value: "active" (or specified status)
+     Include filters: groupId eq "0041", tripStatus eq "valid", runDate gte, runDate lte
+     If ATD/ATA mentioned: include field "atd" / "ata", operator "eq", value "missing" / "notcaptured"
+     Include select: []
+     Filter order: groupId, tripStatus, runDate gte, runDate lte, FixedELock, PortableELock, GPS, atd / ata
    - "closed automatically via forcefull/geofence", "closed with remark manual/forcefully/geofence/polygon/api/backend/web" -> closeremark eq "<remark>", tripStatus eq "valid"
    - "marked as high priority", "high priority trips" -> priority eq "high", select: []
    - "marked as low priority", "low priority", "standard priority", "normal priority", "medium priority", or any priority query without explicit "high" -> priority eq "low", select: []
@@ -594,6 +604,10 @@ Reference Examples:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "closeremark", "operator": "eq", "value": "geofence"}], "select": []}
 - "Download all trips where GPS is active but ATD is not captured of august" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "atd", "operator": "eq", "value": "notcaptured"}], "select": []}
+- "Download all trips where GPS and Fixed Lock are active but ATD is missing of august" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "FixedELock", "operator": "eq", "value": "active"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "atd", "operator": "eq", "value": "missing"}], "select": []}
+- "Download all trips where GPS and Portable Lock are active but ATD is missing" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "PortableELock", "operator": "eq", "value": "active"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "atd", "operator": "eq", "value": "missing"}], "select": []}
 - "Show active Fixed GPS device count across Intercity trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "GPS", "operator": "eq", "value": "active"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeCategory", "operator": "eq", "value": "intercity"}]}
 - "Show active device status for Fixed GPS units on Valid Intercity trips during Aug 2026" ->

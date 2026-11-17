@@ -1,6 +1,6 @@
 import pytest
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
 from app.config import settings
@@ -286,8 +286,8 @@ async def test_trip_report_missing_date_range_flow():
         filters_1 = data_1["entities"]["filters"]
         fields_1 = [f["field"] for f in filters_1]
         assert "groupId" in fields_1
-        assert "gps" in fields_1
-        assert "portableelock" in fields_1
+        assert "gps" in fields_1 or "GPS" in fields_1
+        assert "portableelock" in fields_1 or "PortableELock" in fields_1
         assert "atd" in fields_1
         
         # Verify no external API was called yet
@@ -1090,16 +1090,24 @@ async def test_download_fixed_elock_gps_na_flow():
 
 @pytest.mark.asyncio
 async def test_gps_fixed_lock_active_atd_missing_flow():
-    # Test "Download all trips where GPS and Fixed Lock are active but ATD is missing in last 2 days."
-    # This query specifies GPS and Fixed Lock are active, but it does NOT ask for active/running trips,
-    # so tripStatus should not be set to "active".
     user_query = "Download all trips where GPS and Fixed Lock are active but ATD is missing from 2026-07-26 to 2026-07-28."
     
     # Mock LLM Client Response
     llm_payload_response = json.dumps({
         "entity": "trip",
-        "operation": "find",
+        "operation": "count",
+        "analytics": [{"type": "withgps"}],
         "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
             {
                 "field": "runDate",
                 "operator": "gte",
@@ -1111,12 +1119,12 @@ async def test_gps_fixed_lock_active_atd_missing_flow():
                 "value": "2026-07-28 23:59:59"
             },
             {
-                "field": "gps",
+                "field": "FixedELock",
                 "operator": "eq",
                 "value": "active"
             },
             {
-                "field": "fixedelock",
+                "field": "GPS",
                 "operator": "eq",
                 "value": "active"
             },
@@ -1157,28 +1165,348 @@ async def test_gps_fixed_lock_active_atd_missing_flow():
         
         entities = data["entities"]
         assert entities["entity"] == "trip"
-        assert entities["operation"] == "find"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "withgps"}]
+        assert entities["select"] == []
         
         filters = entities["filters"]
-        # Filters should contain runDate (gte), runDate (lte), groupId, gps, fixedelock, atd, and NO tripStatus filter
-        assert len(filters) == 6
-        fields = [f["field"] for f in filters]
-        assert "groupId" in fields
-        assert "gps" in fields
-        assert "fixedelock" in fields
-        assert "atd" in fields
-        assert "runDate" in fields
-        assert "tripStatus" not in fields
-        
-        for f in filters:
-            if f["field"] == "gps":
-                assert f["value"] == "active"
-            elif f["field"] == "fixedelock":
-                assert f["value"] == "active"
-            elif f["field"] == "atd":
-                assert f["value"] == "missing"
-            elif f["field"] == "groupId":
-                assert f["value"] == "0041"
+        assert filters == [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-07-26 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-07-28 23:59:59"},
+            {"field": "FixedELock", "operator": "eq", "value": "active"},
+            {"field": "GPS", "operator": "eq", "value": "active"},
+            {"field": "atd", "operator": "eq", "value": "missing"}
+        ]
+
+
+@pytest.mark.asyncio
+async def test_gps_and_fixed_lock_active_atd_missing_august_flow():
+    user_query = "Download all trips where GPS and Fixed Lock are active but ATD is missing of august"
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [{"type": "withgps"}],
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "FixedELock", "operator": "eq", "value": "active"},
+            {"field": "GPS", "operator": "eq", "value": "active"},
+            {"field": "atd", "operator": "eq", "value": "missing"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 10}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-gps-fixed-lock-august",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "withgps"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "FixedELock",
+                    "operator": "eq",
+                    "value": "active"
+                },
+                {
+                    "field": "GPS",
+                    "operator": "eq",
+                    "value": "active"
+                },
+                {
+                    "field": "atd",
+                    "operator": "eq",
+                    "value": "missing"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_gps_and_fixed_lock_active_atd_missing_august_fallback_flow():
+    user_query = "Download all trips where GPS and Fixed Lock are active but ATD is missing of august"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM fallback simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 10}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-gps-fixed-lock-august-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "withgps"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "FixedELock",
+                    "operator": "eq",
+                    "value": "active"
+                },
+                {
+                    "field": "GPS",
+                    "operator": "eq",
+                    "value": "active"
+                },
+                {
+                    "field": "atd",
+                    "operator": "eq",
+                    "value": "missing"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_gps_and_portable_lock_active_atd_missing_flow():
+    user_query = "Download all trips where GPS and Portable Lock are active but ATD is missing"
+
+    llm_payload_response = json.dumps({
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [{"type": "withgps"}],
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "PortableELock", "operator": "eq", "value": "active"},
+            {"field": "GPS", "operator": "eq", "value": "active"},
+            {"field": "atd", "operator": "eq", "value": "missing"}
+        ],
+        "select": []
+    })
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = [llm_payload_response, "Done"]
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 10}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query + " of august",
+            "history": [],
+            "session_id": "test-session-gps-portable-lock-august",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "withgps"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "PortableELock",
+                    "operator": "eq",
+                    "value": "active"
+                },
+                {
+                    "field": "GPS",
+                    "operator": "eq",
+                    "value": "active"
+                },
+                {
+                    "field": "atd",
+                    "operator": "eq",
+                    "value": "missing"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
+
+
+@pytest.mark.asyncio
+async def test_gps_and_portable_lock_active_atd_missing_fallback_flow():
+    user_query = "Download all trips where GPS and Portable Lock are active but ATD is missing of august"
+
+    from unittest.mock import MagicMock
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_generate, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_generate.side_effect = Exception("LLM fallback simulation")
+        mock_api_res = MagicMock()
+        mock_api_res.status_code = 200
+        mock_api_res.json.return_value = {"success": True, "count": 10}
+        mock_post.return_value = mock_api_res
+
+        payload = {
+            "message": user_query,
+            "history": [],
+            "session_id": "test-session-gps-portable-lock-august-fb",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+
+        assert response.status_code == 200
+        entities = response.json()["entities"]
+
+        expected_entities = {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": "withgps"
+                }
+            ],
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "tripStatus",
+                    "operator": "eq",
+                    "value": "valid"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "gte",
+                    "value": "2026-08-01 00:00:00"
+                },
+                {
+                    "field": "runDate",
+                    "operator": "lte",
+                    "value": "2026-08-31 23:59:59"
+                },
+                {
+                    "field": "PortableELock",
+                    "operator": "eq",
+                    "value": "active"
+                },
+                {
+                    "field": "GPS",
+                    "operator": "eq",
+                    "value": "active"
+                },
+                {
+                    "field": "atd",
+                    "operator": "eq",
+                    "value": "missing"
+                }
+            ],
+            "select": []
+        }
+        assert entities == expected_entities
 
 
 @pytest.mark.asyncio
