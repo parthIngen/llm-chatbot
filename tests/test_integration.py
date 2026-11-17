@@ -8966,6 +8966,45 @@ async def test_active_trips_from_nga_last_week_fallback_flow():
         ]
 
 
+def test_fallback_location_with_gps_and_atd_missing_groq_rate_limit(client):
+    """
+    Test fallback execution when LLM call fails (e.g. Groq 413 / rate limit exceeded).
+    Ensures _STOP_LOCATION_WORDS and _ATD_ATA_VALUE_MAP do not trigger UnboundLocalError.
+    """
+    from app.core.exceptions import LLMClientError
+
+    user_query = "Show trips from NGA location where GPS is active but ATD is missing of august"
+
+    with patch("app.llm.groq_client.GroqClient.complete", new_callable=AsyncMock) as mock_complete:
+        mock_complete.side_effect = LLMClientError("LLM Provider (groq) returned status code 413: Rate limit exceeded")
+
+        payload = {
+            "message": user_query,
+            "session_id": "test-groq-413-nga-gps-atd-fallback",
+            "AccessToken": "mock-token"
+        }
+
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["intent"] == "trip_report"
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "gps"}]
+
+        filters = entities["filters"]
+        assert {"field": "groupId", "operator": "eq", "value": "0041"} in filters
+        assert {"field": "tripStatus", "operator": "eq", "value": "valid"} in filters
+        assert {"field": "source", "operator": "eq", "value": "NGA"} in filters
+        assert {"field": "GPS", "operator": "eq", "value": "active"} in filters
+        assert {"field": "atd", "operator": "eq", "value": "missing"} in filters
+        assert any(f.get("field") == "runDate" and f.get("operator") == "gte" and "2026-08-01" in f.get("value") for f in filters)
+        assert any(f.get("field") == "runDate" and f.get("operator") == "lte" and "2026-08-31" in f.get("value") for f in filters)
+
+
+
 
 
 

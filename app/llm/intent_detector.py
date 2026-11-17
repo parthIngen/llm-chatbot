@@ -819,6 +819,23 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
 
     return None
 
+_STOP_LOCATION_WORDS = {
+    "the", "a", "an", "all", "device", "devices", "gps", "elock", "vendor",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december", "today", "yesterday", "tomorrow",
+    "last", "this", "next", "week", "month", "year", "date", "days", "day", "valid",
+    "active", "running", "closed", "completed", "cancelled", "cancel", "location", "locations"
+}
+
+_ATD_ATA_VALUE_MAP = {
+    "notcaptured": "notcaptured",
+    "not captured": "notcaptured",
+    "captured": "captured",
+    "missing": "missing",
+    "notmissing": "notmissing",
+    "not missing": "notmissing",
+}
+
 class IntentDetector:
     def __init__(self, llm_client: LLMClient = None):
         provider = getattr(settings, "INTENT_LLM_PROVIDER", "groq")
@@ -2942,14 +2959,6 @@ class IntentDetector:
 
             # --- ATD / ATA Post-Processing ---
             # Normalize ATD/ATA field values to canonical lowercase forms
-            _ATD_ATA_VALUE_MAP = {
-                "notcaptured": "notcaptured",
-                "not captured": "notcaptured",
-                "captured": "captured",
-                "missing": "missing",
-                "notmissing": "notmissing",
-                "not missing": "notmissing",
-            }
             if _is_atd_ata_query or any(isinstance(f, dict) and str(f.get("field", "")).lower() in ("atd", "ata") for f in query_payload.get("filters", [])):
                 detected_atd_val = None
                 detected_ata_val = None
@@ -3004,13 +3013,6 @@ class IntentDetector:
                     query_payload["filters"].sort(key=_device_analytics_sort_key)
 
             # --- Source / Destination Post-Processing ---
-            _STOP_LOCATION_WORDS = {
-                "the", "a", "an", "all", "device", "devices", "gps", "elock", "vendor",
-                "january", "february", "march", "april", "may", "june", "july", "august",
-                "september", "october", "november", "december", "today", "yesterday", "tomorrow",
-                "last", "this", "next", "week", "month", "year", "date", "days", "day", "valid",
-                "active", "running", "closed", "completed", "cancelled", "cancel", "location", "locations"
-            }
             for f in query_payload.get("filters", []):
                 if isinstance(f, dict):
                     fld_lower = str(f.get("field", "")).lower()
