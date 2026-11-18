@@ -1581,11 +1581,16 @@ class IntentDetector:
             _is_network_vs_local_query = bool(
                 re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or|to)\s+local\b', msg_lower)
                 or re.search(r'\blocal\s+(?:vs\.?|versus|and|or|to)\s+network\b', msg_lower)
+                or re.search(r'\bintercity\s+(?:vs\.?|versus|and|or|to)\s+intracity\b', msg_lower)
+                or re.search(r'\bintracity\s+(?:vs\.?|versus|and|or|to)\s+intercity\b', msg_lower)
                 or (
                     re.search(r'\b(?:compare|comparison|versus|vs\.?|difference|ratio)\b', msg_lower)
-                    and re.search(r'\bnetwork\b', msg_lower)
-                    and re.search(r'\blocal\b', msg_lower)
+                    and (
+                        (re.search(r'\bnetwork\b', msg_lower) and re.search(r'\blocal\b', msg_lower))
+                        or (re.search(r'\bintercity\b', msg_lower) and re.search(r'\bintracity\b', msg_lower))
+                    )
                 )
+                or (re.search(r'\bintercity\b', msg_lower) and re.search(r'\bintracity\b', msg_lower))
             )
             _is_trip_type_breakdown_query = bool(
                 re.search(r'\bbreakdown\b', msg_lower)
@@ -2241,7 +2246,7 @@ class IntentDetector:
                     {
                         "field": "shipmentNo",
                         "function": "count",
-                        "alias": "count"
+                        "alias": "TotalTrip"
                     }
                 ]
                 reordered = {}
@@ -4432,7 +4437,7 @@ class IntentDetector:
                     {
                         "field": "shipmentNo",
                         "function": "count",
-                        "alias": "count"
+                        "alias": "TotalTrip"
                     }
                 ]
                 reordered = {}
@@ -4466,7 +4471,7 @@ class IntentDetector:
                     {
                         "field": "shipmentNo",
                         "function": "count",
-                        "alias": "count"
+                        "alias": "TotalTrip"
                     }
                 ]
                 reordered = {}

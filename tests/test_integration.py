@@ -6013,7 +6013,7 @@ async def test_intracity_vs_intercity_august_2026_flow():
             {
                 "field": "shipmentNo",
                 "function": "count",
-                "alias": "count"
+                "alias": "TotalTrip"
             }
         ]
     })
@@ -6027,8 +6027,8 @@ async def test_intracity_vs_intercity_august_2026_flow():
         mock_api_res.json.return_value = {
             "success": True,
             "data": [
-                {"tripType": 1, "tripTypeName": "Intercity Trip", "count": 120},
-                {"tripType": 2, "tripTypeName": "Intracity Trip", "count": 80}
+                {"tripType": 1, "tripTypeName": "Intercity Trip", "TotalTrip": 120, "count": 120},
+                {"tripType": 2, "tripTypeName": "Intracity Trip", "TotalTrip": 80, "count": 80}
             ]
         }
         mock_post.return_value = mock_api_res
@@ -6076,7 +6076,7 @@ async def test_intracity_vs_intercity_august_2026_flow():
                 {
                     "field": "shipmentNo",
                     "function": "count",
-                    "alias": "count"
+                    "alias": "TotalTrip"
                 }
             ]
         }
@@ -6097,8 +6097,8 @@ async def test_intracity_vs_intercity_august_2026_fallback_flow():
         mock_api_res.json.return_value = {
             "success": True,
             "data": [
-                {"tripType": 1, "tripTypeName": "Intercity Trip", "count": 120},
-                {"tripType": 2, "tripTypeName": "Intracity Trip", "count": 80}
+                {"tripType": 1, "tripTypeName": "Intercity Trip", "TotalTrip": 120, "count": 120},
+                {"tripType": 2, "tripTypeName": "Intracity Trip", "TotalTrip": 80, "count": 80}
             ]
         }
         mock_post.return_value = mock_api_res
@@ -6146,7 +6146,7 @@ async def test_intracity_vs_intercity_august_2026_fallback_flow():
                 {
                     "field": "shipmentNo",
                     "function": "count",
-                    "alias": "count"
+                    "alias": "TotalTrip"
                 }
             ]
         }

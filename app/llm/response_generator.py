@@ -485,7 +485,7 @@ class ResponseGenerator:
             local_count = 0
             for row in api_data:
                 tt_name = str(row.get("tripTypeName") or row.get("tripType") or "").lower()
-                cnt = row.get("count", 0) or row.get("trip_count", 0) or row.get("total_count", 0) or 0
+                cnt = row.get("TotalTrip", 0) or row.get("totaltrip", 0) or row.get("count", 0) or row.get("trip_count", 0) or row.get("total_count", 0) or 0
                 if "intercity" in tt_name or "network" in tt_name or str(row.get("tripType")) == "1":
                     network_count += cnt
                 elif "intracity" in tt_name or "local" in tt_name or str(row.get("tripType")) == "2":

@@ -200,13 +200,13 @@ CRITICAL RULES:
         - Do NOT include a "GPS" filter.
         - Include select: []
         - Include groupBy: ["tripType"]
-        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
+        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
         - Filter order: tripStatus first, then groupId, then runDate gte, then runDate lte, then tripType
       * When the query asks to compare Network vs Local or Intracity vs Intercity trip counts (e.g. "How many trips were Intracity vs. Intercity in August 2026?", "Compare Network vs Local trip counts"):
         - Include filters: groupId eq "0041", tripStatus eq "valid", runDate gte, runDate lte
         - Do NOT include select.
         - Include groupBy: ["tripType"]
-        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
+        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
         - Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte
         - Do NOT include routeCategory, routeType, or tripType filters.
       * When the query asks to compare Network vs Local trip counts for Non-GPS trips (e.g. "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026"):
@@ -214,14 +214,14 @@ CRITICAL RULES:
         - Include filters: tripStatus eq "valid", groupId eq "0041", runDate gte, runDate lte
         - Include select: []
         - Include groupBy: ["tripType"]
-        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
+        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
         - Filter order: tripStatus first, then groupId, then runDate gte, then runDate lte
       * When the query asks for device count across Intercity and Intracity trips (e.g. "Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026"):
         - Include top-level: "analytics": [{"type": "gps"}]
         - Include filters: groupId eq "0041", tripStatus eq "valid", runDate gte, runDate lte
         - Do NOT include select.
         - Include groupBy: ["tripType"]
-        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "count"}]
+        - Include metrics: [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
         - Filter order: groupId first, then tripStatus, then runDate gte, then runDate lte
         - Do NOT include a GPS filter (the query asks about GPS active status, not trip status active; the "type": "gps" analytics already covers active GPS devices).
         - Do NOT include a routeCategory, routeType, tripType, or shipmentMethod filter.
@@ -557,7 +557,7 @@ Reference Examples:
 - "Give me the total count of non gps vehicles in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
 - "How many trips were Intracity vs. Intercity in August 2026?" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]}
 - "Compare Network vs Local trip counts for Non-GPS trips in Aug 2026" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gpsna"}], "filters": [{"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["tripType"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "count"}]}
 - "What is the breakdown of Non-GPS trips across Network or Intercity routes in Aug 2026?" ->
