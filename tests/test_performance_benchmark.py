@@ -43,6 +43,7 @@ BENCHMARK_QUERIES = [
     # Comparisons and analytics
     ("Compare Network and Local trips.", "network_vs_local", {"groupBy": "tripType"}),
     ("Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026", "active_fixed_gps_across_trip_types", {"analytics": "gps", "GPS": "active", "groupBy": "tripType", "has_dates": True}),
+    ("Total trips for the North region in August 2026", "north_region_trips", {"region": "North", "has_dates": True}),
     ("Show region-wise trip counts.", "region_breakdown", {"groupBy": "region"}),
     ("Show High Priority vs Normal Priority trips.", "priority_comparison", {"groupBy": "priority"}),
     ("Show unique transporters.", "unique_transporters", {"groupBy": "Transporter"}),
@@ -144,6 +145,10 @@ def test_benchmark_query(query, case_id, expected_traits):
             vendor_vals = [str(f.get("value")).lower() for f in filters if f.get("field") in ("vendor", "vendorgps")]
             expected_v = expected_traits["vendor"].lower()
             assert any(expected_v in v for v in vendor_vals), f"Expected vendor {expected_v} in {vendor_vals}"
+
+        if "region" in expected_traits:
+            region_vals = [str(f.get("value")).lower() for f in filters if f.get("field") == "region"]
+            assert expected_traits["region"].lower() in region_vals, f"Expected region in {filters}"
 
         # 3. Check performance
         assert duration < 1.0, f"Expected sub-second response, got {duration:.3f}s"

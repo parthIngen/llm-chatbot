@@ -64,10 +64,18 @@ def can_resolve_fast_path(message: str) -> bool:
     if bool(re.search(r'\bhigh\s+priority\s+(?:vs\.?|versus|and|or)\s+(?:normal|standard|low)\b', msg_l)):
         return True
 
-    # 8. Basic trip counts & status
+    # 8. Region specific trip queries
+    if bool(re.search(r'\b(?:north|south|east|west|central|north\s*east|north\s*west|south\s*east|south\s*west)\s+region\b', msg_l)) and bool(re.search(r'\btrips?\b', msg_l)):
+        return True
+    if bool(re.search(r'\btrips?\s+(?:in|for|of|across)\s+(?:the\s+)?(?:north|south|east|west|central|north\s*east|north\s*west|south\s*east|south\s*west)\b', msg_l)):
+        return True
+
+    # 9. Basic trip counts & status
     if bool(re.search(r'\b(?:running|active|closed|cancelled|valid)\s+trips\b', msg_l)):
         return True
-    if bool(re.search(r'\bhow\s+many\s+(?:closed|running|cancelled|valid)?\s*trips\b', msg_l)):
+    if bool(re.search(r'\b(?:how\s+many|total|count\s+of|number\s+of)\s+(?:closed|running|cancelled|valid)?\s*trips\b', msg_l)):
+        return True
+    if bool(re.search(r'\bshow\s+(?:all\s+)?(?:closed|running|cancelled|valid)?\s*trips\b', msg_l)):
         return True
     if bool(re.search(r'\btrips\s+for\s+vehicle\s+[a-z0-9_-]+\b', msg_l)):
         return True
