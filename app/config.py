@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # LLM Provider Routing Settings
     LLM_PROVIDER: str = "groq"  # groq, hybrid, ollama
     INTENT_LLM_PROVIDER: str = "groq"  # Used for intent detection & payload generation
-    RESPONSE_LLM_PROVIDER: str = "ollama"  # Used for natural language response generation (Local Ollama qwen2.5-coder:0.5b)
+    RESPONSE_LLM_PROVIDER: str = "groq"  # Primary: Groq qwen/qwen3.8-27b; falls back to Local Ollama on limit exceeded
 
     # Local LLM Settings (Ollama / LM Studio)
     LOCAL_LLM_BASE_URL: str = "http://localhost:11434/v1"

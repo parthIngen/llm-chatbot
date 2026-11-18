@@ -16,6 +16,7 @@ class LLMRateLimitError(LLMClientError):
 
 # Shared persistent HTTP client with connection pooling
 _shared_client: Optional[httpx.AsyncClient] = None
+_groq_rate_limited_until: float = 0.0
 
 def get_shared_client(timeout: float = 60.0) -> httpx.AsyncClient:
     """
@@ -45,11 +46,15 @@ class LLMClient:
         selected_provider = (provider or settings.LLM_PROVIDER or "ollama").lower()
         self.provider = selected_provider
 
+        self.last_used_provider = self.provider
+        self.last_used_model = getattr(settings, "GROQ_MODEL", "qwen/qwen3.8-27b") if selected_provider == "groq" else (settings.LOCAL_LLM_MODEL or "qwen2.5-coder:0.5b")
+        self.last_fallback_to_local = False
+
         if selected_provider == "groq":
             base_url = "https://api.groq.com/openai/v1"
             self.url = f"{base_url}/chat/completions"
             self.api_key = settings.GROQ_API_KEY
-            self.model = settings.GROQ_MODEL or "qwen-2.5-coder-32b"
+            self.model = settings.GROQ_MODEL or "qwen/qwen3.8-27b"
             self.max_tokens = settings.GROQ_MAX_TOKENS
             self.temperature = settings.GROQ_TEMPERATURE if settings.GROQ_TEMPERATURE is not None else 0.2
             self.timeout = settings.LLM_TIMEOUT
@@ -79,6 +84,74 @@ class LLMClient:
         self.max_retries = 3 if selected_provider == "groq" else 0
         self.retry_base_delay = 2.0  # seconds (doubles each attempt: 2s, 4s, 8s)
 
+    async def _generate_local(
+        self,
+        prompt: str,
+        system: Optional[str] = None,
+        format_json: bool = False,
+        max_tokens: Optional[int] = None
+    ) -> str:
+        """
+        Executes generation using the local LLM (Ollama / LM Studio) when primary LLM limit is exceeded.
+        """
+        local_base_url = (settings.LOCAL_LLM_BASE_URL or settings.LLM_BASE_URL).rstrip('/')
+        url = local_base_url if local_base_url.endswith("/chat/completions") else f"{local_base_url}/chat/completions"
+        api_key = settings.LOCAL_LLM_API_KEY or settings.LLM_API_KEY or "ollama"
+        model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "qwen2.5-coder:0.5b"
+        temperature = (
+            settings.LOCAL_LLM_TEMPERATURE
+            if settings.LOCAL_LLM_TEMPERATURE is not None
+            else (settings.LLM_TEMPERATURE if settings.LLM_TEMPERATURE is not None else 0.0)
+        )
+        timeout = settings.LOCAL_LLM_TIMEOUT or 60.0
+        effective_max_tokens = max_tokens if max_tokens is not None else (settings.LOCAL_LLM_MAX_TOKENS or 512)
+
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": effective_max_tokens,
+            "temperature": temperature
+        }
+        if format_json:
+            payload["response_format"] = {"type": "json_object"}
+
+        keep_alive = getattr(settings, "LLM_KEEP_ALIVE", None)
+        if keep_alive:
+            payload["keep_alive"] = keep_alive
+
+        t_start = time.perf_counter()
+        client = get_shared_client(timeout=timeout)
+        response = await client.post(url, headers=headers, json=payload)
+        call_duration = time.perf_counter() - t_start
+
+        if response.status_code != 200:
+            raise LLMClientError(f"Local LLM fallback failed with status {response.status_code}: {response.text}")
+
+        result = response.json()
+        choices = result.get("choices", [])
+        if not choices:
+            raise LLMClientError("No choices returned from local LLM fallback.")
+
+        content = choices[0].get("message", {}).get("content", "").strip()
+        self.last_used_provider = "ollama"
+        self.last_used_model = model
+        self.last_fallback_to_local = True
+
+        logger.info(
+            "Local LLM Fallback Call Finished | model=%s | duration=%.3fs | response_chars=%d",
+            model, call_duration, len(content)
+        )
+        return content
+
     async def generate(
         self,
         prompt: str,
@@ -102,7 +175,28 @@ class LLMClient:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        global _groq_rate_limited_until
+
         effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
+
+        # If Groq is currently in rate-limit cooldown, directly use local LLM
+        if self.provider == "groq" and time.time() < _groq_rate_limited_until:
+            remaining = _groq_rate_limited_until - time.time()
+            logger.warning(
+                "[LLM_COOLDOWN] Groq limit exceeded cooldown active (%.1fs remaining). "
+                "Directly routing to local LLM (%s)...",
+                remaining, settings.LOCAL_LLM_MODEL
+            )
+            try:
+                return await self._generate_local(
+                    prompt=prompt,
+                    system=system,
+                    format_json=format_json,
+                    max_tokens=effective_max_tokens
+                )
+            except Exception as e:
+                logger.error("[LOCAL_LLM_FAILED] Local LLM also failed: %s", str(e))
+                # Fall through to attempt Groq anyway
 
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -133,23 +227,30 @@ class LLMClient:
                 call_duration = time.perf_counter() - t_start
 
                 if response.status_code == 429:
-                    if self.provider == "groq" and attempt < self.max_retries:
-                        retry_after = response.headers.get("retry-after")
-                        wait_time = float(retry_after) if retry_after else (self.retry_base_delay * (2 ** attempt))
-                        log_error(
-                            "LLM", "LLM_RATE_LIMIT_RETRY",
-                            f"LLM Provider ({self.provider}) 429 on attempt {attempt + 1}/{self.max_retries}. "
-                            f"Retrying in {wait_time:.1f}s..."
-                        )
-                        await asyncio.sleep(wait_time)
-                        last_exception = LLMRateLimitError(
-                            f"LLM Provider ({self.provider}) returned 429 (attempt {attempt + 1}): {response.text}"
-                        )
-                        continue
-                    else:
-                        raise LLMRateLimitError(
-                            f"LLM Provider ({self.provider}) returned 429: {response.text}"
-                        )
+                    retry_after = response.headers.get("retry-after")
+                    wait_time = float(retry_after) if retry_after else 30.0
+                    _groq_rate_limited_until = time.time() + wait_time
+                    log_error(
+                        "LLM", "LLM_RATE_LIMIT_EXCEEDED",
+                        f"Groq limit exceeded (429) for model {self.model}. "
+                        f"Switching to local LLM ({settings.LOCAL_LLM_MODEL}). Cooldown set for {wait_time:.1f}s."
+                    )
+                    if self.provider == "groq":
+                        try:
+                            return await self._generate_local(
+                                prompt=prompt,
+                                system=system,
+                                format_json=format_json,
+                                max_tokens=effective_max_tokens
+                            )
+                        except Exception as local_err:
+                            log_error("LLM", "LOCAL_LLM_FALLBACK_FAILED", str(local_err))
+                            raise LLMRateLimitError(
+                                f"Groq limit exceeded and local LLM fallback failed: {str(local_err)}"
+                            ) from local_err
+                    raise LLMRateLimitError(
+                        f"LLM Provider ({self.provider}) returned 429: {response.text}"
+                    )
 
                 elif response.status_code != 200:
                     raise LLMClientError(
@@ -173,6 +274,10 @@ class LLMClient:
                     ) if k in result
                 }
 
+                self.last_used_provider = self.provider
+                self.last_used_model = self.model
+                self.last_fallback_to_local = False
+
                 logger.info(
                     "LLM Call Finished | provider=%s | model=%s | duration=%.3fs | "
                     "system_chars=%d | prompt_chars=%d | total_prompt_chars=%d | "
@@ -187,6 +292,17 @@ class LLMClient:
             except httpx.TimeoutException as te:
                 call_duration = time.perf_counter() - t_start
                 log_error("LLM", "LLM_TIMEOUT", f"Timeout after {call_duration:.2f}s contacting LLM server ({self.url}).")
+                if self.provider == "groq":
+                    logger.warning("[LLM_TIMEOUT_FALLBACK] Groq timed out. Switching to local LLM...")
+                    try:
+                        return await self._generate_local(
+                            prompt=prompt,
+                            system=system,
+                            format_json=format_json,
+                            max_tokens=effective_max_tokens
+                        )
+                    except Exception as local_err:
+                        log_error("LLM", "LOCAL_LLM_FALLBACK_FAILED", str(local_err))
                 raise LLMClientError(f"LLM response timed out contacting {self.url}.") from te
             except LLMRateLimitError as rle:
                 raise rle

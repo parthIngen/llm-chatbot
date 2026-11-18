@@ -3868,19 +3868,18 @@ class IntentDetector:
                 "llm_status": llm_status,
                 "debug": {
                     "source": extraction_source,
-                    "fallback": False,
+                    "fallback": getattr(self.llm_client, "last_fallback_to_local", False),
+                    "fallback_to_local": getattr(self.llm_client, "last_fallback_to_local", False),
                     "llm_attempted": (extraction_source == "llm"),
                     "llm_success": (llm_status == "success") if extraction_source == "llm" else None,
-                    "llm_provider": getattr(self.llm_client, "provider", "unknown") if extraction_source == "llm" else None,
-                    "llm_model": getattr(self.llm_client, "model", "unknown") if extraction_source == "llm" else None,
+                    "llm_provider": getattr(self.llm_client, "last_used_provider", getattr(self.llm_client, "provider", "unknown")) if extraction_source == "llm" else None,
+                    "llm_model": getattr(self.llm_client, "last_used_model", getattr(self.llm_client, "model", "unknown")) if extraction_source == "llm" else None,
                     "llm_status": llm_status,
                     "error_type": None,
                     "error": None
                 }
             }
             
-        except LLMRateLimitError as rle:
-            raise rle
         except Exception as exc:
             log_error(session_id, "INTENT_DETECTION_FAILED", str(exc))
             fb_error_str = str(exc)

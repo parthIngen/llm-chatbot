@@ -268,4 +268,66 @@ def test_all_three_devices_together_exact_payload_and_reply():
         assert "active Fixed GPS" not in res["reply"]
         assert duration < 0.2, f"Expected fast-path sub-200ms execution, got {duration:.3f}s"
 
+def test_groq_limit_exceeded_fallback_to_local_llm():
+    """
+    Validates that when Groq returns HTTP 429 (rate/quota limit exceeded),
+    the system automatically falls back to the local LLM and returns a successful response.
+    """
+    import app.llm.client as client_module
+    client_module._groq_rate_limited_until = 0.0
+
+    mock_429 = MagicMock()
+    mock_429.status_code = 429
+    mock_429.headers = {"retry-after": "10"}
+    mock_429.text = '{"error": {"message": "Rate limit exceeded", "code": "rate_limit_exceeded"}}'
+
+    mock_local_llm = MagicMock()
+    mock_local_llm.status_code = 200
+    mock_local_llm.json.return_value = {
+        "choices": [{
+            "message": {
+                "content": json.dumps({
+                    "entity": "trip",
+                    "operation": "count",
+                    "filters": [
+                        {"field": "groupId", "operator": "eq", "value": "0041"},
+                        {"field": "tripStatus", "operator": "eq", "value": "valid"}
+                    ],
+                    "select": []
+                })
+            }
+        }]
+    }
+
+    mock_api = MagicMock()
+    mock_api.status_code = 200
+    mock_api.json.return_value = {"success": True, "data": 999}
+
+    async def mock_network_post(url, *args, **kwargs):
+        url_str = str(url)
+        if "api.groq.com" in url_str:
+            return mock_429
+        elif "prompt.secutrak.in" in url_str:
+            return mock_api
+        else:
+            return mock_local_llm
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=mock_network_post):
+        response = client.post("/api/v1/chat", json={
+            "message": "kindly explain how many trip operated with no tracking units",
+            "history": [],
+            "session_id": "rate-limit-fallback-test",
+            "AccessToken": "test-token"
+        })
+
+        assert response.status_code == 200
+        res = response.json()
+        assert res["intent"] == "trip_report"
+        assert res["llm_status"] == "success"
+        debug = res["debug"]
+        assert debug["fallback_to_local"] is True
+        assert debug["llm_provider"] == "ollama"
+        assert debug["llm_model"] == "qwen2.5-coder:0.5b"
+
+
 
