@@ -70,7 +70,12 @@ def can_resolve_fast_path(message: str) -> bool:
     if bool(re.search(r'\btrips?\s+(?:in|for|of|across)\s+(?:the\s+)?(?:north|south|east|west|central|north\s*east|north\s*west|south\s*east|south\s*west)\b', msg_l)):
         return True
 
-    # 9. Basic trip counts & status
+    # 9. Shipment method specific trip queries
+    if bool(re.search(r'\b(?:feeder|empty|surface|sfc|speed|air|delivery|pickup|pick[\s-]?up)\b', msg_l)) and bool(re.search(r'\btrips?\b', msg_l)):
+        if not bool(re.search(r'\b(?:vs\.?|versus|compare)\b', msg_l)):
+            return True
+
+    # 10. Basic trip counts & status
     if bool(re.search(r'\b(?:running|active|closed|cancelled|valid)\s+trips\b', msg_l)):
         return True
     if bool(re.search(r'\b(?:how\s+many|total|count\s+of|number\s+of)\s+(?:closed|running|cancelled|valid)?\s*trips\b', msg_l)):

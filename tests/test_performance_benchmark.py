@@ -44,6 +44,7 @@ BENCHMARK_QUERIES = [
     ("Compare Network and Local trips.", "network_vs_local", {"groupBy": "tripType"}),
     ("Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026", "active_fixed_gps_across_trip_types", {"analytics": "gps", "GPS": "active", "groupBy": "tripType", "has_dates": True}),
     ("Total trips for the North region in August 2026", "north_region_trips", {"region": "North", "has_dates": True}),
+    ("Total Feeder type trips in August 2026", "feeder_trips", {"shipmentMethod": "feeder", "tripStatus": "valid", "has_dates": True, "no_group_by": True}),
     ("Show region-wise trip counts.", "region_breakdown", {"groupBy": "region"}),
     ("Show High Priority vs Normal Priority trips.", "priority_comparison", {"groupBy": "priority"}),
     ("Show unique transporters.", "unique_transporters", {"groupBy": "Transporter"}),
@@ -150,5 +151,70 @@ def test_benchmark_query(query, case_id, expected_traits):
             region_vals = [str(f.get("value")).lower() for f in filters if f.get("field") == "region"]
             assert expected_traits["region"].lower() in region_vals, f"Expected region in {filters}"
 
+        if "shipmentMethod" in expected_traits:
+            sm_vals = [str(f.get("value")).lower() for f in filters if f.get("field") == "shipmentMethod"]
+            expected_sm = expected_traits["shipmentMethod"].lower()
+            assert any(expected_sm in v for v in sm_vals), f"Expected shipmentMethod {expected_sm} in {sm_vals}"
+
+        if expected_traits.get("no_group_by"):
+            assert not group_by, f"Expected no groupBy but got {group_by}"
+
         # 3. Check performance
         assert duration < 1.0, f"Expected sub-second response, got {duration:.3f}s"
+
+def test_feeder_trips_exact_payload_and_metric_aggregation():
+    """
+    Validates exact payload, fast-path routing, and metric count extraction
+    for 'Total Feeder type trips in August 2026'.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [{"Feeder_trips": 80290, "shipmentMethod": "FEEDER"}]
+    }
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": "Total Feeder type trips in August 2026",
+            "history": [],
+            "session_id": "feeder-test-1",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        # Check fast path execution
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+
+        # Check payload
+        entities = res["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert "groupBy" not in entities or not entities["groupBy"]
+        assert "metrics" not in entities or not entities["metrics"]
+
+        filters = {f["field"]: f["value"] for f in entities["filters"] if "field" in f}
+        assert filters.get("groupId") == "0041"
+        assert filters.get("tripStatus") == "valid"
+        assert filters.get("shipmentMethod") == "feeder"
+
+        run_dates = [f for f in entities["filters"] if f.get("field") == "runDate"]
+        assert len(run_dates) == 2
+        gte = next(f["value"] for f in run_dates if f.get("operator") == "gte")
+        lte = next(f["value"] for f in run_dates if f.get("operator") == "lte")
+        assert gte == "2026-08-01 00:00:00"
+        assert lte == "2026-08-31 23:59:59"
+
+        # Check response contains correct count 80290, not 1
+        assert "80290" in res["reply"]
+        assert "1 valid" not in res["reply"]
+        assert "feeder" in res["reply"].lower()
+        assert duration < 0.2, f"Expected fast-path sub-200ms execution, got {duration:.3f}s"
+

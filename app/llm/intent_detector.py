@@ -1942,7 +1942,7 @@ class IntentDetector:
             elif word_in_text(["running", "scheduled", "sceduled", "transit", "ongoing", "moving", "intransit", "live"], msg_lower) or re.search(r'\b(?:in[\s-]transit|en[\s-]route|on\s+the\s+way)\b', msg_lower):
                 has_status_keyword = True
                 status_override = "running"
-            elif detected_sm and not has_run_date:
+            elif detected_sm and not any(isinstance(f, dict) and f.get("field") == "runDate" for f in query_payload["filters"]):
                 # Queries mentioning any shipment method default to tripStatus="running" ONLY when no date is given
                 has_status_keyword = True
                 status_override = "running"
@@ -1992,6 +1992,9 @@ class IntentDetector:
                         "operator": "eq",
                         "value": detected_sms[0]
                     })
+                if len(detected_sms) <= 1 and query_payload.get("groupBy") == ["shipmentMethod"]:
+                    query_payload.pop("groupBy", None)
+                    query_payload.pop("metrics", None)
 
             # --- Vendor Post-Processing ---
             target_vendor = None
@@ -3209,6 +3212,9 @@ class IntentDetector:
                         "operator": "eq",
                         "value": detected_sms[0]
                     })
+                if len(detected_sms) <= 1 and query_payload.get("groupBy") == ["shipmentMethod"]:
+                    query_payload.pop("groupBy", None)
+                    query_payload.pop("metrics", None)
                 if detect_device_analytics(message):
                     query_payload["filters"].sort(key=_device_analytics_sort_key)
             elif _is_across_trip_types:
@@ -5193,6 +5199,9 @@ class IntentDetector:
                     fallback_payload["filters"].append(
                         {"field": "shipmentMethod", "operator": "eq", "value": fb_sms[0]}
                     )
+                if len(fb_sms) <= 1 and fallback_payload.get("groupBy") == ["shipmentMethod"]:
+                    fallback_payload.pop("groupBy", None)
+                    fallback_payload.pop("metrics", None)
                 if detect_device_analytics(message):
                     fallback_payload["filters"].sort(key=_fb_device_analytics_sort_key)
             elif fb_is_across_trip_types:

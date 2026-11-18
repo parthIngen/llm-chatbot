@@ -474,6 +474,30 @@ class ResponseGenerator:
         if _is_distinct_transporter_result:
             total_trips = sum(row.get("uniqueTransporterCount", 0) for row in api_data)
 
+        # Detect aggregated metric result in list of dicts (e.g. [{"Feeder_trips": 80290, "shipmentMethod": "FEEDER"}]):
+        _is_specialized_grouped_result = (
+            _is_distinct_vehicle_result
+            or _is_distinct_transporter_result
+            or (
+                isinstance(api_data, list)
+                and len(api_data) > 0
+                and any(isinstance(row, dict) and ("tripType" in row or "tripTypeName" in row or "region" in row or "priority" in row or "tripPriorityName" in row) for row in api_data)
+            )
+        )
+        if isinstance(api_data, list) and len(api_data) > 0 and all(isinstance(row, dict) for row in api_data) and not _is_specialized_grouped_result:
+            metric_keys = set()
+            for row in api_data:
+                for k, v in row.items():
+                    if isinstance(v, (int, float)) and k.lower() not in (
+                        "triptype", "groupid", "id", "_id", "status", "shipmentmethod", "priority", "region"
+                    ):
+                        metric_keys.add(k)
+            if metric_keys:
+                total_trips = sum(
+                    sum(int(row[k]) for k in metric_keys if k in row and isinstance(row[k], (int, float)))
+                    for row in api_data
+                )
+
         # Detect tripType comparison grouped result (e.g. Compare Network vs Local / Intercity vs Intracity):
         _is_trip_type_result = (
             isinstance(api_data, list)
