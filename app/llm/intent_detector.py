@@ -1317,11 +1317,23 @@ class IntentDetector:
                     prompt=prompt,
                     system=system_prompt,
                     format_json=True,
-                    max_tokens=getattr(settings, "INTENT_MAX_TOKENS", 150)
+                    max_tokens=getattr(settings, "INTENT_MAX_TOKENS", 512)
                 )
                 
-                # Parse response
-                query_payload = json.loads(response_text)
+                # Parse response with robust markdown fence removal
+                clean_json_str = response_text.strip()
+                if clean_json_str.startswith("```"):
+                    clean_json_str = re.sub(r"^```(?:json)?\s*", "", clean_json_str)
+                    clean_json_str = re.sub(r"\s*```$", "", clean_json_str)
+
+                try:
+                    query_payload = json.loads(clean_json_str)
+                except json.JSONDecodeError:
+                    json_match = re.search(r"(\{[\s\S]*\})", clean_json_str)
+                    if json_match:
+                        query_payload = json.loads(json_match.group(1))
+                    else:
+                        raise
                 
                 if not isinstance(query_payload, dict):
                     query_payload = {}

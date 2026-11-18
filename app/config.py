@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     GROQ_TEMPERATURE: float = 0.2
 
     # Operation specific token limits and performance settings
-    INTENT_MAX_TOKENS: int = 150
+    INTENT_MAX_TOKENS: int = 512
     RESPONSE_MAX_TOKENS: int = 60
     LLM_KEEP_ALIVE: str = "30m"
     ENABLE_FAST_PATH: bool = True
