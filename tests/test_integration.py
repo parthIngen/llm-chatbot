@@ -9080,6 +9080,47 @@ def test_total_fixed_gps_na_trips():
         assert not any(f.get("field") == "destination" for f in filters)
 
 
+def test_download_trips_gps_active_atd_not_captured_aug_2026():
+    """
+    Test query 'Download all trips where GPS is active but ATD is not captured in Aug 2026'.
+    Ensures atd is mapped to 'notcaptured' (not 'false').
+    """
+    mock_trip_resp = {
+        "status": 1,
+        "msg": "Data Found",
+        "data": [{"TotalTrips": 15}]
+    }
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=mock_trip_resp)
+        )
+
+        payload = {
+            "message": "Download all trips where GPS is active but ATD is not captured in Aug 2026",
+            "session_id": "sess-atd-notcaptured-test",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["intent"] == "trip_report"
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "gps"}]
+
+        filters = entities["filters"]
+        assert {"field": "groupId", "operator": "eq", "value": "0041"} in filters
+        assert {"field": "tripStatus", "operator": "eq", "value": "valid"} in filters
+        assert {"field": "GPS", "operator": "eq", "value": "active"} in filters
+        assert {"field": "atd", "operator": "eq", "value": "notcaptured"} in filters
+        assert any(f.get("field") == "runDate" and f.get("operator") == "gte" and "2026-08-01" in f.get("value") for f in filters)
+        assert any(f.get("field") == "runDate" and f.get("operator") == "lte" and "2026-08-31" in f.get("value") for f in filters)
+
+
+
 
 
 

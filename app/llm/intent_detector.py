@@ -838,6 +838,15 @@ _ATD_ATA_VALUE_MAP = {
     "missing": "missing",
     "notmissing": "notmissing",
     "not missing": "notmissing",
+    "false": "notcaptured",
+    "true": "captured",
+    "0": "notcaptured",
+    "1": "captured",
+    "no": "notcaptured",
+    "yes": "captured",
+    "null": "notcaptured",
+    "none": "notcaptured",
+    "na": "notcaptured",
 }
 
 class IntentDetector:
@@ -3038,11 +3047,16 @@ class IntentDetector:
                     if isinstance(f, dict) and str(f.get("field", "")).lower() in ("atd", "ata"):
                         f["field"] = str(f["field"]).lower()
                         raw_val = str(f.get("value", "")).lower().replace(" ", "").replace("_", "")
-                        f["value"] = _ATD_ATA_VALUE_MAP.get(raw_val, raw_val)
-                        if f["field"] == "atd":
-                            detected_atd_val = f["value"]
-                        elif f["field"] == "ata":
-                            detected_ata_val = f["value"]
+                        if f["field"] == "atd" and detected_atd_val:
+                            f["value"] = detected_atd_val
+                        elif f["field"] == "ata" and detected_ata_val:
+                            f["value"] = detected_ata_val
+                        else:
+                            f["value"] = _ATD_ATA_VALUE_MAP.get(raw_val, raw_val)
+                            if f["field"] == "atd":
+                                detected_atd_val = f["value"]
+                            elif f["field"] == "ata":
+                                detected_ata_val = f["value"]
 
                 if detected_atd_val and not any(isinstance(f, dict) and f.get("field") == "atd" for f in query_payload.get("filters", [])):
                     query_payload["filters"].append({
@@ -5836,11 +5850,16 @@ class IntentDetector:
                     if isinstance(f, dict) and str(f.get("field", "")).lower() in ("atd", "ata"):
                         f["field"] = str(f["field"]).lower()
                         raw_val = str(f.get("value", "")).lower().replace(" ", "").replace("_", "")
-                        f["value"] = _ATD_ATA_VALUE_MAP.get(raw_val, raw_val)
-                        if f["field"] == "atd":
-                            fb_detected_atd_val = f["value"]
-                        elif f["field"] == "ata":
-                            fb_detected_ata_val = f["value"]
+                        if f["field"] == "atd" and fb_detected_atd_val:
+                            f["value"] = fb_detected_atd_val
+                        elif f["field"] == "ata" and fb_detected_ata_val:
+                            f["value"] = fb_detected_ata_val
+                        else:
+                            f["value"] = _ATD_ATA_VALUE_MAP.get(raw_val, raw_val)
+                            if f["field"] == "atd":
+                                fb_detected_atd_val = f["value"]
+                            elif f["field"] == "ata":
+                                fb_detected_ata_val = f["value"]
 
                 if fb_detected_atd_val and not any(isinstance(f, dict) and f.get("field") == "atd" for f in fallback_payload.get("filters", [])):
                     fallback_payload["filters"].append({
