@@ -4,7 +4,8 @@ import calendar
 import re
 from typing import List, Dict, Any, Optional
 from app.llm.client import LLMClient, LLMRateLimitError
-from app.llm.prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_PROMPT_TEMPLATE
+from app.llm.prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_PROMPT_TEMPLATE, route_prompt
+from app.llm.fast_path import build_fast_path_payload
 from app.utils.logger import log_intent_detected, log_entities_extracted, log_error
 from app.config import settings
 
@@ -740,7 +741,7 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                     ]
                 }
 
-    if is_devices_together:
+    if is_devices_together or bool(re.search(r'\b(?:download|export)\b', msg_l)):
         return None
 
     # Single device categories
@@ -1179,7 +1180,7 @@ class IntentDetector:
 
         is_past_running = bool(re.search(r'\b(?:was\s+running|were\s+running|had\s+been\s+running|operated)\b', msg_lower))
 
-        is_vendor_running_query = (not is_past_running) and bool(
+        is_vendor_running_query = (not is_past_running) and (not bool(re.search(r'\boperating\s+on\s+(?:the\s+)?field\b', msg_lower))) and bool(
             re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
             or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
             or (
@@ -1294,29 +1295,61 @@ class IntentDetector:
         # Format user prompt
         prompt = INTENT_EXTRACTION_USER_PROMPT_TEMPLATE.format(message=message, date_context=date_context)
         
+        extraction_source = "llm"
+        llm_status = "success"
+
+        # Check Python Fast-Path first for confident resolution
+        fast_payload = None
+        if getattr(settings, "ENABLE_FAST_PATH", True):
+            fast_payload = build_fast_path_payload(message, reference_now=now)
+
         try:
-            # We enforce JSON output from LLM
-            response_text = await self.llm_client.generate(
-                prompt=prompt,
-                system=INTENT_EXTRACTION_SYSTEM_PROMPT,
-                format_json=True
-            )
-            
-            # Parse response
-            query_payload = json.loads(response_text)
-            
-            if not isinstance(query_payload, dict):
-                query_payload = {}
-            
-            # If the LLM response is wrapped in an 'entities' or 'query_payload' key, unwrap it
-            if "entities" in query_payload and isinstance(query_payload["entities"], dict):
-                query_payload = query_payload["entities"]
-            elif "query_payload" in query_payload and isinstance(query_payload["query_payload"], dict):
-                query_payload = query_payload["query_payload"]
+            if fast_payload is not None:
+                query_payload = fast_payload
+                extraction_source = "fast_path"
+                llm_status = "bypassed"
+            else:
+                # Select domain-specific prompt modules using prompt router
+                system_prompt, selected_domains = route_prompt(message, user_prompt=prompt)
+
+                # We enforce JSON output from LLM with configured token limits
+                response_text = await self.llm_client.generate(
+                    prompt=prompt,
+                    system=system_prompt,
+                    format_json=True,
+                    max_tokens=getattr(settings, "INTENT_MAX_TOKENS", 150)
+                )
+                
+                # Parse response
+                query_payload = json.loads(response_text)
+                
+                if not isinstance(query_payload, dict):
+                    query_payload = {}
+                
+                # If the LLM response is wrapped in an 'entities' or 'query_payload' key, unwrap it
+                if "entities" in query_payload and isinstance(query_payload["entities"], dict):
+                    query_payload = query_payload["entities"]
+                elif "query_payload" in query_payload and isinstance(query_payload["query_payload"], dict):
+                    query_payload = query_payload["query_payload"]
                 
             # Normalize schema
-            query_payload["entity"] = "trip"
-            query_payload["operation"] = "count"
+            query_payload["entity"] = query_payload.get("entity") or "trip"
+            if not query_payload.get("operation"):
+                query_payload["operation"] = "count"
+
+            def _device_analytics_sort_key(flt):
+                if not isinstance(flt, dict):
+                    return 99
+                fld = flt.get("field")
+                if fld == "groupId":
+                    return 1
+                if fld == "tripStatus":
+                    return 2
+                if fld == "runDate" and flt.get("operator") == "gte":
+                    return 3
+                if fld == "runDate" and flt.get("operator") == "lte":
+                    return 4
+                return 10
                 
             if "filters" not in query_payload or not isinstance(query_payload["filters"], list):
                 query_payload["filters"] = []
@@ -1517,8 +1550,20 @@ class IntentDetector:
                 detect_device_analytics(message)
                 or re.search(r'\b(?:gps|elock|e-lock|lock|device|devices)\b', msg_lower)
             )
-            if not has_device_query:
+            has_delay_query = bool(
+                re.search(r'\b(?:departure\s+(?:was\s+)?delayed|delayed\s+departure|arrival\s+(?:was\s+)?delayed|delayed\s+arrival)\b', msg_lower)
+            )
+            if not has_device_query and not has_delay_query:
                 query_payload.pop("analytics", None)
+            elif not has_device_query and "analytics" in query_payload:
+                query_payload["analytics"] = [
+                    a for a in query_payload["analytics"]
+                    if isinstance(a, dict) and a.get("type") in ("departureDelayed", "arrivalDelayed")
+                ]
+                if not query_payload["analytics"]:
+                    query_payload.pop("analytics", None)
+
+            if not has_device_query:
                 _DEVICE_FIELD_NAMES = {
                     "fixedgps", "fixedelock", "portableelock", "gps", "fixed-gps-status",
                     "fixed-elock-status", "portable-elock-status", "vendorgps",
@@ -1767,7 +1812,7 @@ class IntentDetector:
 
             is_past_running = bool(re.search(r'\b(?:was\s+running|were\s+running|had\s+been\s+running|operated)\b', msg_lower))
 
-            is_vendor_running_query = (not is_past_running) and bool(
+            is_vendor_running_query = (not is_past_running) and (not bool(re.search(r'\boperating\s+on\s+(?:the\s+)?field\b', msg_lower))) and bool(
                 re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
                 or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
                 or (
@@ -3194,10 +3239,10 @@ class IntentDetector:
             if not has_vehicle_filter and not _is_distinct_vehicle_query and not _is_active_vehicle_query and not _is_no_gps_vehicle_query:
                 veh_match = re.search(r'\b(?:vehicle(?:\s*(?:no|number|num))?\s*[:=]?\s*|trips\s+of\s+)?([A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4})\b', message, re.IGNORECASE)
                 if not veh_match:
-                    veh_match = re.search(r'\bvehicle\s*(?:no|number|num)?\s*[:=]?\s*([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
+                    veh_match = re.search(r'\bvehicle\s+(?:no|number|num|#)\s*[:=]?\s*([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
                 if veh_match:
                     v_val = re.sub(r'\s+', '', veh_match.group(1)).strip().upper()
-                    if v_val.lower() not in _STOP_LOCATION_WORDS and not v_val.isdigit():
+                    if v_val.lower() not in _STOP_LOCATION_WORDS and not v_val.isdigit() and len(v_val) > 2 and any(c.isdigit() for c in v_val):
                         query_payload["filters"].append({
                             "field": "vehicleNo",
                             "operator": "eq",
@@ -3784,21 +3829,21 @@ class IntentDetector:
             log_intent_detected(session_id, "trip_report")
             log_entities_extracted(session_id, query_payload)
 
-            print(f"[DEBUG_QUERY] Session: {session_id} | Source: llm | LLM Status: success | Provider: {getattr(self.llm_client, 'provider', 'unknown')} | Model: {getattr(self.llm_client, 'model', 'unknown')}")
+            print(f"[DEBUG_QUERY] Session: {session_id} | Source: {extraction_source} | LLM Status: {llm_status} | Provider: {getattr(self.llm_client, 'provider', 'unknown')} | Model: {getattr(self.llm_client, 'model', 'unknown')}")
 
             return {
                 "intent": "trip_report",
                 "entities": query_payload,
-                "source": "llm",
-                "llm_status": "success",
+                "source": extraction_source,
+                "llm_status": llm_status,
                 "debug": {
-                    "source": "llm",
+                    "source": extraction_source,
                     "fallback": False,
-                    "llm_attempted": True,
-                    "llm_success": True,
-                    "llm_provider": getattr(self.llm_client, "provider", "unknown"),
-                    "llm_model": getattr(self.llm_client, "model", "unknown"),
-                    "llm_status": "success",
+                    "llm_attempted": (extraction_source == "llm"),
+                    "llm_success": (llm_status == "success") if extraction_source == "llm" else None,
+                    "llm_provider": getattr(self.llm_client, "provider", "unknown") if extraction_source == "llm" else None,
+                    "llm_model": getattr(self.llm_client, "model", "unknown") if extraction_source == "llm" else None,
+                    "llm_status": llm_status,
                     "error_type": None,
                     "error": None
                 }
@@ -3833,6 +3878,8 @@ class IntentDetector:
             }
             fb_target_vendor = None
             fb_dev_vendor_match = None
+            fb_is_vendor_running_query = False
+            fb_is_past_running = False
 
             if re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 fb_target_vendor = "ThirdParty"
@@ -4076,7 +4123,7 @@ class IntentDetector:
 
                 fb_is_past_running = bool(re.search(r'\b(?:was\s+running|were\s+running|had\s+been\s+running|operated)\b', msg_lower))
 
-                fb_is_vendor_running_query = (not fb_is_past_running) and bool(
+                fb_is_vendor_running_query = (not fb_is_past_running) and (not bool(re.search(r'\boperating\s+on\s+(?:the\s+)?field\b', msg_lower))) and bool(
                     re.search(r'\b(?:was\s+running|is\s+running|running)\s+on\s+(?:\w+\s+)?devices?\b', msg_lower)
                     or re.search(r'\b(?:vehicles?|trips?)\s+(?:which\s+was\s+running|running|operating)\s+on\b', msg_lower)
                     or (
@@ -5270,6 +5317,8 @@ class IntentDetector:
             # Apply Vendor post-processing to fallback
             fb_target_vendor = None
             fb_dev_vendor_match = None
+            fb_is_vendor_running_query = False
+            fb_is_past_running = False
 
             if re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 fb_target_vendor = "ThirdParty"
@@ -5977,10 +6026,10 @@ class IntentDetector:
             if not fb_has_vehicle and not fb_is_distinct_vehicle_query and not fb_is_active_vehicle_query and not fb_is_no_gps_vehicle_query:
                 veh_match = re.search(r'\b(?:vehicle(?:\s*(?:no|number|num))?\s*[:=]?\s*|trips\s+of\s+)?([A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4})\b', message, re.IGNORECASE)
                 if not veh_match:
-                    veh_match = re.search(r'\bvehicle\s*(?:no|number|num)?\s*[:=]?\s*([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
+                    veh_match = re.search(r'\bvehicle\s+(?:no|number|num|#)\s*[:=]?\s*([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
                 if veh_match:
                     v_val = re.sub(r'\s+', '', veh_match.group(1)).strip().upper()
-                    if v_val.lower() not in _STOP_LOCATION_WORDS and not v_val.isdigit():
+                    if v_val.lower() not in _STOP_LOCATION_WORDS and not v_val.isdigit() and len(v_val) > 2 and any(c.isdigit() for c in v_val):
                         fallback_payload["filters"].append({
                             "field": "vehicleNo",
                             "operator": "eq",

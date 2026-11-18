@@ -673,14 +673,22 @@ class ResponseGenerator:
             end_date=end_date,
         )
 
-        # Fast-path: Instant 0ms response formatting for simple count queries
+        # Check if result is a detailed trip list vs a simple count / aggregated metric
+        _is_detailed_trip_list = (
+            isinstance(api_data, list)
+            and len(api_data) > 0
+            and any(isinstance(r, dict) and ("vehicle_no" in r or "source_name" in r or "destination_name" in r or "driver_name" in r) for r in api_data)
+        )
+
+        # Fast-path: Instant 0ms response formatting for simple count queries and known analytics
         if _is_distinct_transporter_result or _is_distinct_vehicle_result:
             return natural_formatted_response
 
-        if start_date and end_date:
-            return natural_formatted_response
-        elif total_trips is not None and not (isinstance(api_data, list) and len(api_data) > 0):
-            return natural_formatted_response
+        if not _is_detailed_trip_list:
+            if start_date and end_date:
+                return natural_formatted_response
+            elif total_trips is not None and not (isinstance(api_data, list) and len(api_data) > 0):
+                return natural_formatted_response
 
         # Truncate lists in API result to protect local LLM context window
         truncated_result = self._truncate_data_for_llm(api_data)
@@ -701,11 +709,13 @@ class ResponseGenerator:
         prompt = RESPONSE_GENERATION_USER_PROMPT_TEMPLATE.format(message=message, context=context_str)
         
         try:
+            from app.config import settings
+            max_tokens = getattr(settings, "RESPONSE_MAX_TOKENS", 60)
             response = await self.llm_client.generate(
                 prompt=prompt,
                 system=RESPONSE_GENERATION_SYSTEM_PROMPT,
                 format_json=False,
-                max_tokens=60
+                max_tokens=max_tokens
             )
             cleaned = response.strip()
             if cleaned.startswith("```html") and cleaned.endswith("```"):

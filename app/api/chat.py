@@ -93,19 +93,30 @@ async def chat_endpoint(
     tool_router: ToolRouter = Depends(get_tool_router),
     response_generator: ResponseGenerator = Depends(get_response_generator)
 ):
+    t_chat_start = time.perf_counter()
     try:
         session_id = request.session_id
         log_request_received(session_id, request.message)
         
+        t_prep_start = time.perf_counter()
         # Check if message is a simple greeting
         if is_greeting(request.message):
             reply = "I am Secutrak AI chatbot ,I am here to resolve your queries kindly ask me question about trips,"
+            total_duration = time.perf_counter() - t_chat_start
             return ChatMessageResponse(
                 reply=reply,
                 intent="greeting",
                 source="rule",
                 llm_status="bypassed",
-                debug={"source": "rule", "mode": "greeting", "llm_attempted": False, "error": None},
+                debug={
+                    "source": "rule",
+                    "mode": "greeting",
+                    "llm_attempted": False,
+                    "error": None,
+                    "timings": {
+                        "total_chat_time": round(total_duration, 4)
+                    }
+                },
                 entities={},
                 data=None,
                 download_url=None,
@@ -138,19 +149,31 @@ async def chat_endpoint(
                     has_valid = False
 
             reply = "no" if has_valid else "yes"
+            total_duration = time.perf_counter() - t_chat_start
             return ChatMessageResponse(
                 reply=reply,
                 intent="cancel_trips_check",
                 source="rule",
                 llm_status="bypassed",
-                debug={"source": "rule", "mode": "cancel_trips_check", "llm_attempted": False, "error": None},
+                debug={
+                    "source": "rule",
+                    "mode": "cancel_trips_check",
+                    "llm_attempted": False,
+                    "error": None,
+                    "timings": {
+                        "total_chat_time": round(total_duration, 4)
+                    }
+                },
                 entities={"has_valid_trip_status": has_valid, "reply": reply},
                 data=None,
                 download_url=None,
                 query_payload=None
             )
         
+        query_preprocessing_time = time.perf_counter() - t_prep_start
+
         # 1. Intent Detection and Entity Extraction
+        t_intent_start = time.perf_counter()
         try:
             extraction = await intent_detector.detect(
                 message=request.message,
@@ -163,6 +186,7 @@ async def chat_endpoint(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Intent detection service error: {str(ide)}"
             )
+        intent_detection_time = time.perf_counter() - t_intent_start
 
         intent = extraction.get("intent", "unknown")
         entities = extraction.get("entities", {})
@@ -257,6 +281,7 @@ async def chat_endpoint(
                     )
 
         # 2. Tool Execution
+        t_api_start = time.perf_counter()
         try:
             api_data = await tool_router.route_and_execute(
                 intent=intent,
@@ -283,6 +308,7 @@ async def chat_endpoint(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred while processing the request."
             )
+        internal_api_time = time.perf_counter() - t_api_start
 
         # 3. Handle Excel Export if record list is returned
         download_url: Optional[str] = None
@@ -309,6 +335,7 @@ async def chat_endpoint(
                 log_error(session_id, "EXCEL_GENERATION_FAILED", str(exp_err))
 
         # 4. Response Generation
+        t_resp_start = time.perf_counter()
         try:
             reply = await response_generator.generate_response(
                 message=request.message,
@@ -327,12 +354,29 @@ async def chat_endpoint(
                 reply = f"Total {total_veh} distinct vehicles found."
             else:
                 reply = f"I found {len(records)} trip details matching your query."
+        response_generation_time = time.perf_counter() - t_resp_start
 
-        # Append plain text download link if download was requested and link isn't already included
+        # Append plain text download link and card if download was requested and link isn't already included
         is_download_request = any(w in request.message.lower() for w in ["download", "export", "excel", "sheet", "csv", "xlsx", "file"])
         if download_url and is_download_request:
             if download_url not in reply:
-                reply = reply.strip() + f"\n\nDownload Excel report: {download_url}"
+                card_html = render_download_card_html(download_url, len(records))
+                reply = reply.strip() + f"\n\nDownload Excel report: {download_url}\n{card_html}"
+
+        total_chat_time = time.perf_counter() - t_chat_start
+        debug_info["timings"] = {
+            "query_preprocessing_time": round(query_preprocessing_time, 4),
+            "intent_detection_time": round(intent_detection_time, 4),
+            "internal_api_time": round(internal_api_time, 4),
+            "response_generation_time": round(response_generation_time, 4),
+            "total_chat_time": round(total_chat_time, 4)
+        }
+
+        from app.utils.logger import logger
+        logger.info(
+            "Chat Request Completed | session=%s | total_time=%.3fs | prep=%.3fs | intent=%.3fs (source=%s) | api=%.3fs | resp=%.3fs",
+            session_id, total_chat_time, query_preprocessing_time, intent_detection_time, source, internal_api_time, response_generation_time
+        )
 
         return ChatMessageResponse(
             reply=reply,

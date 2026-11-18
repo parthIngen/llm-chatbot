@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
@@ -6,11 +7,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.chat import router as chat_router
 from app.config import settings
 from app.utils.logger import logger
+from app.llm.client import close_shared_client
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await close_shared_client()
 
 app = FastAPI(
     title=settings.APP_NAME,
     description="Scalable Clean Architecture backend for a Domain Chatbot with local LLM and external API capabilities.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS configuration

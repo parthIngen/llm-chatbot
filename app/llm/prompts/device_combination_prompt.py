@@ -1,0 +1,49 @@
+# Device combination prompt: multi-device configurations, only-device queries, and without-device rules
+
+DEVICE_COMBINATION_PROMPT = """
+DEVICE COMBINATION RULES:
+1. ONLY SINGLE DEVICE RULES:
+   - "Fixed GPS only" / "only with Fixed GPS" / "Fixed GPS as single device":
+     filters: GPS eq "existing", FixedELock eq "na", PortableELock eq "na"
+   - "Portable E-Lock only" / "only portable E-Lock":
+     filters: GPS eq "na", FixedELock eq "na", PortableELock eq "existing"
+   - "Fixed E-Lock only" / "only Fixed E-Lock":
+     filters: GPS eq "na", FixedELock eq "existing", PortableELock eq "na"
+
+2. COMBINATION OF DEVICES TOGETHER:
+   - When query asks about Fixed GPS + Fixed/Portable E-Lock together (e.g. "Fixed GPS and Fixed E-Lock", "Fixed GPS, Fixed E-Lock, and Portable E-Lock together"):
+     * top-level: "analytics": [{"type": "withgps"}]
+     * field: "fixed-gps-status", operator: "eq", value: "existing"
+     * field: "fixed-elock-status", operator: "eq", value: "existing" (if Fixed E-Lock mentioned)
+     * field: "portable-elock-status", operator: "eq", value: "existing" (if Portable E-Lock mentioned)
+   - When query mentions BOTH "Fixed E-Lock" AND "Portable E-Lock" together without GPS:
+     * top-level: "analytics": [{"type": "withgps"}]
+     * field: "portable-elock-status", operator: "eq", value: "existing"
+     * field: "fixed-elock-status", operator: "eq", value: "existing"
+
+3. WITHOUT ANY DEVICE:
+   - "Trip without any Device or GPS and Fixed Elock and Portable Elock":
+     * top-level: "analytics": [{"type": "withoutanygps"}]
+
+4. WITHOUT ONE DEVICE BUT WITH OTHERS (type: "withoutorgps"):
+   - "not Fixed Elock but having GPS and Portable Elock only":
+     analytics: [{"type": "withoutorgps"}], fixed-gps-status eq "existing", portable-elock-status eq "existing", fixed-elock-status eq "na"
+   - "not Portable Elock but having GPS and Fixed Elock only":
+     analytics: [{"type": "withoutorgps"}], fixed-gps-status eq "existing", fixed-elock-status eq "existing", portable-elock-status eq "na"
+   - "not Fixed GPS but having Portable Elock and Fixed Elock only":
+     analytics: [{"type": "withoutorgps"}], fixed-gps-status eq "na", portable-elock-status eq "existing", fixed-elock-status eq "existing"
+   - With active / inactive statuses: add GPS / FixedELock / PortableELock status filters accordingly.
+
+DEVICE COMBINATION EXAMPLES:
+- "Show vehicles with Fixed GPS only" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "GPS", "operator": "eq", "value": "existing"}, {"field": "FixedELock", "operator": "eq", "value": "na"}, {"field": "PortableELock", "operator": "eq", "value": "na"}], "groupBy": ["vehicleNo"], "metrics": [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]}
+- "Show trips with Fixed GPS and Fixed E-Lock" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "fixed-gps-status", "operator": "eq", "value": "existing"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}], "select": []}
+- "How many trips used Fixed GPS, Fixed E-Lock, and Portable E-Lock together Aug 2026?" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fixed-gps-status", "operator": "eq", "value": "existing"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}], "select": []}
+- "Show Intracity trip count for vehicles using both Fixed E-Lock and Portable E-Lock Aug 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withgps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "portable-elock-status", "operator": "eq", "value": "existing"}, {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}, {"field": "routeCategory", "operator": "eq", "value": "intracity"}]}
+- "Trip without any Device or GPS and Fixed Elock and Portable Elock August 2026" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "withoutanygps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+"""
+

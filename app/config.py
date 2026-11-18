@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     GROQ_MAX_TOKENS: int = 1500
     GROQ_TEMPERATURE: float = 0.2
 
+    # Operation specific token limits and performance settings
+    INTENT_MAX_TOKENS: int = 150
+    RESPONSE_MAX_TOKENS: int = 60
+    LLM_KEEP_ALIVE: str = "30m"
+    ENABLE_FAST_PATH: bool = True
+
     # Trip API settings
     TRIP_API_URL: str = "https://prompt.secutrak.in/api/tripsTest"
     TRIP_API_TIMEOUT: float = 120.0
