@@ -227,9 +227,9 @@ def build_natural_response(
     # Devices
     has_withgps = bool(filter_map.get("withgps")) or (analytics and any(isinstance(a, dict) and a.get("type") == "withgps" for a in analytics))
     if has_withgps:
-        has_gps_present = any(k.lower() in ("gps", "fixedgps", "fixed-gps-status") for k in filter_map) or "gps" in msg_l
-        has_fixed_present = any(k.lower() in ("fixedelock", "fixed-elock-status") for k in filter_map) or "fixed" in msg_l
-        has_portable_present = any(k.lower() in ("portableelock", "portable-elock-status") for k in filter_map) or "portable" in msg_l
+        has_gps_present = any(k.lower() in ("gps", "fixedgps", "fixed-gps-status") for k in filter_map) or "gps" in msg_lower
+        has_fixed_present = any(k.lower() in ("fixedelock", "fixed-elock-status") for k in filter_map) or "fixed" in msg_lower
+        has_portable_present = any(k.lower() in ("portableelock", "portable-elock-status") for k in filter_map) or "portable" in msg_lower
 
         if has_gps_present and (has_fixed_present or has_portable_present):
             if fixed_gps == "active" or gps == "active" or fixed_elock == "active" or portable_elock == "active":
