@@ -744,9 +744,13 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
         return None
 
     # Single device categories
-    has_portable = bool(re.search(r'\bportab?le[\s-]e?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\s+gps\b|\bportab?le\b', msg_l))
-    has_fixed_elock = (bool(re.search(r'\bfixed[\s-]e?locks?\b|\bfixed[\s-]locks?\b', msg_l)) or (bool(re.search(r'\be?locks?\b', msg_l)) and not has_portable)) and not has_portable
-    has_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps|fixed\s+device)\b', msg_l)) and not has_portable and not has_fixed_elock
+    without_elock = bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_l))
+    without_gps = bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed\s+)?gps\b', msg_l))
+    without_portable = bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?portab?le\b', msg_l))
+
+    has_portable = bool(re.search(r'\bportab?le[\s-]e?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\s+gps\b|\bportab?le\b', msg_l)) and not without_portable
+    has_fixed_elock = (bool(re.search(r'\bfixed[\s-]e?locks?\b|\bfixed[\s-]locks?\b', msg_l)) or (bool(re.search(r'\be?locks?\b', msg_l)) and not has_portable)) and not has_portable and not without_elock
+    has_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps|fixed\s+device)\b', msg_l)) and not has_portable and not has_fixed_elock and not without_gps
 
     is_na = bool(
         re.search(r'\b(?:na|not\s+available|notavailable)\b', msg_l)
@@ -2047,7 +2051,7 @@ class IntentDetector:
                     })
 
             # --- Single Device & Combo Post-Processing ---
-            has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower))
+            has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower)) and not bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_lower))
             has_portable_elock = bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', msg_lower))
             has_fixed_gps = bool(re.search(r'\bfixed[\s-]gps\b', msg_lower))
             _is_devices_together = bool(re.search(r'\btogether\b', msg_lower))
@@ -2416,6 +2420,20 @@ class IntentDetector:
                     if not isinstance(flt, dict):
                         return 99
                     fld = flt.get("field")
+                    if dev_single_route_category:
+                        if fld == "tripStatus":
+                            return 1
+                        if fld == "groupId":
+                            return 2
+                        if fld == "runDate":
+                            return 3 if flt.get("operator") == "gte" else 4
+                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                            return 5
+                        if fld == "routeCategory":
+                            return 6
+                        if fld == "shipmentMethod":
+                            return 7
+                        return 10
                     if fld == "groupId":
                         return 1
                     if fld == "tripStatus":
@@ -2427,13 +2445,6 @@ class IntentDetector:
                             return 4 if flt.get("operator") == "gte" else 5
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
                             return 6
-                    elif dev_single_route_category:
-                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 4
-                        if fld == "runDate":
-                            return 5 if flt.get("operator") == "gte" else 6
-                        if fld == "routeCategory":
-                            return 7
                     else:
                         if fld in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                             return 3
@@ -4280,7 +4291,7 @@ class IntentDetector:
 
             # Apply the same single-device and device-combo post-processing to fallback
             fb_has_fixed_gps = bool(re.search(r'\bfixed[\s-]gps\b', msg_lower))
-            fb_has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower))
+            fb_has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower)) and not bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_lower))
             fb_has_portable_elock = bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', msg_lower))
             fb_is_devices_together = bool(re.search(r'\btogether\b', msg_lower))
             fb_is_device_trips = bool(re.search(r'\b(?:device\s+trips?|device\s+data|device\s+report)\b', msg_lower))
@@ -4637,6 +4648,20 @@ class IntentDetector:
                     if not isinstance(flt, dict):
                         return 99
                     fld = flt.get("field")
+                    if fb_single_route_category:
+                        if fld == "tripStatus":
+                            return 1
+                        if fld == "groupId":
+                            return 2
+                        if fld == "runDate":
+                            return 3 if flt.get("operator") == "gte" else 4
+                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
+                            return 5
+                        if fld == "routeCategory":
+                            return 6
+                        if fld == "shipmentMethod":
+                            return 7
+                        return 10
                     if fld == "groupId":
                         return 1
                     if fld == "tripStatus":
@@ -4648,13 +4673,6 @@ class IntentDetector:
                             return 4 if flt.get("operator") == "gte" else 5
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
                             return 6
-                    elif fb_single_route_category:
-                        if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
-                            return 4
-                        if fld == "runDate":
-                            return 5 if flt.get("operator") == "gte" else 6
-                        if fld == "routeCategory":
-                            return 7
                     else:
                         if fld in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                             return 3

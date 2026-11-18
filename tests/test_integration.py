@@ -9120,6 +9120,48 @@ def test_download_trips_gps_active_atd_not_captured_aug_2026():
         assert any(f.get("field") == "runDate" and f.get("operator") == "lte" and "2026-08-31" in f.get("value") for f in filters)
 
 
+def test_intracity_trips_fixed_gps_only_without_elock_august_2026():
+    """
+    Test query 'How many Intracity trips in August 2026 used Fixed GPS only (without any E-Lock)?'.
+    Ensures:
+      - analytics is [{'type': 'gpsonly'}] (not fixedlockonly)
+      - filters contains tripStatus: valid, groupId: 0041, runDate gte/lte for August 2026, routeCategory: intracity
+    """
+    mock_trip_resp = {
+        "status": 1,
+        "msg": "Data Found",
+        "data": [{"TotalTrips": 411}]
+    }
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=mock_trip_resp)
+        )
+
+        payload = {
+            "message": "How many Intracity trips in August 2026 used Fixed GPS only (without any E-Lock)?",
+            "session_id": "sess-fixed-gps-only-without-elock-test",
+            "AccessToken": "mock-token"
+        }
+        response = client.post("/api/v1/chat", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["intent"] == "trip_report"
+        entities = data["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "gpsonly"}]
+
+        filters = entities["filters"]
+        assert {"field": "tripStatus", "operator": "eq", "value": "valid"} in filters
+        assert {"field": "groupId", "operator": "eq", "value": "0041"} in filters
+        assert {"field": "routeCategory", "operator": "eq", "value": "intracity"} in filters
+        assert any(f.get("field") == "runDate" and f.get("operator") == "gte" and "2026-08-01" in f.get("value") for f in filters)
+        assert any(f.get("field") == "runDate" and f.get("operator") == "lte" and "2026-08-31" in f.get("value") for f in filters)
+
+
+
 
 
 
