@@ -1614,6 +1614,24 @@ class IntentDetector:
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "FixedGPS" and f.get("value", "").lower() in {"inactive", "nogps", "gpsinactive", "na"})
                 ]
+
+            if bool(re.search(r'\bwhere\s+(?:gps|fixed[\s-]gps|fixed|lock|elock|device)\s+is\s+(?:active|inactive)\b', msg_lower)):
+                query_payload.pop("analytics", None)
+                if re.search(r'\bwhere\s+(?:gps|fixed[\s-]gps)\s+is\s+active\b', msg_lower):
+                    has_gps_filter = False
+                    for f in query_payload.get("filters", []):
+                        if isinstance(f, dict) and str(f.get("field", "")).lower() in ("gps", "fixedgps"):
+                            f["field"] = "GPS"
+                            f["operator"] = "eq"
+                            f["value"] = "active"
+                            has_gps_filter = True
+                            break
+                    if not has_gps_filter:
+                        query_payload.setdefault("filters", []).append({
+                            "field": "GPS",
+                            "operator": "eq",
+                            "value": "active"
+                        })
                         
             # Ensure groupId is always present as a filter with "0041"
             has_group_id = False
@@ -1920,24 +1938,32 @@ class IntentDetector:
                 has_active = re.search(r'\bactive\b', msg_lower) is not None
                 has_open = re.search(r'\bopen\b', msg_lower) is not None
                 if has_active and not has_open:
-                    if re.search(r'\bactive\s+device\b', msg_lower) or re.search(r'\bactive\s+(?:fixed|portable|gps|lock|elock)\b', msg_lower) or _is_active_vehicle_query:
+                    explicit_active_trip = (
+                        (re.search(r'\bactive\s+trips?\b', msg_lower) is not None and not re.search(r'\b(?:gps|fixed[\s-]gps|lock|elock|e-lock|portable|fixed|device|devices)\s+active\s+trips?\b', msg_lower)) or
+                        re.search(r'\btrips?\s+(?:status\s+)?is\s+active\b', msg_lower) is not None or
+                        re.search(r'\btrips?\s+are\s+active\b', msg_lower) is not None
+                    )
+                    has_device_active = bool(
+                        re.search(r'\bactive\s+(?:device|devices|fixed|portable|gps|lock|elock|e-lock)\b', msg_lower)
+                        or re.search(r'\b(?:where\s+)?(?:gps|fixed[\s-]gps|fixed|lock|elock|e-lock|portable|device|devices)\s+(?:is\s+|are\s+|was\s+)?active\b', msg_lower)
+                        or _is_active_vehicle_query
+                        or bool(detect_device_analytics(message))
+                    )
+                    if not explicit_active_trip and has_device_active:
                         is_active_for_trip = False
                     else:
                         active_field_filters = [
                             f for f in query_payload.get("filters", [])
-                            if isinstance(f, dict) and f.get("field") in ["FixedGPS", "PortableELock", "FixedELock"] and f.get("value") in ["Active", "active"]
+                            if isinstance(f, dict) and str(f.get("field", "")).lower() in [
+                                "gps", "fixedgps", "fixed-gps-status", "fixedelock", "fixed-elock-status",
+                                "portableelock", "portable-elock-status", "vendorgps", "vendorfixedelock",
+                                "vendorportableelock"
+                            ] and str(f.get("value", "")).lower() in ["active", "existing"]
                         ]
-                        if active_field_filters:
-                            # Check if "active" explicitly describes trips/trip
-                            explicit_active_trip = (
-                                (re.search(r'\bactive\s+trips?\b', msg_lower) is not None and not re.search(r'\b(?:gps|lock|elock|e-lock|portable|fixed|device)\s+active\s+trips?\b', msg_lower)) or
-                                re.search(r'\btrips?\s+(?:status\s+)?is\s+active\b', msg_lower) is not None or
-                                re.search(r'\btrips?\s+are\s+active\b', msg_lower) is not None
-                            )
-                            if not explicit_active_trip:
-                                active_count = len(re.findall(r'\bactive\b', msg_lower))
-                                if active_count <= len(active_field_filters):
-                                    is_active_for_trip = False
+                        if active_field_filters and not explicit_active_trip:
+                            active_count = len(re.findall(r'\bactive\b', msg_lower))
+                            if active_count <= len(active_field_filters):
+                                is_active_for_trip = False
                 
                 if is_active_for_trip:
                     has_status_keyword = True
@@ -3815,6 +3841,8 @@ class IntentDetector:
                     return 1
                 elif field == "tripStatus":
                     return 2
+                elif field in ("GPS", "FixedGPS", "FixedELock", "PortableELock", "gps", "fixedgps"):
+                    return 2.5
                 elif field == "runDate" and op == "gte":
                     return 3
                 elif field == "runDate" and op == "lte":
@@ -4272,7 +4300,13 @@ class IntentDetector:
                             re.search(r'\btrips?\s+are\s+active\b', msg_lower) is not None
                         )
                         if not explicit_active_trip:
-                            if re.search(r'\bactive\s+device\b', msg_lower) or re.search(r'\bactive\s+(?:fixed|portable|gps|lock|elock)\b', msg_lower) or fb_is_active_vehicle_query or bool(detect_device_analytics(message)):
+                            has_device_active = bool(
+                                re.search(r'\bactive\s+(?:device|devices|fixed|portable|gps|lock|elock|e-lock)\b', msg_lower)
+                                or re.search(r'\b(?:where\s+)?(?:gps|fixed[\s-]gps|fixed|lock|elock|e-lock|portable|device|devices)\s+(?:is\s+|are\s+|was\s+)?active\b', msg_lower)
+                                or fb_is_active_vehicle_query
+                                or bool(detect_device_analytics(message))
+                            )
+                            if has_device_active:
                                 fb_is_active_for_trip = False
 
                     if fb_is_active_for_trip:
@@ -6081,6 +6115,8 @@ class IntentDetector:
                     return 1
                 elif field == "tripStatus":
                     return 2
+                elif field in ("GPS", "FixedGPS", "FixedELock", "PortableELock", "gps", "fixedgps"):
+                    return 2.5
                 elif field == "runDate" and op == "gte":
                     return 3
                 elif field == "runDate" and op == "lte":
