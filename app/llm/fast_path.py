@@ -47,7 +47,7 @@ def can_resolve_fast_path(message: str) -> bool:
     # 5. Non-GPS / GPS queries
     if bool(re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:active|inactive)\s+gps\b|\bgps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)):
+    if bool(re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)):
         return True
     if bool(re.search(r'\b(?:secutrak|wheelseye)\s+gps\b', msg_l)):
         return True
@@ -158,10 +158,10 @@ def build_fast_path_payload(
     # 3. GPS & E-Lock analytics
     if bool(re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)):
         payload.setdefault("analytics", []).append({"type": "gpsna"})
-    elif bool(re.search(r'\bactive\s+gps\b|\bgps\s+(?:is\s+)?active\b', msg_l)):
+    elif bool(re.search(r'\bactive\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?active\b', msg_l)):
         payload.setdefault("analytics", []).append({"type": "gps"})
         payload["filters"].append({"field": "GPS", "operator": "eq", "value": "active"})
-    elif bool(re.search(r'\binactive\s+gps\b|\bgps\s+(?:is\s+)?inactive\b', msg_l)):
+    elif bool(re.search(r'\binactive\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive\b', msg_l)):
         payload.setdefault("analytics", []).append({"type": "gps"})
         payload["filters"].append({"field": "GPS", "operator": "eq", "value": "inactive"})
 

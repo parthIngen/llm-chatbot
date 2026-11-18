@@ -42,6 +42,7 @@ BENCHMARK_QUERIES = [
 
     # Comparisons and analytics
     ("Compare Network and Local trips.", "network_vs_local", {"groupBy": "tripType"}),
+    ("Show active Fixed GPS device count across Intercity and Intracity trips in Aug 2026", "active_fixed_gps_across_trip_types", {"analytics": "gps", "GPS": "active", "groupBy": "tripType", "has_dates": True}),
     ("Show region-wise trip counts.", "region_breakdown", {"groupBy": "region"}),
     ("Show High Priority vs Normal Priority trips.", "priority_comparison", {"groupBy": "priority"}),
     ("Show unique transporters.", "unique_transporters", {"groupBy": "Transporter"}),
@@ -134,6 +135,10 @@ def test_benchmark_query(query, case_id, expected_traits):
 
         if "groupBy" in expected_traits:
             assert expected_traits["groupBy"] in group_by, f"Expected {expected_traits['groupBy']} in {group_by}"
+
+        if "GPS" in expected_traits:
+            gps_vals = [str(f.get("value")).lower() for f in filters if f.get("field") == "GPS"]
+            assert expected_traits["GPS"].lower() in gps_vals, f"Expected GPS in {filters}"
 
         if "vendor" in expected_traits:
             vendor_vals = [str(f.get("value")).lower() for f in filters if f.get("field") in ("vendor", "vendorgps")]

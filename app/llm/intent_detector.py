@@ -2282,7 +2282,7 @@ class IntentDetector:
                         reordered[k] = v
                 query_payload.clear()
                 query_payload.update(reordered)
-            elif _is_network_vs_local_query:
+            elif _is_network_vs_local_query and not bool(detect_device_analytics(message)):
                 is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -2440,7 +2440,7 @@ class IntentDetector:
                         {
                             "field": "shipmentNo",
                             "function": "count",
-                            "alias": "count"
+                            "alias": "TotalTrip"
                         }
                     ]
                 elif dev_single_route_category:
@@ -3513,7 +3513,7 @@ class IntentDetector:
                     return 10
 
                 query_payload["filters"].sort(key=_trip_type_breakdown_sort_key)
-            elif _is_network_vs_local_query:
+            elif _is_network_vs_local_query and not bool(detect_device_analytics(message)):
                 is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
                 def _network_vs_local_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -4521,7 +4521,7 @@ class IntentDetector:
                         reordered[k] = v
                 fallback_payload.clear()
                 fallback_payload.update(reordered)
-            elif fb_is_network_vs_local_query:
+            elif fb_is_network_vs_local_query and not bool(detect_device_analytics(message)):
                 fb_is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
@@ -4670,7 +4670,7 @@ class IntentDetector:
                         {
                             "field": "shipmentNo",
                             "function": "count",
-                            "alias": "count"
+                            "alias": "TotalTrip"
                         }
                     ]
                 elif fb_single_route_category:
@@ -5593,7 +5593,7 @@ class IntentDetector:
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_trip_type_breakdown_sort_key)
-            elif fb_is_network_vs_local_query:
+            elif fb_is_network_vs_local_query and not bool(detect_device_analytics(message)):
                 fb_is_non_gps = bool(re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower))
                 def _fb_network_vs_local_sort_key(flt):
                     if not isinstance(flt, dict):
