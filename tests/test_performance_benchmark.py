@@ -218,3 +218,54 @@ def test_feeder_trips_exact_payload_and_metric_aggregation():
         assert "feeder" in res["reply"].lower()
         assert duration < 0.2, f"Expected fast-path sub-200ms execution, got {duration:.3f}s"
 
+def test_all_three_devices_together_exact_payload_and_reply():
+    """
+    Validates exact payload and natural language response for:
+    'How many trips in August 2026 used all three devices together (Fixed GPS + Fixed E-Lock + Portable E-Lock)?'
+    Ensures device filter values are 'existing' when not specified as active/na.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": 35125
+    }
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": "How many trips in August 2026 used all three devices together (Fixed GPS + Fixed E-Lock + Portable E-Lock)?",
+            "history": [],
+            "session_id": "three-devices-test-1",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+
+        entities = res["entities"]
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities["analytics"] == [{"type": "withgps"}]
+        assert entities["select"] == []
+
+        filters = {f["field"]: f["value"] for f in entities["filters"] if "field" in f}
+        assert filters.get("groupId") == "0041"
+        assert filters.get("tripStatus") == "valid"
+        assert filters.get("FixedELock") == "existing"
+        assert filters.get("PortableELock") == "existing"
+        assert filters.get("GPS") == "existing"
+
+        # Check reply phrasing
+        assert "35125" in res["reply"]
+        assert "using all three devices together (Fixed GPS, Fixed E-Lock, and Portable E-Lock)" in res["reply"]
+        assert "active Fixed GPS" not in res["reply"]
+        assert duration < 0.2, f"Expected fast-path sub-200ms execution, got {duration:.3f}s"
+
+

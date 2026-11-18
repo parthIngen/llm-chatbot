@@ -623,12 +623,20 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
         (has_gps_mention_together and has_fixed_elock_mention_together and has_portable_mention_together)
         or re.search(r'\b(?:all\s+)?devices?\s+together\b', msg_l)
     ):
+        dev_val = "existing"
+        if re.search(r'\b(?:inactive|no\s+connectivity)\b', msg_l):
+            dev_val = "inactive"
+        elif re.search(r'\bactive\b', msg_l):
+            dev_val = "active"
+        elif re.search(r'\b(?:na|n/a|not\s+available|not\s+applicable)\b', msg_l):
+            dev_val = "na"
+
         return {
             "analytics_type": "withgps",
             "device_filters": [
-                {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
-                {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-                {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}
+                {"field": "FixedELock", "operator": "eq", "value": dev_val},
+                {"field": "PortableELock", "operator": "eq", "value": dev_val},
+                {"field": "GPS", "operator": "eq", "value": dev_val}
             ]
         }
 
@@ -2134,6 +2142,8 @@ class IntentDetector:
                     return "active"
                 elif re.search(r'\binactive\b', msg):
                     return "inactive"
+                elif re.search(r'\b(?:na|n/a)\b', msg):
+                    return "na"
                 return default
 
             # 1. Fixed GPS Only / Single Device
@@ -2363,11 +2373,13 @@ class IntentDetector:
                             "value": "valid"
                         })
 
-                dev_val = "active"
+                dev_val = "existing"
                 if re.search(r'\b(?:inactive|no\s+connectivity)\b', msg_lower):
                     dev_val = "inactive"
                 elif re.search(r'\bactive\b', msg_lower):
                     dev_val = "active"
+                elif re.search(r'\b(?:na|n/a|not\s+available|not\s+applicable)\b', msg_lower):
+                    dev_val = "na"
                 elif re.search(r'\bexisting\b', msg_lower):
                     dev_val = "existing"
 
@@ -4378,6 +4390,8 @@ class IntentDetector:
                     return "active"
                 elif re.search(r'\binactive\b', msg):
                     return "inactive"
+                elif re.search(r'\b(?:na|n/a)\b', msg):
+                    return "na"
                 return default
 
             fb_is_active_device_count = bool(re.search(r'\b(?:active\s+)?device\s+count\b', msg_lower))
@@ -4605,11 +4619,13 @@ class IntentDetector:
                             "value": "valid"
                         })
 
-                fb_dev_val = "active"
+                fb_dev_val = "existing"
                 if re.search(r'\b(?:inactive|no\s+connectivity)\b', msg_lower):
                     fb_dev_val = "inactive"
                 elif re.search(r'\bactive\b', msg_lower):
                     fb_dev_val = "active"
+                elif re.search(r'\b(?:na|n/a|not\s+available|not\s+applicable)\b', msg_lower):
+                    fb_dev_val = "na"
                 elif re.search(r'\bexisting\b', msg_lower):
                     fb_dev_val = "existing"
 

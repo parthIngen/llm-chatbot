@@ -159,10 +159,18 @@ def build_fast_path_payload(
         ])
     elif bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)) and bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l)):
         payload.setdefault("analytics", []).append({"type": "withgps"})
-        payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
-        payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
+        dev_val = "existing"
+        if re.search(r'\b(?:inactive|no\s+connectivity)\b', msg_l):
+            dev_val = "inactive"
+        elif re.search(r'\bactive\b', msg_l):
+            dev_val = "active"
+        elif re.search(r'\b(?:na|n/a|not\s+available|not\s+applicable)\b', msg_l):
+            dev_val = "na"
+
+        payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": dev_val})
         if bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b', msg_l)):
-            payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
+            payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": dev_val})
+        payload["filters"].append({"field": "GPS", "operator": "eq", "value": dev_val})
     elif bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l)) and bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b', msg_l)):
         payload.setdefault("analytics", []).append({"type": "withgps"})
         payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
