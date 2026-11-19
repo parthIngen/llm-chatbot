@@ -1018,6 +1018,8 @@ def test_shipment_details_exact_payload_and_reply(query):
         assert len(filters) == 2
 
         reply = res["reply"]
+        assert "<div" in reply
+        assert "<table" in reply
         assert "PLW" in reply
         assert "PLW-BDW-ASL" in reply
         assert "WEST" in reply

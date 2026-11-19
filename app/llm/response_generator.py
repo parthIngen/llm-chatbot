@@ -541,25 +541,66 @@ class ResponseGenerator:
                 trip_status = "N/A"
 
             s_id = shipment_no or trip.get("shipment_no") or trip.get("shipmentNo") or ""
-            header = f"Here is the summary details for shipment {s_id}:" if s_id else "Here is the summary details:"
+            header_title = f"Shipment Details: {s_id}" if s_id else "Shipment Details"
 
-            return (
-                f"{header}\n\n"
-                f"- **Source Code**: {source_code}\n"
-                f"- **Route Name**: {route_name}\n"
-                f"- **Region Code**: {region_code}\n"
-                f"- **Destination Name**: {destination_name}\n"
-                f"- **Trip Type**: {trip_type}\n"
-                f"- **Schedule Departure**: {schedule_departure}\n"
-                f"- **Schedule Arrival**: {schedule_arrival}\n"
-                f"- **Vehicle No**: {vehicle_no}\n"
-                f"- **Driver Name**: {driver_name}\n"
-                f"- **Shipment Method**: {shipment_method}\n"
-                f"- **Transporter Name**: {transporter_name}\n"
-                f"- **Actual Destination Arrival Time**: {actual_destination_arrival_time}\n"
-                f"- **Actual Source Departure Time**: {actual_source_departure_time}\n"
-                f"- **Trip Status**: {trip_status}"
+            if trip_status == "running":
+                badge_bg = "#ecfdf5"
+                badge_color = "#047857"
+            elif trip_status == "closed":
+                badge_bg = "#f1f5f9"
+                badge_color = "#475569"
+            else:
+                badge_bg = "#fef3c7"
+                badge_color = "#b45309"
+
+            rows = [
+                ("Source Code", source_code),
+                ("Route Name", route_name),
+                ("Region Code", region_code),
+                ("Destination Name", destination_name),
+                ("Trip Type", trip_type),
+                ("Schedule Departure", schedule_departure),
+                ("Schedule Arrival", schedule_arrival),
+                ("Vehicle No", vehicle_no),
+                ("Driver Name", driver_name),
+                ("Shipment Method", shipment_method),
+                ("Transporter Name", transporter_name),
+                ("Actual Destination Arrival Time", actual_destination_arrival_time),
+                ("Actual Source Departure Time", actual_source_departure_time),
+                ("Trip Status", trip_status),
+            ]
+
+            table_rows_html = []
+            for i, (label, val) in enumerate(rows):
+                bg = "#fafbfc" if i % 2 == 1 else "#ffffff"
+                val_style = "color: #94a3b8; font-weight: 500;" if val == "N/A" else "color: #0f172a; font-weight: 600;"
+                table_rows_html.append(
+                    f'<tr style="border-bottom: 1px solid #f1f5f9; background: {bg};">'
+                    f'<td style="padding: 9px 16px; font-weight: 600; color: #64748b; width: 45%;">{label}</td>'
+                    f'<td style="padding: 9px 16px; {val_style}">{val}</td>'
+                    f'</tr>'
+                )
+
+            table_content = "\n".join(table_rows_html)
+
+            html_card = (
+                f'<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; '
+                f'max-width: 650px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; '
+                f'box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-top: 8px;">\n'
+                f'<div style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #e2e8f0; display: flex; '
+                f'align-items: center; justify-content: space-between;">\n'
+                f'<span style="font-size: 15px; font-weight: 700; color: #1e293b;">📦 {header_title}</span>\n'
+                f'<span style="background: {badge_bg}; color: {badge_color}; font-size: 12px; font-weight: 700; '
+                f'padding: 3px 10px; border-radius: 9999px; text-transform: uppercase;">{trip_status}</span>\n'
+                f'</div>\n'
+                f'<table style="width: 100%; border-collapse: collapse; font-size: 13px;">\n'
+                f'<tbody>\n{table_content}\n</tbody>\n'
+                f'</table>\n'
+                f'</div>'
             )
+
+            intro_text = f"Here is the summary details for shipment {s_id}:" if s_id else "Here is the summary details:"
+            return f"{intro_text}\n\n{html_card}"
 
         start_date = None
         end_date = None
