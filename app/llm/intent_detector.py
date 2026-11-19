@@ -307,6 +307,89 @@ def extract_device_vendor(text: str) -> Optional[str]:
         return "ThirdParty"
     return None
 
+def detect_vehicle_master(text: str) -> Optional[str]:
+    """Detect whether query asks for trips with vehicle inside or outside of vehicle master.
+    Returns: 'outside' or 'inside', or None if not applicable.
+    """
+    text_l = text.lower()
+    if bool(re.search(r'\broutes?\b|\bnetwork\s+module\b|\bfleets?\b', text_l)) and not bool(re.search(r'\bvehicles?\b', text_l)):
+        return None
+    # Check outside first (as it might contain "vehicle master" or "in vehicle master")
+    if bool(re.search(r'\b(?:vehicle\s+outside\s+(?:of\s+)?master|outside\s+of\s+master|vehicle\s+na\s+in\s+(?:vehicle\s+)?master|na\s+in\s+vehicle\s+master|not\s+in\s+vehicle\s+master)\b', text_l)) or (
+        bool(re.search(r'\boutside\s+(?:of\s+)?(?:vehicle\s+)?master\b', text_l)) and bool(re.search(r'\bvehicles?\b', text_l))
+    ):
+        return "outside"
+    elif bool(re.search(r'\b(?:vehicle\s+inside\s+(?:of\s+)?master|inside\s+of\s+master|in\s+vehicle\s+master)\b', text_l)) or (
+        bool(re.search(r'\binside\s+(?:of\s+)?(?:vehicle\s+)?master\b', text_l)) and bool(re.search(r'\bvehicles?\b', text_l))
+    ):
+        return "inside"
+    return None
+
+def detect_route_master(text: str) -> Optional[str]:
+    """Detect whether query asks for trips with route inside or outside of route master / network module.
+    Returns: 'outside' or 'inside', or None if not applicable.
+    """
+    text_l = text.lower()
+    if bool(re.search(r'\bfleets?\b', text_l)) and not bool(re.search(r'\broutes?\b', text_l)):
+        return None
+    # Check outside first
+    if bool(re.search(r'\b(?:route\s+outside\s+(?:of\s+)?(?:route\s+)?master|route\s+na\s+in\s+(?:network\s+)?module|na\s+in\s+network\s+module|not\s+in\s+network\s+module|route\s+not\s+in\s+(?:route\s+)?master)\b', text_l)) or (
+        bool(re.search(r'\boutside\s+(?:of\s+)?(?:route\s+)?master\b', text_l)) and bool(re.search(r'\broutes?\b', text_l))
+    ):
+        return "outside"
+    elif bool(re.search(r'\b(?:route\s+inside\s+(?:of\s+)?(?:route\s+)?master|route\s+in\s+(?:route\s+)?master|(?:present|available)\s+in\s+network\s+module|in\s+network\s+module)\b', text_l)) or (
+        bool(re.search(r'\binside\s+(?:of\s+)?(?:route\s+)?master\b', text_l)) and bool(re.search(r'\broutes?\b', text_l))
+    ):
+        return "inside"
+    return None
+
+def detect_fleet_master(text: str) -> Optional[str]:
+    """Detect whether query asks for trips with fleet inside or outside of fleet master / network module.
+    Returns: 'outside' or 'inside', or None if not applicable.
+    """
+    text_l = text.lower()
+    if not bool(re.search(r'\bfleets?\b', text_l)):
+        return None
+    # Check outside first
+    if (
+        bool(re.search(r'\b(?:fleet\s+outside\s+(?:of\s+)?(?:fleet\s+)?master|fleet\s+na\s+in\s+(?:network\s+)?module|na\s+in\s+network\s+module|not\s+in\s+network\s+module|fleet\s+not\s+in\s+(?:fleet\s+)?master)\b', text_l))
+        or bool(re.search(r'\boutside\s+(?:of\s+)?(?:fleet\s+)?master\b', text_l))
+    ):
+        return "outside"
+    elif (
+        bool(re.search(r'\b(?:fleet\s+inside\s+(?:of\s+)?(?:fleet\s+)?master|fleet\s+in\s+(?:fleet\s+)?master|fleet\s+in\s+(?:network\s+)?module|(?:present|available)\s+in\s+network\s+module)\b', text_l))
+        or bool(re.search(r'\binside\s+(?:of\s+)?(?:fleet\s+)?master\b', text_l))
+    ):
+        return "inside"
+    return None
+
+def extract_single_shipment_lookup(text: str) -> Optional[str]:
+    """Detects if query asks for details, report, info or information of a specific shipment number or trip ID.
+    Returns the shipment number / trip ID string if detected, else None.
+    """
+    text_l = text.lower()
+    # 1. Prefix: e.g. "shipment 12543311", "shipment no 12543311", "trip id 12543311", "trip no 12543311"
+    m = re.search(r'\b(?:shipment\s*(?:no|number|id)?|trip\s*(?:id|no|number))\s*[:#]?\s*([A-Za-z0-9_-]{5,25})\b', text_l)
+    if m:
+        val = m.group(1).strip()
+        if bool(re.search(r'\d{3,}', val)) and val not in ("report", "details", "information", "summary", "status"):
+            return val
+
+    # 2. Suffix: e.g. "12543311 trip id", "12543311 shipment number", "12543311 shipment"
+    m = re.search(r'\b([A-Za-z0-9_-]{5,25})\s*[:#-]?\s*(?:trip\s*(?:id|no|number)|shipment\s*(?:no|number|id)?)\b', text_l)
+    if m:
+        val = m.group(1).strip()
+        if bool(re.search(r'\d{3,}', val)) and val not in ("report", "details", "information", "summary", "status"):
+            return val
+
+    # 3. Fallback: query has words like report/details/info and mentions shipment or trip id with a standalone 6-15 digit number
+    if bool(re.search(r'\b(?:report|details|info|information|summary)\b', text_l)) and bool(re.search(r'\b(?:shipment|trip\s*id)\b', text_l)):
+        m = re.search(r'\b(\d{6,15})\b', text_l)
+        if m:
+            return m.group(1).strip()
+
+    return None
+
 def detect_shipment_methods(text: str) -> list[str]:
     """Detect and normalize all shipment method names present in text, returned in order of appearance.
     Canonical values:
@@ -315,6 +398,8 @@ def detect_shipment_methods(text: str) -> list[str]:
     # Normalize 'v/s' or 'vs' delimiters (e.g. 'v/sComm/BZ-In' -> 'v/s Comm/BZ-In')
     msg_lower = re.sub(r'v/s(?=[a-zA-Z0-9])', 'v/s ', text.lower())
     msg_lower = re.sub(r'\bvs(?=[a-zA-Z0-9])', 'vs ', msg_lower)
+    # Mask out non-shipment-method phrases like 'network module'
+    msg_lower = re.sub(r'\bnetwork\s+module\b', lambda m: ' ' * len(m.group(0)), msg_lower)
     methods: list[tuple[str, int]] = []
 
     # 1. Pick Up and Delivery (e.g. 'pick & delivery', 'pick up and delivery', 'pickup and delivery')
@@ -490,13 +575,16 @@ def extract_route_code(text: str) -> str | None:
     """Extract specific route code or name from query (e.g. 'route ABL', 'route: ABL').
     Excludes non-route words like 'intercity', 'intracity', 'feeder', 'trips', etc.
     """
+    if detect_route_master(text) is not None:
+        return None
     _NON_ROUTE_WORDS = {
         "intercity", "intracity", "network", "local", "feeder", "empty",
         "delivery", "air", "surface", "speed", "category", "type", "types",
         "major", "categories", "method", "methods", "route", "routes",
         "breakdown", "schedule", "trip", "trips", "count", "counts",
         "report", "reports", "details", "data", "for", "in", "of", "to", "from",
-        "the", "all", "valid", "closed", "running", "active", "cancelled", "canceled", "cancel"
+        "the", "all", "valid", "closed", "running", "active", "cancelled", "canceled", "cancel",
+        "outside", "inside", "master", "na", "not", "module"
     }
     m = re.search(r'\broute\s*(?:code|name)?[:\s]+([A-Za-z0-9_-]+)\b', text, re.IGNORECASE)
     if m:
@@ -1339,6 +1427,39 @@ class IntentDetector:
         llm_status = "success"
 
         # Check Python Fast-Path first for confident resolution
+        single_shipment = extract_single_shipment_lookup(message)
+        if single_shipment:
+            query_payload = {
+                "entity": "trip",
+                "operation": "find",
+                "filters": [
+                    {
+                        "field": "groupId",
+                        "operator": "eq",
+                        "value": "0041"
+                    },
+                    {
+                        "field": "shipmentNo",
+                        "operator": "eq",
+                        "value": single_shipment
+                    }
+                ],
+                "select": []
+            }
+            log_intent_detected(session_id, "trip_report")
+            log_entities_extracted(session_id, query_payload)
+            print(f"[DEBUG_QUERY] Session: {session_id} | Source: fast_path | LLM Status: bypassed | Mode: single_shipment_lookup")
+            return {
+                "intent": "trip_report",
+                "entities": query_payload,
+                "source": "fast_path",
+                "llm_status": "bypassed",
+                "debug": {
+                    "source": "fast_path",
+                    "llm_status": "bypassed"
+                }
+            }
+
         fast_payload = None
         if getattr(settings, "ENABLE_FAST_PATH", True):
             fast_payload = build_fast_path_payload(message, reference_now=now)
@@ -1581,8 +1702,11 @@ class IntentDetector:
                     raw_field = f.get("field", "")
                     if raw_field == "GPS":
                         continue
-                    if raw_field.lower() == "gps" and f.get("value") == "existing":
-                        f["field"] = "GPS"
+                    if raw_field.lower() == "gps":
+                        if any(isinstance(x, dict) and x.get("field") in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock") for x in query_payload["filters"]) or extract_device_vendor(message):
+                            f["field"] = "gps"
+                        elif f.get("value") in ("existing", "active", "inactive"):
+                            f["field"] = "GPS"
                         continue
                     if raw_field.lower() in ("atd", "ata"):
                         f["field"] = raw_field.lower()
@@ -2121,6 +2245,9 @@ class IntentDetector:
                     vendor_field = "vendorgps"
                     query_payload["analytics"] = [{"type": "gps"}]
 
+                has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
+                has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
+
                 query_payload["filters"] = [
                     f for f in query_payload.get("filters", [])
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -2135,6 +2262,11 @@ class IntentDetector:
                     "operator": "contains",
                     "value": canonical_vendor
                 })
+                if vendor_field == "vendorgps":
+                    if has_gps_inactive:
+                        query_payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+                    elif has_gps_active:
+                        query_payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
             elif re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 target_vendor = "ThirdParty"
             elif re.search(r'\b(secutrak|icici|ilgic)\b', msg_lower):
@@ -2217,10 +2349,16 @@ class IntentDetector:
                 elif is_vendor_gps:
                     vendor_field = "vendorgps"
                     query_payload["analytics"] = [{"type": "gps"}]
+                    has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
+                    has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") in ["GPS", "FixedGPS", "gps", "fixedgps"])
                     ]
+                    if has_gps_inactive:
+                        query_payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+                    elif has_gps_active:
+                        query_payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
                 else:
                     vendor_field = "vendor"
 
@@ -2244,6 +2382,25 @@ class IntentDetector:
                         "operator": op,
                         "value": canonical_vendor
                     })
+
+                if vendor_field == "vendorgps":
+                    has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
+                    has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
+                    gps_status_val = "inactive" if has_gps_inactive else ("active" if has_gps_active else None)
+                    if gps_status_val:
+                        has_gps_f = False
+                        for f in query_payload["filters"]:
+                            if isinstance(f, dict) and f.get("field") == "gps":
+                                f["value"] = gps_status_val
+                                f["operator"] = "eq"
+                                has_gps_f = True
+                                break
+                        if not has_gps_f:
+                            query_payload["filters"].append({
+                                "field": "gps",
+                                "operator": "eq",
+                                "value": gps_status_val
+                            })
 
             # --- Single Device & Combo Post-Processing ---
             has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower)) and not bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_lower))
@@ -3399,6 +3556,7 @@ class IntentDetector:
                     or _is_active_vehicle_query
                 )
                 and ((not is_vendor_running_query) or has_explicit_vehicle_count)
+                and not bool(detect_vehicle_master(message))
             )
             _is_distinct_transporter_query = (
                 has_transporter_mention
@@ -3420,6 +3578,80 @@ class IntentDetector:
                             "operator": "eq",
                             "value": v_val
                         })
+
+            # --- Vehicle Master Post-Processing ---
+            vm_detected = detect_vehicle_master(message)
+            if vm_detected:
+                has_vm = False
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master"):
+                        f["field"] = "vehicleMaster"
+                        f["operator"] = "eq"
+                        f["value"] = vm_detected
+                        has_vm = True
+                        break
+                if not has_vm:
+                    query_payload.setdefault("filters", []).append({
+                        "field": "vehicleMaster",
+                        "operator": "eq",
+                        "value": vm_detected
+                    })
+                query_payload["select"] = []
+                query_payload.pop("groupBy", None)
+                query_payload.pop("metrics", None)
+                query_payload.pop("analytics", None)
+
+            # --- Route Master Post-Processing ---
+            rm_detected = detect_route_master(message)
+            if rm_detected:
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master", "fleetMaster", "fleet_master", "Route", "route", "RouteName", "routeName", "shipmentMethod"))
+                ]
+                has_rm = False
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ("routeMaster", "route_master"):
+                        f["field"] = "routeMaster"
+                        f["operator"] = "eq"
+                        f["value"] = rm_detected
+                        has_rm = True
+                        break
+                if not has_rm:
+                    query_payload.setdefault("filters", []).append({
+                        "field": "routeMaster",
+                        "operator": "eq",
+                        "value": rm_detected
+                    })
+                query_payload["select"] = []
+                query_payload.pop("groupBy", None)
+                query_payload.pop("metrics", None)
+                query_payload.pop("analytics", None)
+
+            # --- Fleet Master Post-Processing ---
+            fm_detected = detect_fleet_master(message)
+            if fm_detected:
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "Route", "route", "RouteName", "routeName", "shipmentMethod"))
+                ]
+                has_fm = False
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ("fleetMaster", "fleet_master"):
+                        f["field"] = "fleetMaster"
+                        f["operator"] = "eq"
+                        f["value"] = fm_detected
+                        has_fm = True
+                        break
+                if not has_fm:
+                    query_payload.setdefault("filters", []).append({
+                        "field": "fleetMaster",
+                        "operator": "eq",
+                        "value": fm_detected
+                    })
+                query_payload["select"] = []
+                query_payload.pop("groupBy", None)
+                query_payload.pop("metrics", None)
+                query_payload.pop("analytics", None)
 
             if _is_each_region_query:
                 query_payload["groupBy"] = ["region"]
@@ -3771,10 +4003,12 @@ class IntentDetector:
                         return 4
                     elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 5
-                    elif field == "routeCategory":
+                    elif field in ("gps", "GPS", "FixedGPS", "fixedgps"):
                         return 6
-                    elif field == "shipmentMethod":
+                    elif field == "routeCategory":
                         return 7
+                    elif field == "shipmentMethod":
+                        return 8
                     return 10
 
                 query_payload["filters"].sort(key=_vendor_sort_key)
@@ -3963,6 +4197,8 @@ class IntentDetector:
                     return 3
                 elif field == "runDate" and op == "lte":
                     return 4
+                elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
+                    return 4.5
                 elif field in ("source", "destination", "From", "To"):
                     return 5
                 elif field == "region":
@@ -4037,6 +4273,38 @@ class IntentDetector:
             fb_error_type = "rate_limit_exceeded" if is_rate_limit else ("timeout" if "timeout" in fb_error_str.lower() else "llm_error")
             fb_llm_status = "rate_limit_exceeded" if is_rate_limit else "error"
             # Fallback structure
+            fb_single_shipment = extract_single_shipment_lookup(message)
+            if fb_single_shipment:
+                fallback_payload = {
+                    "entity": "trip",
+                    "operation": "find",
+                    "filters": [
+                        {
+                            "field": "groupId",
+                            "operator": "eq",
+                            "value": "0041"
+                        },
+                        {
+                            "field": "shipmentNo",
+                            "operator": "eq",
+                            "value": fb_single_shipment
+                        }
+                    ],
+                    "select": []
+                }
+                print(f"[DEBUG_QUERY] Session: {session_id} | Source: regex | LLM Status: {fb_llm_status or 'fallback'} | Mode: single_shipment_lookup")
+                return {
+                    "intent": "trip_report",
+                    "entities": fallback_payload,
+                    "source": "regex",
+                    "llm_status": fb_llm_status or "fallback",
+                    "debug": {
+                        "source": "regex",
+                        "llm_status": fb_llm_status or "fallback",
+                        "error_type": fb_error_type
+                    }
+                }
+
             fallback_payload = {
                 "entity": "trip",
                 "operation": "count",
@@ -5434,6 +5702,7 @@ class IntentDetector:
                     or fb_is_active_vehicle_query
                 )
                 and ((not fb_is_vendor_running_query) or fb_has_explicit_vehicle_count)
+                and not bool(detect_vehicle_master(message))
             )
             fb_is_distinct_transporter_query = (
                 fb_has_transporter_mention
@@ -5567,6 +5836,9 @@ class IntentDetector:
                     fb_vendor_field = "vendorgps"
                     fallback_payload["analytics"] = [{"type": "gps"}]
 
+                has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
+                has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
+
                 fallback_payload["filters"] = [
                     f for f in fallback_payload.get("filters", [])
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -5581,6 +5853,11 @@ class IntentDetector:
                     "operator": "contains",
                     "value": fb_canonical_vendor
                 })
+                if fb_vendor_field == "vendorgps":
+                    if has_gps_inactive:
+                        fallback_payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+                    elif has_gps_active:
+                        fallback_payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
             elif re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 fb_target_vendor = "ThirdParty"
             elif re.search(r'\b(secutrak|icici|ilgic)\b', msg_lower):
@@ -5650,10 +5927,16 @@ class IntentDetector:
                 elif fb_is_vendor_gps:
                     fb_vendor_field = "vendorgps"
                     fallback_payload["analytics"] = [{"type": "gps"}]
+                    has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
+                    has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") in ["GPS", "FixedGPS", "gps", "fixedgps"])
                     ]
+                    if has_gps_inactive:
+                        fallback_payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+                    elif has_gps_active:
+                        fallback_payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
                 else:
                     fb_vendor_field = "vendor"
 
@@ -5677,6 +5960,25 @@ class IntentDetector:
                         "operator": fb_op,
                         "value": fb_canonical_vendor
                     })
+
+                if fb_vendor_field == "vendorgps":
+                    has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
+                    has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
+                    gps_status_val = "inactive" if has_gps_inactive else ("active" if has_gps_active else None)
+                    if gps_status_val:
+                        has_gps_f = False
+                        for f in fallback_payload["filters"]:
+                            if isinstance(f, dict) and f.get("field") == "gps":
+                                f["value"] = gps_status_val
+                                f["operator"] = "eq"
+                                has_gps_f = True
+                                break
+                        if not has_gps_f:
+                            fallback_payload["filters"].append({
+                                "field": "gps",
+                                "operator": "eq",
+                                "value": gps_status_val
+                            })
 
             if fb_is_vendor_running_query:
                 if not fb_has_date_specified:
@@ -5940,10 +6242,12 @@ class IntentDetector:
                         return 4
                     elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
                         return 5
-                    elif field == "routeCategory":
+                    elif field in ("gps", "GPS", "FixedGPS", "fixedgps"):
                         return 6
-                    elif field == "shipmentMethod":
+                    elif field == "routeCategory":
                         return 7
+                    elif field == "shipmentMethod":
+                        return 8
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_vendor_sort_key)
@@ -6297,6 +6601,80 @@ class IntentDetector:
                             "value": v_val
                         })
 
+            # --- Vehicle Master Fallback Post-Processing ---
+            fb_vm_detected = detect_vehicle_master(message)
+            if fb_vm_detected:
+                fb_has_vm = False
+                for f in fallback_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master"):
+                        f["field"] = "vehicleMaster"
+                        f["operator"] = "eq"
+                        f["value"] = fb_vm_detected
+                        fb_has_vm = True
+                        break
+                if not fb_has_vm:
+                    fallback_payload.setdefault("filters", []).append({
+                        "field": "vehicleMaster",
+                        "operator": "eq",
+                        "value": fb_vm_detected
+                    })
+                fallback_payload["select"] = []
+                fallback_payload.pop("groupBy", None)
+                fallback_payload.pop("metrics", None)
+                fallback_payload.pop("analytics", None)
+
+            # --- Route Master Fallback Post-Processing ---
+            fb_rm_detected = detect_route_master(message)
+            if fb_rm_detected:
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master", "fleetMaster", "fleet_master", "Route", "route", "RouteName", "routeName", "shipmentMethod"))
+                ]
+                fb_has_rm = False
+                for f in fallback_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ("routeMaster", "route_master"):
+                        f["field"] = "routeMaster"
+                        f["operator"] = "eq"
+                        f["value"] = fb_rm_detected
+                        fb_has_rm = True
+                        break
+                if not fb_has_rm:
+                    fallback_payload.setdefault("filters", []).append({
+                        "field": "routeMaster",
+                        "operator": "eq",
+                        "value": fb_rm_detected
+                    })
+                fallback_payload["select"] = []
+                fallback_payload.pop("groupBy", None)
+                fallback_payload.pop("metrics", None)
+                fallback_payload.pop("analytics", None)
+
+            # --- Fleet Master Fallback Post-Processing ---
+            fb_fm_detected = detect_fleet_master(message)
+            if fb_fm_detected:
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "Route", "route", "RouteName", "routeName", "shipmentMethod"))
+                ]
+                fb_has_fm = False
+                for f in fallback_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ("fleetMaster", "fleet_master"):
+                        f["field"] = "fleetMaster"
+                        f["operator"] = "eq"
+                        f["value"] = fb_fm_detected
+                        fb_has_fm = True
+                        break
+                if not fb_has_fm:
+                    fallback_payload.setdefault("filters", []).append({
+                        "field": "fleetMaster",
+                        "operator": "eq",
+                        "value": fb_fm_detected
+                    })
+                fallback_payload["select"] = []
+                fallback_payload.pop("groupBy", None)
+                fallback_payload.pop("metrics", None)
+                fallback_payload.pop("analytics", None)
+
             def _fb_standard_filter_sort_key(flt):
                 if not isinstance(flt, dict):
                     return 99
@@ -6312,6 +6690,8 @@ class IntentDetector:
                     return 3
                 elif field == "runDate" and op == "lte":
                     return 4
+                elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
+                    return 4.5
                 elif field in ("source", "destination", "From", "To"):
                     return 5
                 elif field == "region":

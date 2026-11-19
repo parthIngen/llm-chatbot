@@ -682,6 +682,363 @@ def test_transporter_vehicles_queries_exact_payload_and_reply():
         assert d2 < 0.5, f"Expected fast-path sub-500ms execution, got {d2:.3f}s"
 
 
+def test_secutrak_gps_inactive_exact_payload_and_reply():
+    """
+    Validates exact payload, field order, and response for:
+    'Total Secutrak GPS inactive trips in August 2026'
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [{"total_count": 77152}]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        query = "Total Secutrak GPS inactive trips in August 2026"
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "test-secutrak-inactive-gps",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("analytics") == [{"type": "gps"}]
+        assert entities.get("select") == []
+
+        filters = entities["filters"]
+        field_order = [f.get("field") for f in filters]
+        assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "vendorgps", "gps"], f"Unexpected field order: {field_order}"
+
+        f_map = {f["field"]: f for f in filters if "field" in f}
+        assert f_map["groupId"]["value"] == "0041"
+        assert f_map["tripStatus"]["value"] == "valid"
+        assert f_map["vendorgps"]["value"] == "Secutrak"
+        assert f_map["vendorgps"]["operator"] == "eq"
+        assert f_map["gps"]["value"] == "inactive"
+        assert f_map["gps"]["operator"] == "eq"
+
+        date_filters = [f for f in filters if f.get("field") == "runDate"]
+        assert len(date_filters) == 2
+        assert date_filters[0]["operator"] == "gte"
+        assert date_filters[0]["value"] == "2026-08-01 00:00:00"
+        assert date_filters[1]["operator"] == "lte"
+        assert date_filters[1]["value"] == "2026-08-31 23:59:59"
+
+        reply = res["reply"]
+        assert "Total 77152 valid trips with inactive Fixed GPS found using Secutrak devices" in reply
+        assert "in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59" in reply
+        assert "It does not include cancelled trips." in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+@pytest.mark.parametrize("query,expected_vm", [
+    ("Total trips with vehicle outside of master (Vehicle NA in Vehicle Master) in August 2026", "outside"),
+    ("Total trips with vehicle outside of master in August 2026", "outside"),
+    ("Total trips with Vehicle NA in Vehicle Master in August 2026", "outside"),
+    ("total trips with vehicle inside of master in August 2026", "inside"),
+])
+def test_vehicle_master_queries_exact_payload_and_reply(query, expected_vm):
+    """
+    Validates exact payload, field order, and response for vehicle master queries.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [{"total_count": 500}]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "test-vehicle-master",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("select") == []
+        assert "analytics" not in entities or entities.get("analytics") == []
+
+        filters = entities["filters"]
+        field_order = [f.get("field") for f in filters]
+        assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "vehicleMaster"], f"Unexpected field order: {field_order}"
+
+        f_map = {f["field"]: f for f in filters if "field" in f}
+        assert f_map["groupId"]["value"] == "0041"
+        assert f_map["tripStatus"]["value"] == "valid"
+        assert f_map["vehicleMaster"]["value"] == expected_vm
+        assert f_map["vehicleMaster"]["operator"] == "eq"
+
+        date_filters = [f for f in filters if f.get("field") == "runDate"]
+        assert len(date_filters) == 2
+        assert date_filters[0]["operator"] == "gte"
+        assert date_filters[0]["value"] == "2026-08-01 00:00:00"
+        assert date_filters[1]["operator"] == "lte"
+        assert date_filters[1]["value"] == "2026-08-31 23:59:59"
+
+        reply = res["reply"]
+        assert f"Total 500 valid trips with vehicle {expected_vm} of master found" in reply
+        assert "in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59" in reply
+        assert "It does not include cancelled trips." in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+@pytest.mark.parametrize("query,expected_rm", [
+    ("Total trips with route outside of master (Route NA in Network Module) in August 2026", "outside"),
+    ("Total trips with (Route NA in Network Module in August 2026", "outside"),
+    ("Total trips with route outside of master in August 2026", "outside"),
+    ("Total trips with route inside of master in August 2026", "inside"),
+])
+def test_route_master_queries_exact_payload_and_reply(query, expected_rm):
+    """
+    Validates exact payload, field order, and response for route master queries.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [{"total_count": 500}]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "test-route-master",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("select") == []
+        assert "analytics" not in entities or entities.get("analytics") == []
+
+        filters = entities["filters"]
+        field_order = [f.get("field") for f in filters]
+        assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "routeMaster"], f"Unexpected field order: {field_order}"
+
+        f_map = {f["field"]: f for f in filters if "field" in f}
+        assert f_map["groupId"]["value"] == "0041"
+        assert f_map["tripStatus"]["value"] == "valid"
+        assert f_map["routeMaster"]["value"] == expected_rm
+        assert f_map["routeMaster"]["operator"] == "eq"
+
+        date_filters = [f for f in filters if f.get("field") == "runDate"]
+        assert len(date_filters) == 2
+        assert date_filters[0]["operator"] == "gte"
+        assert date_filters[0]["value"] == "2026-08-01 00:00:00"
+        assert date_filters[1]["operator"] == "lte"
+        assert date_filters[1]["value"] == "2026-08-31 23:59:59"
+
+        reply = res["reply"]
+        assert f"Total 500 valid trips with route {expected_rm} of master found" in reply
+        assert "in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59" in reply
+        assert "It does not include cancelled trips." in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+@pytest.mark.parametrize("query,expected_fm", [
+    ("Total trips with fleet outside of master (Fleet NA in Network Module) in August 2026", "outside"),
+    ("Total trips with fleet outside of master in August 2026", "outside"),
+    ("Total trips with Fleet NA in Network Module in August 2026", "outside"),
+    ("Total trips with fleet inside of master in August 2026", "inside"),
+    ("Total trips with fleet in Network Module in August 2026", "inside"),
+])
+def test_fleet_master_queries_exact_payload_and_reply(query, expected_fm):
+    """
+    Validates exact payload, field order, and response for fleet master queries.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [{"total_count": 500}]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "test-fleet-master",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("select") == []
+        assert "analytics" not in entities or entities.get("analytics") == []
+
+        filters = entities["filters"]
+        field_order = [f.get("field") for f in filters]
+        assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "fleetMaster"], f"Unexpected field order: {field_order}"
+
+        f_map = {f["field"]: f for f in filters if "field" in f}
+        assert f_map["groupId"]["value"] == "0041"
+        assert f_map["tripStatus"]["value"] == "valid"
+        assert f_map["fleetMaster"]["value"] == expected_fm
+        assert f_map["fleetMaster"]["operator"] == "eq"
+
+        date_filters = [f for f in filters if f.get("field") == "runDate"]
+        assert len(date_filters) == 2
+        assert date_filters[0]["operator"] == "gte"
+        assert date_filters[0]["value"] == "2026-08-01 00:00:00"
+        assert date_filters[1]["operator"] == "lte"
+        assert date_filters[1]["value"] == "2026-08-31 23:59:59"
+
+        reply = res["reply"]
+        assert f"Total 500 valid trips with fleet {expected_fm} of master found" in reply
+        assert "in date range from 2026-08-01 00:00:00 to 2026-08-31 23:59:59" in reply
+        assert "It does not include cancelled trips." in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+@pytest.mark.parametrize("query", [
+    "share the report of the shipment 12543311",
+    "share the details of the shipment 12543311",
+    "show the report of the shipment 12543311",
+    "share the report of the trip id 12543311",
+    "information of trip id 12543311",
+    "12543311 trip id details",
+    "12543311 shipment number details",
+])
+def test_shipment_details_exact_payload_and_reply(query):
+    """
+    Validates exact payload, find operation, and natural language summary for single shipment lookup.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [
+            {
+                "_id": {"$oid": "6af24a0e291e6d387e097cc8"},
+                "source_code": "PLW",
+                "route_name": "PLW-BDW-ASL",
+                "region_code": "WEST",
+                "destination_name": "BDE-ASL - (ASLALI WAREHOUSE)",
+                "trip_type": 1,
+                "shipment_no": "12543311",
+                "schedule_departure": "2026-11-10 06:00:00",
+                "schedule_arrival": "2026-11-11 15:00:00",
+                "vehicle_no": "GJ27TD6497",
+                "driver_name": "bablu",
+                "shipment_method": "SFC_Network",
+                "transporter_name": "SHREE G.K. FREIGHT CARRIER",
+                "actual_destination_arrival_time": "2026-11-19 08:38",
+                "actual_source_departure_time": "",
+                "trip_status": 0
+            }
+        ]
+    }
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "test-shipment-details",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "find"
+        assert entities.get("select") == []
+        assert "analytics" not in entities or entities.get("analytics") == []
+        assert "groupBy" not in entities
+        assert "metrics" not in entities
+
+        filters = entities["filters"]
+        f_map = {f["field"]: f for f in filters if "field" in f}
+        assert f_map["groupId"]["value"] == "0041"
+        assert f_map["groupId"]["operator"] == "eq"
+        assert f_map["shipmentNo"]["value"] == "12543311"
+        assert f_map["shipmentNo"]["operator"] == "eq"
+        assert len(filters) == 2
+
+        reply = res["reply"]
+        assert "PLW" in reply
+        assert "PLW-BDW-ASL" in reply
+        assert "WEST" in reply
+        assert "BDE-ASL - (ASLALI WAREHOUSE)" in reply
+        assert "1" in reply
+        assert "2026-11-10 06:00:00" in reply
+        assert "2026-11-11 15:00:00" in reply
+        assert "GJ27TD6497" in reply
+        assert "bablu" in reply
+        assert "SFC_Network" in reply
+        assert "SHREE G.K. FREIGHT CARRIER" in reply
+        assert "2026-11-19 08:38" in reply
+        assert "N/A" in reply
+        assert "closed" in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+
+
+
+
 
 
 

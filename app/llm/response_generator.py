@@ -41,7 +41,9 @@ def build_natural_response(
     # Handle analytics (e.g. delayed departure/arrival)
     for a in analytics:
         if isinstance(a, dict) and "type" in a:
-            filter_map[a["type"]] = True
+            t = a["type"]
+            filter_map.setdefault(t, True)
+            filter_map[f"analytics_{t}"] = True
 
     # Date clause
     date_clause = ""
@@ -348,6 +350,27 @@ def build_natural_response(
         if gps not in ("active", "inactive"):
             device_qualifiers.append("with Fixed GPS")
 
+    # Vehicle Master qualifier
+    vm_val = str(filter_map.get("vehicleMaster") or filter_map.get("vehicle_master", "")).lower().strip()
+    if vm_val == "outside":
+        device_qualifiers.append("with vehicle outside of master")
+    elif vm_val == "inside":
+        device_qualifiers.append("with vehicle inside of master")
+
+    # Route Master qualifier
+    rm_val = str(filter_map.get("routeMaster") or filter_map.get("route_master", "")).lower().strip()
+    if rm_val == "outside":
+        device_qualifiers.append("with route outside of master")
+    elif rm_val == "inside":
+        device_qualifiers.append("with route inside of master")
+
+    # Fleet Master qualifier
+    fm_val = str(filter_map.get("fleetMaster") or filter_map.get("fleet_master", "")).lower().strip()
+    if fm_val == "outside":
+        device_qualifiers.append("with fleet outside of master")
+    elif fm_val == "inside":
+        device_qualifiers.append("with fleet inside of master")
+
     # Contextual qualifiers (Locations, route, vehicle, transporter, region, vendor)
     context_qualifiers = []
     if from_loc and to_loc:
@@ -453,6 +476,90 @@ class ResponseGenerator:
             api_data = api_result
         else:
             api_data = api_result
+
+        # Single shipment / trip lookup formatting
+        is_shipment_find = (
+            (entities.get("operation") == "find" if entities else False)
+            or (any(isinstance(f, dict) and f.get("field") in ("shipmentNo", "shipment_no") for f in (entities.get("filters", []) if entities else [])))
+        )
+        if not is_shipment_find and message:
+            from app.llm.intent_detector import extract_single_shipment_lookup
+            if extract_single_shipment_lookup(message):
+                is_shipment_find = True
+
+        if is_shipment_find:
+            records = []
+            if isinstance(api_data, list):
+                records = api_data
+            elif isinstance(api_data, dict):
+                records = [api_data]
+
+            shipment_no = None
+            if entities and "filters" in entities:
+                for f in entities["filters"]:
+                    if isinstance(f, dict) and f.get("field") in ("shipmentNo", "shipment_no"):
+                        shipment_no = str(f.get("value"))
+                        break
+            if not shipment_no and message:
+                from app.llm.intent_detector import extract_single_shipment_lookup
+                shipment_no = extract_single_shipment_lookup(message)
+
+            if not records or not isinstance(records[0], dict):
+                s_label = f" for shipment {shipment_no}" if shipment_no else ""
+                return f"No shipment details found{s_label}."
+
+            trip = records[0]
+
+            def _clean(val):
+                if val is None:
+                    return "N/A"
+                s = str(val).strip()
+                return s if s else "N/A"
+
+            source_code = _clean(trip.get("source_code") or trip.get("sourceCode"))
+            route_name = _clean(trip.get("route_name") or trip.get("routeName"))
+            region_code = _clean(trip.get("region_code") or trip.get("regionCode") or trip.get("region"))
+            destination_name = _clean(trip.get("destination_name") or trip.get("destinationName"))
+            trip_type = _clean(trip.get("trip_type") or trip.get("tripType"))
+            schedule_departure = _clean(trip.get("schedule_departure") or trip.get("scheduleDeparture"))
+            schedule_arrival = _clean(trip.get("schedule_arrival") or trip.get("scheduleArrival"))
+            vehicle_no = _clean(trip.get("vehicle_no") or trip.get("vehicleNo"))
+            driver_name = _clean(trip.get("driver_name") or trip.get("driverName"))
+            shipment_method = _clean(trip.get("shipment_method") or trip.get("shipmentMethod"))
+            transporter_name = _clean(trip.get("transporter_name") or trip.get("transporterName") or trip.get("transporter"))
+            actual_destination_arrival_time = _clean(trip.get("actual_destination_arrival_time") or trip.get("actualDestinationArrivalTime"))
+            actual_source_departure_time = _clean(trip.get("actual_source_departure_time") or trip.get("actualSourceDepartureTime"))
+
+            raw_status = trip.get("trip_status") if "trip_status" in trip else trip.get("tripStatus")
+            if raw_status in (1, "1", "running", "Active", "active"):
+                trip_status = "running"
+            elif raw_status in (0, "0", "closed", "InActive", "inactive", "Completed", "completed"):
+                trip_status = "closed"
+            elif raw_status is not None and str(raw_status).strip():
+                trip_status = str(raw_status).strip()
+            else:
+                trip_status = "N/A"
+
+            s_id = shipment_no or trip.get("shipment_no") or trip.get("shipmentNo") or ""
+            header = f"Here is the summary details for shipment {s_id}:" if s_id else "Here is the summary details:"
+
+            return (
+                f"{header}\n\n"
+                f"- **Source Code**: {source_code}\n"
+                f"- **Route Name**: {route_name}\n"
+                f"- **Region Code**: {region_code}\n"
+                f"- **Destination Name**: {destination_name}\n"
+                f"- **Trip Type**: {trip_type}\n"
+                f"- **Schedule Departure**: {schedule_departure}\n"
+                f"- **Schedule Arrival**: {schedule_arrival}\n"
+                f"- **Vehicle No**: {vehicle_no}\n"
+                f"- **Driver Name**: {driver_name}\n"
+                f"- **Shipment Method**: {shipment_method}\n"
+                f"- **Transporter Name**: {transporter_name}\n"
+                f"- **Actual Destination Arrival Time**: {actual_destination_arrival_time}\n"
+                f"- **Actual Source Departure Time**: {actual_source_departure_time}\n"
+                f"- **Trip Status**: {trip_status}"
+            )
 
         start_date = None
         end_date = None

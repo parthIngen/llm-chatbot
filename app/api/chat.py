@@ -257,7 +257,12 @@ async def chat_endpoint(
                 ))
             )
 
-            if not is_active_trip_query:
+            is_shipment_find = (
+                entities.get("operation") == "find"
+                or any(isinstance(f, dict) and f.get("field") in ("shipmentNo", "shipment_no") for f in filters)
+            )
+
+            if not is_active_trip_query and not is_shipment_find:
                 for f in filters:
                     if isinstance(f, dict) and f.get("field") == "runDate":
                         op = f.get("operator")

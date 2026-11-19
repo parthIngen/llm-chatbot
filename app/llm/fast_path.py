@@ -95,6 +95,15 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b', msg_l)):
         return True
+    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master, extract_single_shipment_lookup
+    if detect_vehicle_master(message) is not None:
+        return True
+    if detect_route_master(message) is not None:
+        return True
+    if detect_fleet_master(message) is not None:
+        return True
+    if extract_single_shipment_lookup(message) is not None:
+        return True
 
     return False
 
@@ -106,6 +115,27 @@ def build_fast_path_payload(
     Constructs an initial structured query payload for queries that can be confidently resolved.
     Returns None if the query cannot be confidently resolved without an LLM.
     """
+    from app.llm.intent_detector import extract_single_shipment_lookup
+    single_shp = extract_single_shipment_lookup(message)
+    if single_shp:
+        return {
+            "entity": "trip",
+            "operation": "find",
+            "filters": [
+                {
+                    "field": "groupId",
+                    "operator": "eq",
+                    "value": "0041"
+                },
+                {
+                    "field": "shipmentNo",
+                    "operator": "eq",
+                    "value": single_shp
+                }
+            ],
+            "select": []
+        }
+
     if not can_resolve_fast_path(message):
         return None
 
@@ -214,6 +244,8 @@ def build_fast_path_payload(
     if vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint"]:
         is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
         is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
+        has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_l))
+        has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_l))
 
         if is_fixed_elock_v:
             v_field = "vendorfixedelock"
@@ -228,14 +260,29 @@ def build_fast_path_payload(
         payload["filters"] = [
             f for f in payload["filters"]
             if not (isinstance(f, dict) and f.get("field") in [
-                "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                "GPS", "FixedGPS", "gps", "fixedgps", "FixedELock", "PortableELock",
                 "vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"
             ])
         ]
         payload["filters"].append({"field": v_field, "operator": "contains", "value": vendor})
+        if v_field == "vendorgps":
+            if has_gps_inactive:
+                payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+            elif has_gps_active:
+                payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
     elif vendor == "Wheelseye":
         is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
         is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
+        has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_l))
+        has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_l))
+
+        payload["filters"] = [
+            f for f in payload["filters"]
+            if not (isinstance(f, dict) and f.get("field") in [
+                "GPS", "FixedGPS", "gps", "fixedgps", "FixedELock", "PortableELock",
+                "vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"
+            ])
+        ]
         if is_fixed_elock_v:
             payload["analytics"] = [{"type": "fixedlock"}]
             payload["filters"].append({"field": "vendorfixedelock", "operator": "contains", "value": "Wheelseye"})
@@ -245,11 +292,25 @@ def build_fast_path_payload(
         elif bool(re.search(r'\bgps\b', msg_l)):
             payload["analytics"] = [{"type": "gps"}]
             payload["filters"].append({"field": "vendorgps", "operator": "contains", "value": "Wheelseye"})
+            if has_gps_inactive:
+                payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+            elif has_gps_active:
+                payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
         else:
             payload["filters"].append({"field": "vendor", "operator": "contains", "value": "Wheelseye"})
     elif vendor == "Secutrak":
         is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
         is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
+        has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_l))
+        has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_l))
+
+        payload["filters"] = [
+            f for f in payload["filters"]
+            if not (isinstance(f, dict) and f.get("field") in [
+                "GPS", "FixedGPS", "gps", "fixedgps", "FixedELock", "PortableELock",
+                "vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"
+            ])
+        ]
         if is_fixed_elock_v:
             payload["analytics"] = [{"type": "fixedlock"}]
             payload["filters"].append({"field": "vendorfixedelock", "operator": "eq", "value": "Secutrak"})
@@ -259,11 +320,25 @@ def build_fast_path_payload(
         elif bool(re.search(r'\bgps\b', msg_l)):
             payload["analytics"] = [{"type": "gps"}]
             payload["filters"].append({"field": "vendorgps", "operator": "eq", "value": "Secutrak"})
+            if has_gps_inactive:
+                payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+            elif has_gps_active:
+                payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
         else:
             payload["filters"].append({"field": "vendor", "operator": "eq", "value": "Secutrak"})
     elif vendor == "ThirdParty":
         is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
         is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
+        has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_l))
+        has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_l))
+
+        payload["filters"] = [
+            f for f in payload["filters"]
+            if not (isinstance(f, dict) and f.get("field") in [
+                "GPS", "FixedGPS", "gps", "fixedgps", "FixedELock", "PortableELock",
+                "vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"
+            ])
+        ]
         if is_fixed_elock_v:
             payload["analytics"] = [{"type": "fixedlock"}]
             payload["filters"].append({"field": "vendorfixedelock", "operator": "eq", "value": "ThirdParty"})
@@ -273,6 +348,10 @@ def build_fast_path_payload(
         elif bool(re.search(r'\bgps\b', msg_l)):
             payload["analytics"] = [{"type": "gps"}]
             payload["filters"].append({"field": "vendorgps", "operator": "eq", "value": "ThirdParty"})
+            if has_gps_inactive:
+                payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+            elif has_gps_active:
+                payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
         else:
             payload["filters"].append({"field": "vendor", "operator": "eq", "value": "ThirdParty"})
 
@@ -339,12 +418,42 @@ def build_fast_path_payload(
         veh_no = re.sub(r'\s+', '', veh_match.group(1)).upper()
         payload["filters"].append({"field": "vehicleNo", "operator": "eq", "value": "UP32AB1234" if "UP32AB1234" in veh_no else veh_no})
 
+    # 6b. Vehicle Master, Route Master & Fleet Master
+    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master
+    vm = detect_vehicle_master(message)
+    if vm:
+        payload["filters"].append({"field": "vehicleMaster", "operator": "eq", "value": vm})
+    rm = detect_route_master(message)
+    if rm:
+        payload["filters"] = [
+            f for f in payload.get("filters", [])
+            if not (isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master", "fleetMaster", "fleet_master", "Route", "route", "RouteName", "routeName", "shipmentMethod"))
+        ]
+        payload["filters"].append({"field": "routeMaster", "operator": "eq", "value": rm})
+        payload.pop("groupBy", None)
+        payload.pop("metrics", None)
+        payload.pop("analytics", None)
+    fm = detect_fleet_master(message)
+    if fm:
+        payload["filters"] = [
+            f for f in payload.get("filters", [])
+            if not (isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "Route", "route", "RouteName", "routeName", "shipmentMethod"))
+        ]
+        payload["filters"].append({"field": "fleetMaster", "operator": "eq", "value": fm})
+        payload.pop("groupBy", None)
+        payload.pop("metrics", None)
+        payload.pop("analytics", None)
+
     # 7. Trip status
     has_status_filter = any(f.get("field") == "tripStatus" for f in payload["filters"])
     if not has_status_filter:
         if bool(re.search(r'\b(?:running|in[\s-]transit|live|active\s+trips?)\b', msg_l)):
             payload["filters"].append({"field": "tripStatus", "operator": "eq", "value": "running"})
-        elif bool(re.search(r'\b(?:closed|completed|inactive\s+trips?)\b', msg_l)):
+        elif bool(re.search(r'\b(?:closed|completed)\b', msg_l)) or (
+            bool(re.search(r'\binactive\s+trips?\b', msg_l))
+            and not bool(re.search(r'\b(?:gps|fixed[\s-]gps|lock|elock|e-lock|portable|fixed|device)\s+inactive\s+trips?\b', msg_l))
+            and not bool(re.search(r'\binactive\s+(?:fixed[\s-]?)?gps\b', msg_l))
+        ):
             payload["filters"].append({"field": "tripStatus", "operator": "eq", "value": "InActive"})
         elif bool(re.search(r'\bcancel(?:led)?\s+trips?\b', msg_l)):
             payload["filters"].append({"field": "tripStatus", "operator": "eq", "value": "cancelled"})
