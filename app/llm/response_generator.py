@@ -86,7 +86,9 @@ def build_natural_response(
         is_operating_on_field = "operating on the field" in msg_lower or "on the field" in msg_lower
 
         is_active_vehicle = "active" in msg_lower or trip_status == "active"
-        if is_operating_on_field:
+        if "on trip" in msg_lower or "on trips" in msg_lower or "was on trip" in msg_lower:
+            base_entity = "vehicles were on trip"
+        elif is_operating_on_field:
             base_entity = "active vehicles operating on the field"
         elif is_active_vehicle:
             base_entity = "active vehicles"
@@ -133,7 +135,10 @@ def build_natural_response(
 
         # Transporter
         if transporter:
-            post_qualifiers.append(f"used by transporter {transporter}")
+            if "vehicles were on trip" in base_entity:
+                post_qualifiers.append(f"for the transporter {transporter}")
+            else:
+                post_qualifiers.append(f"used by transporter {transporter}")
         elif not post_qualifiers and "distinct" in base_entity:
             post_qualifiers.append("used")
 
@@ -157,7 +162,10 @@ def build_natural_response(
             parts.extend(post_qualifiers)
         if date_clause:
             parts.append(date_clause)
-        return " ".join(parts).strip() + "."
+        resp = " ".join(parts).strip() + "."
+        if trip_status == "valid":
+            resp += " It does not include cancelled trips."
+        return resp
 
     # 3. Regular Trips
     trip_status = str(filter_map.get("tripStatus", "")).lower()
@@ -448,6 +456,7 @@ class ResponseGenerator:
 
         start_date = None
         end_date = None
+        msg_l = message.lower() if message else ""
         if entities and "filters" in entities:
             for f in entities["filters"]:
                 if isinstance(f, dict) and f.get("field") == "runDate":
@@ -491,7 +500,10 @@ class ResponseGenerator:
             or (
                 isinstance(api_data, list)
                 and len(api_data) > 0
-                and any(isinstance(row, dict) and ("tripType" in row or "tripTypeName" in row or "region" in row or "priority" in row or "tripPriorityName" in row) for row in api_data)
+                and (
+                    any(isinstance(row, dict) and ("tripType" in row or "tripTypeName" in row or "region" in row or "priority" in row or "tripPriorityName" in row) for row in api_data)
+                    or ((entities.get("groupBy") == ["shipmentMethod"] if entities else False) and any(isinstance(row, dict) and ("shipmentMethod" in row or "shipment_method" in row) for row in api_data))
+                )
             )
         )
         if isinstance(api_data, list) and len(api_data) > 0 and all(isinstance(row, dict) for row in api_data) and not _is_specialized_grouped_result:
@@ -653,6 +665,65 @@ class ResponseGenerator:
             status_note = " It does not include cancelled trips." if trip_status == "valid" else ""
             return f"Trip counts by region{date_clause}: {breakdown_str}.{status_note}"
 
+        # Detect shipment method breakdown grouped result (e.g. trip count across major feeder types / route types / shipment methods):
+        _is_shipment_method_breakdown_result = (
+            isinstance(api_data, list)
+            and len(api_data) > 0
+            and (entities.get("groupBy") == ["shipmentMethod"] if entities else False)
+            and any(isinstance(row, dict) and ("shipmentMethod" in row or "shipment_method" in row) for row in api_data)
+        )
+        if _is_shipment_method_breakdown_result:
+            sm_counts: Dict[str, int] = {}
+            for row in api_data:
+                if not isinstance(row, dict):
+                    continue
+                cnt = (
+                    row.get("trip_count")
+                    or row.get("count")
+                    or row.get("Shipments")
+                    or row.get("shipments")
+                    or row.get("total_count")
+                    or row.get("Feeder_trips")
+                    or 0
+                )
+                raw_sm = row.get("shipmentMethod") or row.get("shipment_method")
+                if raw_sm is not None and str(raw_sm).strip() != "":
+                    sm_name = str(raw_sm).strip()
+                    sm_counts[sm_name] = sm_counts.get(sm_name, 0) + cnt
+
+            # Sort by count descending
+            sorted_sm = sorted(sm_counts.items(), key=lambda x: x[1], reverse=True)
+            breakdown_items = [f"{sm} is {cnt}" for sm, cnt in sorted_sm]
+            if len(breakdown_items) > 1:
+                breakdown_str = ", ".join(breakdown_items[:-1]) + f", and {breakdown_items[-1]}"
+            elif breakdown_items:
+                breakdown_str = breakdown_items[0]
+            else:
+                breakdown_str = "no trips found"
+
+            date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+            trip_status = "valid"
+            if entities and "filters" in entities:
+                for f in entities["filters"]:
+                    if isinstance(f, dict) and f.get("field") == "tripStatus":
+                        trip_status = str(f.get("value", "valid")).lower()
+                        break
+
+            status_note = " It does not include cancelled trips." if trip_status == "valid" else ""
+
+            if "breakdown" in msg_l:
+                intro = f"Trip breakdown across shipment methods{date_clause}"
+            elif "vs" in msg_l or "v/s" in msg_l or "compare" in msg_l:
+                intro = f"Trip comparison across shipment methods{date_clause}"
+            elif "feeder" in msg_l and ("types" in msg_l or "major" in msg_l or "across" in msg_l):
+                intro = f"Trip counts across feeder types{date_clause}"
+            elif "route" in msg_l and ("types" in msg_l or "major" in msg_l or "across" in msg_l):
+                intro = f"Trip counts across route types{date_clause}"
+            else:
+                intro = f"Trip counts across shipment methods{date_clause}"
+
+            return f"{intro}: {breakdown_str}.{status_note}"
+
         # Detect priority breakdown/comparison grouped result (e.g. High Priority vs Standard / Normal):
         _is_priority_breakdown_result = (
             isinstance(api_data, list)
@@ -715,7 +786,43 @@ class ResponseGenerator:
         )
 
         # Fast-path: Instant 0ms response formatting for simple count queries and known analytics
-        if _is_distinct_transporter_result or _is_distinct_vehicle_result:
+        if _is_distinct_transporter_result:
+            return natural_formatted_response
+
+        if _is_distinct_vehicle_result:
+            vehicle_list = [
+                str(r.get("vehicleNo"))
+                for r in api_data
+                if isinstance(r, dict) and r.get("vehicleNo")
+            ]
+            is_list_query = bool(
+                re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b|\b(?:lis|list)\s+vehicles?\b|\b(?:which|show\s+all|get\s+all)\s+vehicles?\b', msg_l)
+                or (re.search(r'\b(?:lis|list)\b', msg_l) and not re.search(r'\b(?:how\s+many|count\s+of|total\s+count|count)\b', msg_l))
+            )
+            if is_list_query and vehicle_list:
+                total_veh = len(vehicle_list)
+                transporter_val = None
+                if entities and "filters" in entities:
+                    for f in entities["filters"]:
+                        if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                            transporter_val = f.get("value")
+                            break
+
+                date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+                trans_clause = f" for the transporter {transporter_val}" if transporter_val else ""
+
+                if total_veh <= 10:
+                    lines = [f"Total {total_veh} vehicles were on trip{trans_clause}{date_clause}:"]
+                    for idx, v_no in enumerate(vehicle_list, 1):
+                        lines.append(f"{idx}. {v_no}")
+                    return "\n".join(lines)
+                else:
+                    lines = [f"Total {total_veh} vehicles were on trip{trans_clause}{date_clause}. Here is the list of first 10 vehicles:"]
+                    for idx, v_no in enumerate(vehicle_list[:10], 1):
+                        lines.append(f"{idx}. {v_no}")
+                    lines.append(f"\nShowing first 10 of {total_veh} vehicles. Download complete Excel list: {{DOWNLOAD_URL}}")
+                    return "\n".join(lines)
+
             return natural_formatted_response
 
         if not _is_detailed_trip_list:

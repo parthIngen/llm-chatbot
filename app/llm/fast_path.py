@@ -49,14 +49,18 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:secutrak|wheelseye)\s+gps\b', msg_l)):
+    if bool(re.search(r'\b(?:secutrak_tp|secutrak|wheelseye|fleetx|axestrack|gtropy|eicher|g[\s-]?trac|ashok|tata|kiasaint)\b', msg_l)):
         return True
 
     # 6. E-Lock queries
     if bool(re.search(r'\b(?:trips\s+with\s+fixed\s+e[\s-]?lock|inactive\s+portable\s+e[\s-]?lock|active\s+fixed\s+e[\s-]?lock)\b', msg_l)):
         return True
+    if bool(re.search(r'\b(?:fixed[\s-]e[\s-]?locks?|portable[\s-]e[\s-]?locks?)\b', msg_l)) and bool(re.search(r'\btrips?\b', msg_l)):
+        return True
 
     # 7. Comparisons and grouped analytics
+    if bool(re.search(r'\b(?:across|by|in|each|all|breakdown)\s+(?:major\s+)?(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_l)) or bool(re.search(r'\b(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\s+breakdown\b', msg_l)) or bool(re.search(r'\btrip\s+count\s+across\s+(?:major\s+)?(?:feeder|route|shipment)\b', msg_l)) or bool(re.search(r'\bmajor\s+(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_l)):
+        return True
     if bool(re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or)\s+local\b|\bintercity\s+(?:vs\.?|versus|and|or)\s+intracity\b|\bcompare\s+network\s+and\s+local\b', msg_l)):
         return True
     if bool(re.search(r'\b(?:in\s+each\s+region|region[\s-]wise|by\s+region|each\s+region)\b', msg_l)):
@@ -71,9 +75,10 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
 
     # 9. Shipment method specific trip queries
-    if bool(re.search(r'\b(?:feeder|empty|surface|sfc|speed|air|delivery|pickup|pick[\s-]?up)\b', msg_l)) and bool(re.search(r'\btrips?\b', msg_l)):
-        if not bool(re.search(r'\b(?:vs\.?|versus|compare)\b', msg_l)):
-            return True
+    if bool(re.search(r'\b(?:feeder|empty|surface|sfc|speed|air|delivery|pickup|pick[\s-]?up|comm[\s/_-]*bz[\s/_-]*(?:out|in))\b', msg_l)) and bool(re.search(r'\btrips?\b', msg_l)):
+        return True
+    if bool(re.search(r'\bbreakdown\s+of\s+trips\b|\btrips\s+that\s+were\b', msg_l)):
+        return True
 
     # 10. Basic trip counts & status
     if bool(re.search(r'\b(?:running|active|closed|cancelled|valid)\s+trips\b', msg_l)):
@@ -85,6 +90,10 @@ def can_resolve_fast_path(message: str) -> bool:
     if bool(re.search(r'\btrips\s+for\s+vehicle\s+[a-z0-9_-]+\b', msg_l)):
         return True
     if bool(re.search(r'\btrips\s+for\s+transporter\s+[a-z0-9_\s-]+\b', msg_l)):
+        return True
+    if bool(re.search(r'\b(?:vehicles?|veh)\b', msg_l)) and bool(re.search(r'\btransporters?\b', msg_l)):
+        return True
+    if bool(re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b', msg_l)):
         return True
 
     return False
@@ -200,15 +209,97 @@ def build_fast_path_payload(
         payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
 
     # 4. Vendors
-    if bool(re.search(r'\bsecutrak\b|\bicici\b|\bilgic\b', msg_l)):
-        payload["filters"].append({"field": "vendor", "operator": "eq", "value": "Secutrak"})
-    elif bool(re.search(r'\bwheelseye\b', msg_l)):
-        payload["filters"].append({"field": "vendor", "operator": "contains", "value": "Wheelseye"})
-    elif bool(re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_l)):
-        payload["filters"].append({"field": "vendor", "operator": "eq", "value": "ThirdParty"})
+    from app.llm.intent_detector import extract_device_vendor
+    vendor = extract_device_vendor(message)
+    if vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint"]:
+        is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
+        is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
+
+        if is_fixed_elock_v:
+            v_field = "vendorfixedelock"
+            payload["analytics"] = [{"type": "fixedlock"}]
+        elif is_portable_elock_v:
+            v_field = "vendorportableelock"
+            payload["analytics"] = [{"type": "portablelock"}]
+        else:
+            v_field = "vendorgps"
+            payload["analytics"] = [{"type": "gps"}]
+
+        payload["filters"] = [
+            f for f in payload["filters"]
+            if not (isinstance(f, dict) and f.get("field") in [
+                "GPS", "FixedGPS", "FixedELock", "PortableELock",
+                "vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"
+            ])
+        ]
+        payload["filters"].append({"field": v_field, "operator": "contains", "value": vendor})
+    elif vendor == "Wheelseye":
+        is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
+        is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
+        if is_fixed_elock_v:
+            payload["analytics"] = [{"type": "fixedlock"}]
+            payload["filters"].append({"field": "vendorfixedelock", "operator": "contains", "value": "Wheelseye"})
+        elif is_portable_elock_v:
+            payload["analytics"] = [{"type": "portablelock"}]
+            payload["filters"].append({"field": "vendorportableelock", "operator": "contains", "value": "Wheelseye"})
+        elif bool(re.search(r'\bgps\b', msg_l)):
+            payload["analytics"] = [{"type": "gps"}]
+            payload["filters"].append({"field": "vendorgps", "operator": "contains", "value": "Wheelseye"})
+        else:
+            payload["filters"].append({"field": "vendor", "operator": "contains", "value": "Wheelseye"})
+    elif vendor == "Secutrak":
+        is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
+        is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
+        if is_fixed_elock_v:
+            payload["analytics"] = [{"type": "fixedlock"}]
+            payload["filters"].append({"field": "vendorfixedelock", "operator": "eq", "value": "Secutrak"})
+        elif is_portable_elock_v:
+            payload["analytics"] = [{"type": "portablelock"}]
+            payload["filters"].append({"field": "vendorportableelock", "operator": "eq", "value": "Secutrak"})
+        elif bool(re.search(r'\bgps\b', msg_l)):
+            payload["analytics"] = [{"type": "gps"}]
+            payload["filters"].append({"field": "vendorgps", "operator": "eq", "value": "Secutrak"})
+        else:
+            payload["filters"].append({"field": "vendor", "operator": "eq", "value": "Secutrak"})
+    elif vendor == "ThirdParty":
+        is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
+        is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
+        if is_fixed_elock_v:
+            payload["analytics"] = [{"type": "fixedlock"}]
+            payload["filters"].append({"field": "vendorfixedelock", "operator": "eq", "value": "ThirdParty"})
+        elif is_portable_elock_v:
+            payload["analytics"] = [{"type": "portablelock"}]
+            payload["filters"].append({"field": "vendorportableelock", "operator": "eq", "value": "ThirdParty"})
+        elif bool(re.search(r'\bgps\b', msg_l)):
+            payload["analytics"] = [{"type": "gps"}]
+            payload["filters"].append({"field": "vendorgps", "operator": "eq", "value": "ThirdParty"})
+        else:
+            payload["filters"].append({"field": "vendor", "operator": "eq", "value": "ThirdParty"})
 
     # 5. Comparisons and Grouping
-    if bool(re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or)\s+local\b|\bintercity\s+(?:vs\.?|versus|and|or)\s+intracity\b|\bcompare\s+network\s+and\s+local\b', msg_l)):
+    _is_sm_breakdown = bool(re.search(r'\b(?:across|by|in|each|all|breakdown)\s+(?:major\s+)?(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_l)) or bool(re.search(r'\b(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\s+breakdown\b', msg_l)) or bool(re.search(r'\btrip\s+count\s+across\s+(?:major\s+)?(?:feeder|route|shipment)\b', msg_l)) or bool(re.search(r'\bmajor\s+(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_l))
+
+    from app.llm.intent_detector import detect_shipment_methods
+    sms = detect_shipment_methods(message)
+    if _is_sm_breakdown:
+        payload["groupBy"] = ["shipmentMethod"]
+        payload["metrics"] = [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}]
+    elif sms and not bool(re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or)\s+local\b|\bintercity\s+(?:vs\.?|versus|and|or)\s+intracity\b', msg_l)):
+        if len(sms) > 1:
+            payload["filters"].append({
+                "field": "shipmentMethod",
+                "operator": "in",
+                "value": sms
+            })
+            payload["groupBy"] = ["shipmentMethod"]
+            payload["metrics"] = [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}]
+        else:
+            payload["filters"].append({
+                "field": "shipmentMethod",
+                "operator": "eq",
+                "value": sms[0]
+            })
+    elif bool(re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or)\s+local\b|\bintercity\s+(?:vs\.?|versus|and|or)\s+intracity\b|\bcompare\s+network\s+and\s+local\b', msg_l)):
         payload["groupBy"] = ["tripType"]
         payload["metrics"] = [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
     elif bool(re.search(r'\b(?:in\s+each\s+region|region[\s-]wise|by\s+region|each\s+region)\b', msg_l)):
@@ -222,9 +313,25 @@ def build_fast_path_payload(
         payload["metrics"] = [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]
     elif bool(re.search(r'\b(?:unique\s+vehicles?|distinct\s+vehicles?|active\s+vehicles\s+operating\s+on\s+the\s+field)\b', msg_l)) or (
         bool(re.search(r'\bvehicles?\b', msg_l)) and bool(re.search(r'\b(?:gps|e[\s-]?lock)\b', msg_l))
+    ) or (
+        bool(re.search(r'\b(?:vehicles?|veh)\b', msg_l)) and bool(re.search(r'\btransporters?\b', msg_l))
     ):
         payload["groupBy"] = ["vehicleNo"]
         payload["metrics"] = [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+
+    from app.llm.intent_detector import extract_specific_transporter
+    spec_transporter = extract_specific_transporter(message)
+    if spec_transporter:
+        trans_exists = False
+        for f in payload["filters"]:
+            if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                f["field"] = "transporter"
+                f["operator"] = "eq"
+                f["value"] = spec_transporter
+                trans_exists = True
+                break
+        if not trans_exists:
+            payload["filters"].append({"field": "transporter", "operator": "eq", "value": spec_transporter})
 
     # 6. Specific vehicle number filter
     veh_match = re.search(r'\b([A-Z]{2}\s*\d{1,2}\s*[A-Z]{1,3}\s*\d{4})\b', message)

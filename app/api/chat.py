@@ -356,12 +356,20 @@ async def chat_endpoint(
                 reply = f"I found {len(records)} trip details matching your query."
         response_generation_time = time.perf_counter() - t_resp_start
 
-        # Append plain text download link and card if download was requested and link isn't already included
+        # Append plain text download link and card if download was requested or if list query returned > 10 items
         is_download_request = any(w in request.message.lower() for w in ["download", "export", "excel", "sheet", "csv", "xlsx", "file"])
-        if download_url and is_download_request:
-            if download_url not in reply:
+        is_list_query = bool(
+            re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b|\b(?:lis|list)\s+vehicles?\b|\b(?:which|show\s+all|get\s+all)\s+vehicles?\b', request.message.lower())
+            or (re.search(r'\b(?:lis|list)\b', request.message.lower()) and not re.search(r'\b(?:how\s+many|count\s+of|total\s+count|count)\b', request.message.lower()))
+        )
+        if download_url:
+            if "{DOWNLOAD_URL}" in reply:
                 card_html = render_download_card_html(download_url, len(records))
-                reply = reply.strip() + f"\n\nDownload Excel report: {download_url}\n{card_html}"
+                reply = reply.replace("{DOWNLOAD_URL}", f"{download_url}\n{card_html}")
+            elif is_download_request or (is_list_query and len(records) > 10):
+                if download_url not in reply:
+                    card_html = render_download_card_html(download_url, len(records))
+                    reply = reply.strip() + f"\n\nDownload Excel report: {download_url}\n{card_html}"
 
         total_chat_time = time.perf_counter() - t_chat_start
         debug_info["timings"] = {

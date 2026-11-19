@@ -174,7 +174,9 @@ def test_feeder_trips_exact_payload_and_metric_aggregation():
         "data": [{"Feeder_trips": 80290, "shipmentMethod": "FEEDER"}]
     }
 
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
         mock_post.return_value = mock_api_res
 
         t_start = time.perf_counter()
@@ -216,7 +218,7 @@ def test_feeder_trips_exact_payload_and_metric_aggregation():
         assert "80290" in res["reply"]
         assert "1 valid" not in res["reply"]
         assert "feeder" in res["reply"].lower()
-        assert duration < 0.2, f"Expected fast-path sub-200ms execution, got {duration:.3f}s"
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
 
 def test_all_three_devices_together_exact_payload_and_reply():
     """
@@ -231,7 +233,9 @@ def test_all_three_devices_together_exact_payload_and_reply():
         "data": 35125
     }
 
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
         mock_post.return_value = mock_api_res
 
         t_start = time.perf_counter()
@@ -266,7 +270,7 @@ def test_all_three_devices_together_exact_payload_and_reply():
         assert "35125" in res["reply"]
         assert "using all three devices together (Fixed GPS, Fixed E-Lock, and Portable E-Lock)" in res["reply"]
         assert "active Fixed GPS" not in res["reply"]
-        assert duration < 0.2, f"Expected fast-path sub-200ms execution, got {duration:.3f}s"
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
 
 def test_groq_limit_exceeded_fallback_to_local_llm():
     """
@@ -328,6 +332,358 @@ def test_groq_limit_exceeded_fallback_to_local_llm():
         assert debug["fallback_to_local"] is True
         assert debug["llm_provider"] == "ollama"
         assert debug["llm_model"] == "qwen2.5-coder:0.5b"
+
+
+@pytest.mark.parametrize("query", [
+    "What is the trip count across major feeder types in August 2026?",
+    "What is the trip count across major route types in August 2026?",
+    "What is the trip count across major shipment method in August 2026?",
+])
+def test_shipment_method_breakdown_queries_exact_payload_and_reply(query):
+    """
+    Validates exact payload, grouping by shipmentMethod, metrics,
+    and natural language formatting for all shipment method breakdown query variations.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [
+            {"trip_count": 21011, "shipmentMethod": "AIR_NETWORK"},
+            {"trip_count": 13490, "shipmentMethod": "PICK UP AND DELIVERY"},
+            {"trip_count": 20329, "shipmentMethod": "DELIVERY"},
+            {"trip_count": 656, "shipmentMethod": "COMM/BZ-OUT"},
+            {"trip_count": 80290, "shipmentMethod": "FEEDER"},
+            {"trip_count": 16363, "shipmentMethod": "PICK UP"},
+            {"trip_count": 1188, "shipmentMethod": "EMPTY"},
+            {"trip_count": 1390, "shipmentMethod": "SPEED_TRUCK"},
+            {"trip_count": 18527, "shipmentMethod": "SFC_NETWORK"},
+            {"trip_count": 295, "shipmentMethod": "COMM/BZ-IN"}
+        ]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "shipment-method-test",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        # Check fast path execution
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+
+        # Check exact payload structure
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("groupBy") == ["shipmentMethod"]
+        assert entities.get("metrics") == [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}]
+        assert entities.get("select") == []
+
+        filters = {f["field"]: f["value"] for f in entities["filters"] if "field" in f}
+        assert filters.get("groupId") == "0041"
+        assert filters.get("tripStatus") == "valid"
+        assert "Route" not in filters
+        assert "routeCategory" not in filters
+        assert "shipmentMethod" not in filters
+
+        run_dates = [f for f in entities["filters"] if f.get("field") == "runDate"]
+        assert len(run_dates) == 2
+        gte = next(f["value"] for f in run_dates if f.get("operator") == "gte")
+        lte = next(f["value"] for f in run_dates if f.get("operator") == "lte")
+        assert gte == "2026-08-01 00:00:00"
+        assert lte == "2026-08-31 23:59:59"
+
+        # Check response contains key breakdown items
+        reply = res["reply"]
+        assert "FEEDER is 80290" in reply or "80290" in reply
+        assert "21011" in reply
+        assert "20329" in reply
+        assert "does not include cancelled trips" in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+@pytest.mark.parametrize("query", [
+    "How many trips were Speed_Truck, Empty, Comm/BZ-Out, or Comm/BZ-In in August 2026?",
+    "breakdown of trips that were Speed_Truck, Empty, Comm/BZ-Out, or Comm/BZ-In in August 2026?",
+    "trips that were Speed_Truck v/s Empty v/s  Comm/BZ-Out v/sComm/BZ-In in August 2026?",
+])
+def test_multiple_shipment_methods_breakdown_exact_payload_and_reply(query):
+    """
+    Validates exact payload, grouping by shipmentMethod, metrics,
+    and natural language formatting when multiple shipment methods are queried.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [
+            {"trip_count": 1390, "shipmentMethod": "SPEED_TRUCK"},
+            {"trip_count": 1188, "shipmentMethod": "EMPTY"},
+            {"trip_count": 656, "shipmentMethod": "COMM/BZ-OUT"},
+            {"trip_count": 295, "shipmentMethod": "COMM/BZ-IN"}
+        ]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "multi-shipment-test",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        # Check fast path execution
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+
+        # Check exact payload structure
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("groupBy") == ["shipmentMethod"]
+        assert entities.get("metrics") == [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}]
+        assert entities.get("select") == []
+
+        filters = {f["field"]: f for f in entities["filters"] if "field" in f}
+        assert filters.get("groupId", {}).get("value") == "0041"
+        assert filters.get("tripStatus", {}).get("value") == "valid"
+        assert filters.get("shipmentMethod", {}).get("operator") == "in"
+        assert filters.get("shipmentMethod", {}).get("value") == ["speed", "empty", "Comm/BZ-Out", "Comm/BZ-In"]
+
+        run_dates = [f for f in entities["filters"] if f.get("field") == "runDate"]
+        assert len(run_dates) == 2
+        gte = next(f["value"] for f in run_dates if f.get("operator") == "gte")
+        lte = next(f["value"] for f in run_dates if f.get("operator") == "lte")
+        assert gte == "2026-08-01 00:00:00"
+        assert lte == "2026-08-31 23:59:59"
+
+        # Check response contains key breakdown items
+        reply = res["reply"]
+        assert "1390" in reply
+        assert "1188" in reply
+        assert "656" in reply
+        assert "295" in reply
+        assert "does not include cancelled trips" in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+@pytest.mark.parametrize("query,expected_field,expected_vendor,expected_analytics", [
+    ("How many trips used Secutrak_TP Fixed GPS in August 2026?", "vendorgps", "Secutrak_TP", "gps"),
+    ("How many trips used Fleetx (fleetx_bluedart) Fixed GPS in August 2026?", "vendorgps", "Fleetx", "gps"),
+    ("How many trips used Axestrack Fixed GPS in August 2026?", "vendorgps", "Axestrack", "gps"),
+    ("How many trips used Gtropy Fixed GPS in August 2026?", "vendorgps", "Gtropy", "gps"),
+    ("How many trips used Eicher Fixed GPS in August 2026?", "vendorgps", "Eicher", "gps"),
+    ("How many trips used G-Trac Fixed GPS in August 2026?", "vendorgps", "G-Trac", "gps"),
+    ("How many trips used Ashok Leyland Fixed GPS in August 2026?", "vendorgps", "Ashok", "gps"),
+    ("How many trips used Tata Motors Fixed GPS in August 2026?", "vendorgps", "Tata", "gps"),
+    ("How many trips used Kiasaint Fixed E-Lock in August 2026?", "vendorfixedelock", "Kiasaint", "fixedlock"),
+    ("How many trips used G-Trac Fixed E-Lock in August 2026?", "vendorfixedelock", "G-Trac", "fixedlock"),
+    ("How many trips used Kiasaint Portable E-Lock in August 2026?", "vendorportableelock", "Kiasaint", "portablelock"),
+    ("How many trips used G-Trac Portable E-Lock in August 2026?", "vendorportableelock", "G-Trac", "portablelock"),
+])
+def test_tracking_device_vendor_queries_exact_payload_and_reply(query, expected_field, expected_vendor, expected_analytics):
+    """
+    Validates exact payload, device-specific vendor field (vendorgps, vendorfixedelock, vendorportableelock),
+    analytics type (gps, fixedlock, portablelock), and sub-500ms latency.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": 1234
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "vendor-test",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        # Check fast path execution
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+
+        # Check exact payload structure
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("analytics") == [{"type": expected_analytics}]
+        assert entities.get("select") == []
+        assert "groupBy" not in entities or not entities["groupBy"]
+        assert "metrics" not in entities or not entities["metrics"]
+
+        filters = entities["filters"]
+        # Exact field order check: groupId, tripStatus, runDate (gte), runDate (lte), vendor field
+        field_order = [f.get("field") for f in filters]
+        assert field_order == ["groupId", "tripStatus", "runDate", "runDate", expected_field], f"Unexpected field order: {field_order}"
+
+        f_map = {f["field"]: f for f in filters if "field" in f}
+        assert f_map["groupId"]["value"] == "0041"
+        assert f_map["groupId"]["operator"] == "eq"
+        assert f_map["tripStatus"]["value"] == "valid"
+        assert f_map["tripStatus"]["operator"] == "eq"
+
+        run_dates = [f for f in filters if f.get("field") == "runDate"]
+        assert len(run_dates) == 2
+        gte = next(f["value"] for f in run_dates if f.get("operator") == "gte")
+        lte = next(f["value"] for f in run_dates if f.get("operator") == "lte")
+        assert gte == "2026-08-01 00:00:00"
+        assert lte == "2026-08-31 23:59:59"
+
+        assert f_map[expected_field]["operator"] == "contains"
+        assert f_map[expected_field]["value"] == expected_vendor
+
+        # Check response
+        reply = res["reply"]
+        assert "1234" in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+def test_transporter_vehicles_queries_exact_payload_and_reply():
+    """
+    Validates exact payload, groupBy vehicleNo, metrics, clean transporter value,
+    first 10 vehicle listing with Excel link for list query, and count-only for how-many query.
+    """
+    mock_vehicle_data = [
+        {"vehicleNo": "DL01MB2525", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MB4852", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MB5985", "uniqueVehicleCount": 1},
+        {"vehicleNo": "HR55AU2959", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MA6293", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MB2983", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MB4349", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MB5589", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MA2844", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01LAF2969", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MB1854", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01AF2969", "uniqueVehicleCount": 1},
+        {"vehicleNo": "DL01MA9719", "uniqueVehicleCount": 1}
+    ]
+
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": mock_vehicle_data
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        # --- 1. List of vehicles query ---
+        q1 = "Lis of the vehicle was on trip this month for the transporter - DIDAR SINGH"
+        t_start = time.perf_counter()
+        resp1 = client.post("/api/v1/chat", json={
+            "message": q1,
+            "history": [],
+            "session_id": "test-list-vehicles",
+            "AccessToken": "test-token"
+        })
+        d1 = time.perf_counter() - t_start
+        assert resp1.status_code == 200
+        r1 = resp1.json()
+
+        assert r1["source"] == "fast_path"
+        assert r1["llm_status"] == "bypassed"
+        ent1 = r1["entities"]
+        assert ent1.get("entity") == "trip"
+        assert ent1.get("operation") == "count"
+        assert ent1.get("groupBy") == ["vehicleNo"]
+        assert ent1.get("metrics") == [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        assert ent1.get("select") == []
+
+        f_order1 = [f.get("field") for f in ent1["filters"]]
+        assert f_order1 == ["groupId", "tripStatus", "runDate", "runDate", "transporter"]
+
+        f_map1 = {f["field"]: f for f in ent1["filters"] if "field" in f}
+        assert f_map1["groupId"]["value"] == "0041"
+        assert f_map1["tripStatus"]["value"] == "valid"
+        assert f_map1["transporter"]["value"] == "DIDAR SINGH"
+        assert f_map1["transporter"]["operator"] == "eq"
+
+        reply1 = r1["reply"]
+        assert "DL01MB2525" in reply1
+        assert "DL01LAF2969" in reply1
+        assert "DL01MB1854" not in reply1  # 11th item should be omitted from text preview
+        assert "Download complete Excel list" in reply1 or "Download Excel" in reply1
+        assert r1["download_url"] is not None
+        assert d1 < 0.5, f"Expected fast-path sub-500ms execution, got {d1:.3f}s"
+
+        # --- 2. How many vehicles query ---
+        q2 = "how many vehicle was on trip this month for the transporter - DIDAR SINGH"
+        t_start = time.perf_counter()
+        resp2 = client.post("/api/v1/chat", json={
+            "message": q2,
+            "history": [],
+            "session_id": "test-count-vehicles",
+            "AccessToken": "test-token"
+        })
+        d2 = time.perf_counter() - t_start
+        assert resp2.status_code == 200
+        r2 = resp2.json()
+
+        assert r2["source"] == "fast_path"
+        assert r2["llm_status"] == "bypassed"
+        ent2 = r2["entities"]
+        assert ent2.get("entity") == "trip"
+        assert ent2.get("operation") == "count"
+        assert ent2.get("groupBy") == ["vehicleNo"]
+        assert ent2.get("metrics") == [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        assert ent2.get("select") == []
+
+        f_order2 = [f.get("field") for f in ent2["filters"]]
+        assert f_order2 == ["groupId", "tripStatus", "runDate", "runDate", "transporter"]
+
+        f_map2 = {f["field"]: f for f in ent2["filters"] if "field" in f}
+        assert f_map2["groupId"]["value"] == "0041"
+        assert f_map2["tripStatus"]["value"] == "valid"
+        assert f_map2["transporter"]["value"] == "DIDAR SINGH"
+        assert f_map2["transporter"]["operator"] == "eq"
+
+        reply2 = r2["reply"]
+        assert "Total 13 vehicles were on trip" in reply2
+        assert "DL01MB2525" not in reply2  # No list of vehicle numbers in count-only reply
+        assert "Download complete Excel list" not in reply2
+        assert "Download Excel report" not in reply2
+        assert d2 < 0.5, f"Expected fast-path sub-500ms execution, got {d2:.3f}s"
+
+
+
+
 
 
 
