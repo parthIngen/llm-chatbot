@@ -410,7 +410,7 @@ def detect_top_device_vendors(text: str) -> Optional[Dict[str, str]]:
         }
     elif bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?locks?|locks?|elocks?)\b', text_l)):
         return {
-            "analytics_type": "fixedelock",
+            "analytics_type": "fixedlock",
             "vendor_field": "vendorfixedelock",
             "label": "Fixed E-Lock"
         }
