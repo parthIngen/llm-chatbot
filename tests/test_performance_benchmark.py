@@ -1108,6 +1108,133 @@ def test_top_device_vendors_payload_and_reply(query, expected_analytics, expecte
         assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
 
 
+def test_download_gps_active_trips_exact_payload():
+    """
+    Validates exact payload for 'Download all trips where GPS is active. in aug 2026'
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": 116085
+    }
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": "Download all trips where GPS is active. in aug 2026",
+            "history": [],
+            "session_id": "test-download-gps-active",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("analytics") == [{"type": "gps"}]
+        assert entities.get("select") == []
+
+        filters = entities["filters"]
+        assert len(filters) == 5
+        f_map = {f["field"]: f for f in filters if f.get("field") != "runDate"}
+        assert f_map["groupId"] == {"field": "groupId", "operator": "eq", "value": "0041"}
+        assert f_map["tripStatus"] == {"field": "tripStatus", "operator": "eq", "value": "valid"}
+        assert f_map["GPS"] == {"field": "GPS", "operator": "eq", "value": "active"}
+        assert {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"} in filters
+        assert {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"} in filters
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+@pytest.mark.asyncio
+async def test_device_only_queries_exact_payload():
+    """Verify that device-only queries generate exact payload with gpsonly, fixedlockonly, portablelockonly and no device filters."""
+    from app.llm.intent_detector import IntentDetector
+    from app.llm.response_generator import build_natural_response
+    detector = IntentDetector()
+
+    test_cases = [
+        (
+            "How many trips in August 2026 used Fixed GPS only (without Fixed E-Lock or Portable E-Lock)?",
+            "gpsonly",
+            "Fixed GPS only"
+        ),
+        (
+            "How many trips in August 2026 used Fixed GPS only?",
+            "gpsonly",
+            "Fixed GPS only"
+        ),
+        (
+            "How many trips in August 2026 used Fixed E-Lock only (without Fixed GPS or Portable E-Lock)?",
+            "fixedlockonly",
+            "Fixed E-Lock only"
+        ),
+        (
+            "How many trips in August 2026 used Fixed E-Lock only?",
+            "fixedlockonly",
+            "Fixed E-Lock only"
+        ),
+        (
+            "How many trips in August 2026 used Portable E-Lock only (without Fixed GPS or Fixed E-Lock)?",
+            "portablelockonly",
+            "Portable E-Lock only"
+        ),
+        (
+            "How many trips in August 2026 used Portable E-Lock only?",
+            "portablelockonly",
+            "Portable E-Lock only"
+        ),
+    ]
+
+    for query, expected_type, expected_reply_sub in test_cases:
+        t0 = time.perf_counter()
+        result = await detector.detect_intent(query)
+        duration = time.perf_counter() - t0
+
+        entities = result.get("entities", {})
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("analytics") == [{"type": expected_type}]
+        assert entities.get("select") == []
+        assert "groupBy" not in entities or not entities["groupBy"]
+        assert "metrics" not in entities or not entities["metrics"]
+
+        filters = entities.get("filters", [])
+        field_order = [f.get("field") for f in filters]
+        assert field_order == ["groupId", "tripStatus", "runDate", "runDate"], f"Unexpected field order for {query}: {field_order}"
+
+        f_map = {f["field"]: f for f in filters if "field" in f}
+        assert f_map["groupId"]["value"] == "0041"
+        assert f_map["groupId"]["operator"] == "eq"
+        assert f_map["tripStatus"]["value"] == "valid"
+        assert f_map["tripStatus"]["operator"] == "eq"
+
+        run_dates = [f for f in filters if f.get("field") == "runDate"]
+        assert len(run_dates) == 2
+        gte = next(f["value"] for f in run_dates if f.get("operator") == "gte")
+        lte = next(f["value"] for f in run_dates if f.get("operator") == "lte")
+        assert gte == "2026-08-01 00:00:00"
+        assert lte == "2026-08-31 23:59:59"
+
+        # Device filters must NOT be present in filters
+        for f in filters:
+            assert f.get("field") not in ["GPS", "FixedGPS", "FixedELock", "PortableELock", "fixed-gps status", "fixed-e-lock status", "portable-e-lock status"]
+
+        assert duration < 0.5, f"Query '{query}' took {duration:.3f}s, expected < 0.5s"
+
+        reply = build_natural_response(4914, filters=filters, analytics=entities.get("analytics"), message=query)
+        assert expected_reply_sub in reply
+        assert "all three devices together" not in reply
+
+
+
 
 
 

@@ -310,34 +310,34 @@ def build_natural_response(
     elif filter_map.get("withgps"):
         pass
     elif filter_map.get("gpsonly"):
-        device_qualifiers.append("with single Fixed GPS only")
+        device_qualifiers.append("using Fixed GPS only")
     elif filter_map.get("fixedgpsonly"):
         if gps == "active":
-            device_qualifiers.append("with active single Fixed GPS only")
+            device_qualifiers.append("with active Fixed GPS only")
         elif gps == "inactive":
-            device_qualifiers.append("with inactive single Fixed GPS only")
+            device_qualifiers.append("with inactive Fixed GPS only")
         else:
-            device_qualifiers.append("with single Fixed GPS only")
+            device_qualifiers.append("using Fixed GPS only")
     elif filter_map.get("fixedlockonly"):
-        device_qualifiers.append("with single Fixed E-Lock only")
+        device_qualifiers.append("using Fixed E-Lock only")
     elif filter_map.get("fixedelockonly"):
         if fixed_elock == "active":
-            device_qualifiers.append("with active single Fixed E-Lock only")
+            device_qualifiers.append("with active Fixed E-Lock only")
         elif fixed_elock == "inactive":
-            device_qualifiers.append("with inactive single Fixed E-Lock only")
+            device_qualifiers.append("with inactive Fixed E-Lock only")
         else:
-            device_qualifiers.append("with single Fixed E-Lock only")
+            device_qualifiers.append("using Fixed E-Lock only")
     elif filter_map.get("fixedlockna"):
         device_qualifiers.append("where Fixed E-Lock is not available")
     elif filter_map.get("portablelockonly"):
-        device_qualifiers.append("with single Portable E-Lock only")
+        device_qualifiers.append("using Portable E-Lock only")
     elif filter_map.get("portableelockonly"):
         if portable_elock == "active":
-            device_qualifiers.append("with active single Portable E-Lock only")
+            device_qualifiers.append("with active Portable E-Lock only")
         elif portable_elock == "inactive":
-            device_qualifiers.append("with inactive single Portable E-Lock only")
+            device_qualifiers.append("with inactive Portable E-Lock only")
         else:
-            device_qualifiers.append("with single Portable E-Lock only")
+            device_qualifiers.append("using Portable E-Lock only")
     elif filter_map.get("portablelockna"):
         device_qualifiers.append("where Portable E-Lock is not available")
     elif filter_map.get("fixedlock"):
@@ -478,14 +478,14 @@ class ResponseGenerator:
             api_data = api_result
 
         # Single shipment / trip lookup formatting
-        is_shipment_find = (
-            (entities.get("operation") == "find" if entities else False)
-            or (any(isinstance(f, dict) and f.get("field") in ("shipmentNo", "shipment_no") for f in (entities.get("filters", []) if entities else [])))
-        )
-        if not is_shipment_find and message:
+        has_shipment_no_filter = any(isinstance(f, dict) and f.get("field") in ("shipmentNo", "shipment_no") for f in (entities.get("filters", []) if entities else []))
+        has_shipment_msg = False
+        if message:
             from app.llm.intent_detector import extract_single_shipment_lookup
             if extract_single_shipment_lookup(message):
-                is_shipment_find = True
+                has_shipment_msg = True
+
+        is_shipment_find = has_shipment_no_filter or has_shipment_msg
 
         if is_shipment_find:
             records = []

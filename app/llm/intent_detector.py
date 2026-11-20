@@ -410,7 +410,7 @@ def detect_top_device_vendors(text: str) -> Optional[Dict[str, str]]:
         }
     elif bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?locks?|locks?|elocks?)\b', text_l)):
         return {
-            "analytics_type": "fixedlock",
+            "analytics_type": "fixedelock",
             "vendor_field": "vendorfixedelock",
             "label": "Fixed E-Lock"
         }
@@ -901,17 +901,22 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                     ]
                 }
 
-    if is_devices_together or bool(re.search(r'\b(?:download|export)\b', msg_l)):
+    if is_devices_together:
         return None
 
     # Single device categories
-    without_elock = bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_l))
-    without_gps = bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed\s+)?gps\b', msg_l))
-    without_portable = bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?portab?le\b', msg_l))
+    without_match = re.search(r'\b(?:without|excluding|except|no|not\s+having)\b\s*(.*)', msg_l)
+    without_text = without_match.group(1) if without_match else ""
 
-    has_portable = bool(re.search(r'\bportab?le[\s-]e?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\s+gps\b|\bportab?le\b', msg_l)) and not without_portable
-    has_fixed_elock = (bool(re.search(r'\bfixed[\s-]e?locks?\b|\bfixed[\s-]locks?\b', msg_l)) or (bool(re.search(r'\be?locks?\b', msg_l)) and not has_portable)) and not has_portable and not without_elock
-    has_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps|fixed\s+device)\b', msg_l)) and not has_portable and not has_fixed_elock and not without_gps
+    without_elock = bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\b|\be[\s-]?locks?\b', without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_l))
+    without_gps = bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed\s+)?gps\b', msg_l))
+    without_portable = bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?)?locks?\b|\bportab?le\b', without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?portab?le\b', msg_l))
+
+    pos_text = re.sub(r'\b(?:without|excluding|except)\b.*', '', msg_l) if without_match else msg_l
+
+    has_portable = bool(re.search(r'\bportab?le[\s-]e?locks?\b|\bportab?le[\s-]locks?\b|\bportab?le\s+gps\b|\bportab?le\b', pos_text)) and not without_portable
+    has_fixed_elock = (bool(re.search(r'\bfixed[\s-]e?locks?\b|\bfixed[\s-]locks?\b', pos_text)) or (bool(re.search(r'\be?locks?\b', pos_text)) and not has_portable)) and not has_portable and not without_elock
+    has_gps = bool(re.search(r'\b(?:fixed[\s-]gps|gps|fixed\s+device)\b', pos_text)) and not has_portable and not has_fixed_elock and not without_gps
 
     is_na = bool(
         re.search(r'\b(?:na|not\s+available|notavailable)\b', msg_l)
@@ -923,7 +928,11 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
     )
     is_inactive = bool(re.search(r'\b(?:inactive|no\s+connectivity|connectivity)\b', msg_l))
     is_active = bool(re.search(r'\bactive\b', msg_l)) and not bool(re.search(r'\bactive\s+trips?\b', msg_l))
-    is_only_or_single = bool(re.search(r'\b(?:single|only|sole|alone)\b', msg_l))
+    is_only_or_single = bool(re.search(r'\b(?:single|only|sole|alone|exclusive)\b', msg_l))
+
+    # Download / export queries without explicit device status are report downloads, not device analytics
+    if bool(re.search(r'\b(?:download|export)\b', msg_l)) and not (is_na or is_inactive or is_active or is_only_or_single or without_gps or without_elock or without_portable):
+        return None
 
     # --- PORTABLE E-LOCK ---
     if has_portable:
@@ -1450,6 +1459,8 @@ class IntentDetector:
             and not re.search(r'\bvehicles?\b', msg_lower)
             and not re.search(r'\btransporters?\b', msg_lower)
             and not _is_network_vs_local_query
+            and not re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_lower)
+            and not re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_lower)
         )
 
         # Format user prompt
@@ -2496,9 +2507,19 @@ class IntentDetector:
                             })
 
             # --- Single Device & Combo Post-Processing ---
-            has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower)) and not bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_lower))
-            has_portable_elock = bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', msg_lower))
-            has_fixed_gps = bool(re.search(r'\bfixed[\s-]gps\b', msg_lower))
+            has_veh_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
+            without_match = re.search(r'\b(?:without|excluding|except|no|not\s+having)\b\s*(.*)', msg_lower)
+            without_text = without_match.group(1) if without_match else ""
+
+            without_elock = bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\b|\be[\s-]?locks?\b', without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_lower))
+            without_portable = bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?)?locks?\b|\bportab?le\b', without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?portab?le\b', msg_lower))
+            without_gps = bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed\s+)?gps\b', msg_lower))
+
+            pos_text = re.sub(r'\b(?:without|excluding|except)\b.*', '', msg_lower) if without_match else msg_lower
+
+            has_fixed_elock = (bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', pos_text)) or bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower))) and not without_elock
+            has_portable_elock = (bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', pos_text)) or bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', msg_lower))) and not without_portable
+            has_fixed_gps = (bool(re.search(r'\bfixed[\s-]gps\b', pos_text)) or bool(re.search(r'\bfixed[\s-]gps\b', msg_lower))) and not without_gps
             _is_devices_together = bool(re.search(r'\btogether\b', msg_lower))
             _is_device_trips = bool(re.search(r'\b(?:device\s+trips?|device\s+data|device\s+report)\b', msg_lower))
             _is_gps_na = bool(re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower))
@@ -2524,13 +2545,14 @@ class IntentDetector:
                 return default
 
             # 1. Fixed GPS Only / Single Device
-            _is_fixed_gps_only = bool(
-                re.search(r'\bfixed[\s-]gps\b', msg_lower)
-                and re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower)
-            ) or bool(
-                re.search(r'\bonly\s+fixed[\s-]gps\b', msg_lower)
-            ) or bool(
-                re.search(r'\bfixed[\s-]gps\s+(as\s+)?(the\s+)?(single|only|sole)\b', msg_lower)
+            _is_fixed_gps_only = (
+                not has_veh_mention and (
+                    bool(re.search(r'\bfixed[\s-]gps\b', msg_lower) and re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower))
+                    or bool(re.search(r'\bonly\s+fixed[\s-]gps\b', msg_lower))
+                    or bool(re.search(r'\bfixed[\s-]gps\s+(as\s+)?(the\s+)?(single|only|sole)\b', msg_lower))
+                    or bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps)\s+(?:only|single|sole|alone|exclusive)\b', msg_lower))
+                    or bool(re.search(r'\bonly\s+(?:fixed[\s-]*)?gps\b', msg_lower))
+                )
             )
 
             # 1b. Fixed GPS + E-Lock Combo (e.g. "Fixed GPS + Fixed E-Lock combination", "Fixed GPS and Fixed E-Lock combo")
@@ -2565,7 +2587,8 @@ class IntentDetector:
 
             # 2a. Portable E-Lock Single Device ONLY (when "only" / "single" is mentioned)
             _is_portable_elock_only = (
-                has_portable_elock
+                not has_veh_mention
+                and has_portable_elock
                 and not has_fixed_elock
                 and not _is_devices_together
                 and not _is_device_trips
@@ -2590,7 +2613,8 @@ class IntentDetector:
 
             # 3a. Fixed E-Lock Single Device ONLY (when "only" / "single" is mentioned)
             _is_fixed_elock_only = (
-                has_fixed_elock
+                not has_veh_mention
+                and has_fixed_elock
                 and not has_portable_elock
                 and not _is_devices_together
                 and not _is_device_trips
@@ -2949,7 +2973,7 @@ class IntentDetector:
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
             elif _is_fixed_gps_only:
-                gps_val = _get_device_status(msg_lower, "existing")
+                query_payload["analytics"] = [{"type": "gpsonly"}]
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -2958,9 +2982,7 @@ class IntentDetector:
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                query_payload["filters"].append({"field": "GPS",          "operator": "eq", "value": gps_val})
-                query_payload["filters"].append({"field": "FixedELock",   "operator": "eq", "value": "na"})
-                query_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": "na"})
+                query_payload["select"] = []
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
                 if _is_include_cancelled:
@@ -2993,7 +3015,7 @@ class IntentDetector:
                             "value": target_status
                         })
             elif _is_portable_elock_only:
-                portable_val = _get_device_status(msg_lower, "existing")
+                query_payload["analytics"] = [{"type": "portablelockonly"}]
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -3002,9 +3024,7 @@ class IntentDetector:
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                query_payload["filters"].append({"field": "GPS",          "operator": "eq", "value": "na"})
-                query_payload["filters"].append({"field": "FixedELock",   "operator": "eq", "value": "na"})
-                query_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": portable_val})
+                query_payload["select"] = []
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
                 if _is_include_cancelled:
@@ -3079,7 +3099,7 @@ class IntentDetector:
                             "value": target_status
                         })
             elif _is_fixed_elock_only:
-                fixed_val = _get_device_status(msg_lower, "existing")
+                query_payload["analytics"] = [{"type": "fixedlockonly"}]
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -3088,9 +3108,7 @@ class IntentDetector:
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                query_payload["filters"].append({"field": "GPS",          "operator": "eq", "value": "na"})
-                query_payload["filters"].append({"field": "FixedELock",   "operator": "eq", "value": fixed_val})
-                query_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": "na"})
+                query_payload["select"] = []
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
                 if _is_include_cancelled:
@@ -3103,6 +3121,25 @@ class IntentDetector:
                         re.search(r'\b(?:closed\s+trips?|completed\s+trips?)\b', msg_lower)
                         or re.search(r'\btrips?\s+(?:status\s+)?is\s+(?:closed|completed)\b', msg_lower)
                     )
+                    if explicit_closed_trip:
+                        target_status = "closed"
+                    elif status_override and status_override != "closed":
+                        target_status = status_override
+                    else:
+                        target_status = "valid"
+                    found_status = False
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") == "tripStatus":
+                            f["value"] = target_status
+                            f["operator"] = "eq"
+                            found_status = True
+                            break
+                    if not found_status:
+                        query_payload["filters"].append({
+                            "field": "tripStatus",
+                            "operator": "eq",
+                            "value": target_status
+                        })
                     if explicit_closed_trip:
                         target_status = "closed"
                     elif status_override and status_override != "closed":
@@ -3970,9 +4007,9 @@ class IntentDetector:
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "tripStatus":
+                    if field == "groupId":
                         return 1
-                    elif field == "groupId":
+                    elif field == "tripStatus":
                         return 2
                     elif field == "runDate" and op == "gte":
                         return 3
@@ -3991,6 +4028,15 @@ class IntentDetector:
                     return 10
 
                 query_payload["filters"].sort(key=_single_device_sort_key)
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "select"]:
+                    if k in query_payload:
+                        reordered[k] = query_payload[k]
+                for k, v in query_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                query_payload.clear()
+                query_payload.update(reordered)
             elif _is_trip_type_breakdown_query:
                 def _trip_type_breakdown_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -4601,6 +4647,8 @@ class IntentDetector:
                 and not re.search(r'\bvehicles?\b', msg_lower)
                 and not re.search(r'\btransporters?\b', msg_lower)
                 and not fb_is_network_vs_local_query
+                and not re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_lower)
+                and not re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_lower)
             )
             fb_specific_transporter = extract_specific_transporter(message)
             fb_is_no_gps_vehicle_query = bool(
@@ -4971,9 +5019,19 @@ class IntentDetector:
                         )
 
             # Apply the same single-device and device-combo post-processing to fallback
-            fb_has_fixed_gps = bool(re.search(r'\bfixed[\s-]gps\b', msg_lower))
-            fb_has_fixed_elock = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower)) and not bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_lower))
-            fb_has_portable_elock = bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', msg_lower))
+            fb_has_veh_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
+            fb_without_match = re.search(r'\b(?:without|excluding|except|no|not\s+having)\b\s*(.*)', msg_lower)
+            fb_without_text = fb_without_match.group(1) if fb_without_match else ""
+
+            fb_without_elock = bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\b|\be[\s-]?locks?\b', fb_without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]?)?(?:e[\s-]?)?locks?\b', msg_lower))
+            fb_without_portable = bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?)?locks?\b|\bportab?le\b', fb_without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?portab?le\b', msg_lower))
+            fb_without_gps = bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', fb_without_text)) or bool(re.search(r'\b(?:without|no|not\s+having|excluding|except)\s+(?:any\s+)?(?:fixed\s+)?gps\b', msg_lower))
+
+            fb_pos_text = re.sub(r'\b(?:without|excluding|except)\b.*', '', msg_lower) if fb_without_match else msg_lower
+
+            fb_has_fixed_elock = (bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', fb_pos_text)) or bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b', msg_lower))) and not fb_without_elock
+            fb_has_portable_elock = (bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', fb_pos_text)) or bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b|\bportable[\s-]locks?\b', msg_lower))) and not fb_without_portable
+            fb_has_fixed_gps = (bool(re.search(r'\bfixed[\s-]gps\b', fb_pos_text)) or bool(re.search(r'\bfixed[\s-]gps\b', msg_lower))) and not fb_without_gps
             fb_is_devices_together = bool(re.search(r'\btogether\b', msg_lower))
             fb_is_device_trips = bool(re.search(r'\b(?:device\s+trips?|device\s+data|device\s+report)\b', msg_lower))
             fb_is_gps_na = bool(re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower))
@@ -5019,13 +5077,14 @@ class IntentDetector:
             )
 
             # 1. Fixed GPS Only / Single Device
-            fb_is_fixed_gps_only = bool(
-                re.search(r'\bfixed[\s-]gps\b', msg_lower)
-                and re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower)
-            ) or bool(
-                re.search(r'\bonly\s+fixed[\s-]gps\b', msg_lower)
-            ) or bool(
-                re.search(r'\bfixed[\s-]gps\s+(as\s+)?(the\s+)?(single|only|sole)\b', msg_lower)
+            fb_is_fixed_gps_only = (
+                not fb_has_veh_mention and (
+                    bool(re.search(r'\bfixed[\s-]gps\b', msg_lower) and re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower))
+                    or bool(re.search(r'\bonly\s+fixed[\s-]gps\b', msg_lower))
+                    or bool(re.search(r'\bfixed[\s-]gps\s+(as\s+)?(the\s+)?(single|only|sole)\b', msg_lower))
+                    or bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps)\s+(?:only|single|sole|alone|exclusive)\b', msg_lower))
+                    or bool(re.search(r'\bonly\s+(?:fixed[\s-]*)?gps\b', msg_lower))
+                )
             )
 
             # 1b. Fixed GPS + E-Lock Combo (e.g. "Fixed GPS + Fixed E-Lock combination", "Fixed GPS and Fixed E-Lock combo")
@@ -5040,7 +5099,8 @@ class IntentDetector:
 
             # 2a. Portable E-Lock Single Device ONLY (when "only" / "single" is mentioned)
             fb_is_portable_elock_only = (
-                fb_has_portable_elock
+                not fb_has_veh_mention
+                and fb_has_portable_elock
                 and not fb_has_fixed_elock
                 and not fb_is_devices_together
                 and not fb_is_device_trips
@@ -5065,7 +5125,8 @@ class IntentDetector:
 
             # 3a. Fixed E-Lock Single Device ONLY (when "only" / "single" is mentioned)
             fb_is_fixed_elock_only = (
-                fb_has_fixed_elock
+                not fb_has_veh_mention
+                and fb_has_fixed_elock
                 and not fb_has_portable_elock
                 and not fb_is_devices_together
                 and not fb_is_device_trips
@@ -5413,7 +5474,7 @@ class IntentDetector:
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
             elif fb_is_fixed_gps_only:
-                fb_gps_val = _fb_get_device_status(msg_lower, "existing")
+                fallback_payload["analytics"] = [{"type": "gpsonly"}]
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -5422,9 +5483,7 @@ class IntentDetector:
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                fallback_payload["filters"].append({"field": "GPS",          "operator": "eq", "value": fb_gps_val})
-                fallback_payload["filters"].append({"field": "FixedELock",   "operator": "eq", "value": "na"})
-                fallback_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": "na"})
+                fallback_payload["select"] = []
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
                 if fb_is_include_cancelled:
@@ -5448,7 +5507,7 @@ class IntentDetector:
                             "value": target_status
                         })
             elif fb_is_portable_elock_only:
-                fb_portable_val = _fb_get_device_status(msg_lower, "existing")
+                fallback_payload["analytics"] = [{"type": "portablelockonly"}]
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -5457,9 +5516,7 @@ class IntentDetector:
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                fallback_payload["filters"].append({"field": "GPS",          "operator": "eq", "value": "na"})
-                fallback_payload["filters"].append({"field": "FixedELock",   "operator": "eq", "value": "na"})
-                fallback_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": fb_portable_val})
+                fallback_payload["select"] = []
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
                 if fb_is_include_cancelled:
@@ -5516,7 +5573,7 @@ class IntentDetector:
                             "value": target_status
                         })
             elif fb_is_fixed_elock_only:
-                fb_fixed_val = _fb_get_device_status(msg_lower, "existing")
+                fallback_payload["analytics"] = [{"type": "fixedlockonly"}]
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") in [
@@ -5525,9 +5582,7 @@ class IntentDetector:
                         "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                fallback_payload["filters"].append({"field": "GPS",          "operator": "eq", "value": "na"})
-                fallback_payload["filters"].append({"field": "FixedELock",   "operator": "eq", "value": fb_fixed_val})
-                fallback_payload["filters"].append({"field": "PortableELock","operator": "eq", "value": "na"})
+                fallback_payload["select"] = []
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
                 if fb_is_include_cancelled:
@@ -6293,9 +6348,9 @@ class IntentDetector:
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "tripStatus":
+                    if field == "groupId":
                         return 1
-                    elif field == "groupId":
+                    elif field == "tripStatus":
                         return 2
                     elif field == "runDate" and op == "gte":
                         return 3
@@ -6314,6 +6369,15 @@ class IntentDetector:
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_single_device_sort_key)
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "select"]:
+                    if k in fallback_payload:
+                        reordered[k] = fallback_payload[k]
+                for k, v in fallback_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                fallback_payload.clear()
+                fallback_payload.update(reordered)
             elif fb_is_trip_type_breakdown_query:
                 def _fb_trip_type_breakdown_sort_key(flt):
                     if not isinstance(flt, dict):

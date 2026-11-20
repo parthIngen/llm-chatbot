@@ -12,8 +12,14 @@ def can_resolve_fast_path(message: str) -> bool:
     if any(phrase in msg_l for phrase in ["why", "how come", "what does", "explain", "meaning", "help me understand"]):
         return False
 
-    # Download / export queries require operation find and report formatting
-    if bool(re.search(r'\b(?:download|export|spreadsheet)\b', msg_l)):
+    # Download / export queries require operation find and report formatting,
+    # except device status / device analytics count queries (e.g. "Download all trips where GPS is active")
+    is_device_status_count = bool(
+        re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)
+        or re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)
+        or re.search(r'\b(?:trips\s+with\s+fixed\s+e[\s-]?lock|inactive\s+portable\s+e[\s-]?lock|active\s+fixed\s+e[\s-]?lock)\b', msg_l)
+    )
+    if bool(re.search(r'\b(?:download|export|spreadsheet)\b', msg_l)) and not is_device_status_count:
         return False
 
     # 1. Distinct vehicle queries
@@ -37,7 +43,15 @@ def can_resolve_fast_path(message: str) -> bool:
     # 4. Device combination queries
     if bool(re.search(r'\bwithout\s+any\s+device\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:fixed\s+gps\s+only|portable\s+e[\s-]?lock\s+only|fixed\s+e[\s-]?lock\s+only)\b', msg_l)):
+    if bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps\s+(?:only|single|sole|alone|exclusive)|portable[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive)|fixed[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive))\b', msg_l)):
+        return True
+    if bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+(?:(?:fixed[\s-]*)?gps|portable[\s-]*(?:e[\s-]?)?locks?|fixed[\s-]*(?:e[\s-]?)?locks?)\b', msg_l)):
+        return True
+    if bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)):
+        return True
+    if bool(re.search(r'\b(?:portable[\s-]e[\s-]?locks?|portable[\s-]locks?)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)):
+        return True
+    if bool(re.search(r'\b(?:fixed[\s-]e[\s-]?locks?|fixed[\s-]locks?)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)):
         return True
     if bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)) and bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l)):
         return True
@@ -226,27 +240,54 @@ def build_fast_path_payload(
         payload["filters"].append({"field": "ata", "operator": "eq", "value": "captured"})
 
     # 2. Device combinations
+    has_veh = bool(re.search(r'\bvehicles?\b', msg_l))
     if bool(re.search(r'\bwithout\s+any\s+device\b', msg_l)):
         payload.setdefault("analytics", []).append({"type": "withoutanygps"})
-    elif bool(re.search(r'\bfixed\s+gps\s+only\b', msg_l)):
-        payload["filters"].extend([
-            {"field": "GPS", "operator": "eq", "value": "existing"},
-            {"field": "FixedELock", "operator": "eq", "value": "na"},
-            {"field": "PortableELock", "operator": "eq", "value": "na"}
-        ])
-    elif bool(re.search(r'\bportable\s+e[\s-]?lock\s+only\b', msg_l)):
-        payload["filters"].extend([
-            {"field": "GPS", "operator": "eq", "value": "na"},
-            {"field": "FixedELock", "operator": "eq", "value": "na"},
-            {"field": "PortableELock", "operator": "eq", "value": "existing"}
-        ])
-    elif bool(re.search(r'\bfixed\s+e[\s-]?lock\s+only\b', msg_l)):
-        payload["filters"].extend([
-            {"field": "GPS", "operator": "eq", "value": "na"},
-            {"field": "FixedELock", "operator": "eq", "value": "existing"},
-            {"field": "PortableELock", "operator": "eq", "value": "na"}
-        ])
-    elif bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)) and bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l)):
+    elif (
+        bool(re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:only|single|sole|alone|exclusive)\b', msg_l))
+        or bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+(?:fixed[\s-]*)?gps\b', msg_l))
+        or (bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)) and not bool(re.search(r'\b(?:fixed[\s-]e[\s-]?lock|portable[\s-]e[\s-]?lock)\s+(?:only|single|sole|alone|exclusive)\b', msg_l)) and not bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+(?:fixed[\s-]e[\s-]?lock|portable[\s-]e[\s-]?lock)\b', msg_l)))
+    ):
+        if has_veh:
+            payload["filters"].extend([
+                {"field": "GPS", "operator": "eq", "value": "existing"},
+                {"field": "FixedELock", "operator": "eq", "value": "na"},
+                {"field": "PortableELock", "operator": "eq", "value": "na"}
+            ])
+        else:
+            payload.setdefault("analytics", []).append({"type": "gpsonly"})
+    elif (
+        bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive)\b', msg_l))
+        or bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+portab?le[\s-]*(?:e[\s-]?)?locks?\b', msg_l))
+        or (bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?)?locks?\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)))
+    ):
+        if has_veh:
+            payload["filters"].extend([
+                {"field": "GPS", "operator": "eq", "value": "na"},
+                {"field": "FixedELock", "operator": "eq", "value": "na"},
+                {"field": "PortableELock", "operator": "eq", "value": "existing"}
+            ])
+        else:
+            payload.setdefault("analytics", []).append({"type": "portablelockonly"})
+    elif (
+        bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive)\b', msg_l))
+        or bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+fixed[\s-]*(?:e[\s-]?)?locks?\b', msg_l))
+        or (bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)))
+    ):
+        if has_veh:
+            payload["filters"].extend([
+                {"field": "GPS", "operator": "eq", "value": "na"},
+                {"field": "FixedELock", "operator": "eq", "value": "existing"},
+                {"field": "PortableELock", "operator": "eq", "value": "na"}
+            ])
+        else:
+            payload.setdefault("analytics", []).append({"type": "fixedlockonly"})
+    elif (
+        not bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\b', msg_l))
+        and not bool(re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_l))
+        and bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l))
+        and bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l))
+    ):
         payload.setdefault("analytics", []).append({"type": "withgps"})
         dev_val = "existing"
         if re.search(r'\b(?:inactive|no\s+connectivity)\b', msg_l):
@@ -260,7 +301,12 @@ def build_fast_path_payload(
         if bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b', msg_l)):
             payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": dev_val})
         payload["filters"].append({"field": "GPS", "operator": "eq", "value": dev_val})
-    elif bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l)) and bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b', msg_l)):
+    elif (
+        not bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\b', msg_l))
+        and not bool(re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_l))
+        and bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l))
+        and bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b', msg_l))
+    ):
         payload.setdefault("analytics", []).append({"type": "withgps"})
         payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
         payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
