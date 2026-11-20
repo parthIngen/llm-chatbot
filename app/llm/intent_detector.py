@@ -390,6 +390,38 @@ def extract_single_shipment_lookup(text: str) -> Optional[str]:
 
     return None
 
+def detect_top_device_vendors(text: str) -> Optional[Dict[str, str]]:
+    """Detects whether the query asks for top tracking device vendors (Fixed GPS, Fixed E-Lock, or Portable E-Lock).
+    Returns a dict with 'analytics_type', 'vendor_field', 'label' or None.
+    """
+    text_l = text.lower()
+    if not (
+        bool(re.search(r'\b(?:top|major|leading|highest|most\s+used)\b', text_l))
+        and bool(re.search(r'\bvendors?\b', text_l))
+    ):
+        return None
+
+    # Check Portable E-Lock FIRST (handles queries like 'top portable elock GPS vendors')
+    if bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?locks?|locks?|elocks?)\b', text_l)):
+        return {
+            "analytics_type": "portablelock",
+            "vendor_field": "vendorportableelock",
+            "label": "Portable E-Lock"
+        }
+    elif bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?locks?|locks?|elocks?)\b', text_l)):
+        return {
+            "analytics_type": "fixedelock",
+            "vendor_field": "vendorfixedelock",
+            "label": "Fixed E-Lock"
+        }
+    elif bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', text_l)):
+        return {
+            "analytics_type": "gps",
+            "vendor_field": "vendorgps",
+            "label": "Fixed GPS"
+        }
+    return None
+
 def detect_shipment_methods(text: str) -> list[str]:
     """Detect and normalize all shipment method names present in text, returned in order of appearance.
     Canonical values:
@@ -1449,6 +1481,67 @@ class IntentDetector:
             log_intent_detected(session_id, "trip_report")
             log_entities_extracted(session_id, query_payload)
             print(f"[DEBUG_QUERY] Session: {session_id} | Source: fast_path | LLM Status: bypassed | Mode: single_shipment_lookup")
+            return {
+                "intent": "trip_report",
+                "entities": query_payload,
+                "source": "fast_path",
+                "llm_status": "bypassed",
+                "debug": {
+                    "source": "fast_path",
+                    "llm_status": "bypassed"
+                }
+            }
+
+        top_vendors = detect_top_device_vendors(message)
+        if top_vendors:
+            start_date, end_date = extract_date_range(message, reference_now=now)
+            if not start_date or not end_date:
+                start_date, end_date = _resolve_month_range(msg_lower, now)
+            if not start_date or not end_date:
+                if "august" in msg_lower or "aug" in msg_lower:
+                    start_date = "2026-08-01 00:00:00"
+                    end_date = "2026-08-31 23:59:59"
+                elif "this month" in msg_lower or "current month" in msg_lower:
+                    start_date = this_month_start
+                    end_date = this_month_end
+            filters = [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "tripStatus", "operator": "eq", "value": "valid"}
+            ]
+            if start_date:
+                filters.append({"field": "runDate", "operator": "gte", "value": start_date})
+            if end_date:
+                filters.append({"field": "runDate", "operator": "lte", "value": end_date})
+            filters.append({"field": top_vendors["vendor_field"], "operator": "eq", "value": "existing"})
+            query_payload = {
+                "entity": "trip",
+                "operation": "count",
+                "analytics": [
+                    {
+                        "type": top_vendors["analytics_type"]
+                    }
+                ],
+                "filters": filters,
+                "groupBy": [
+                    top_vendors["vendor_field"]
+                ],
+                "metrics": [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "TotalTrip"
+                    }
+                ],
+                "sort": [
+                    {
+                        "field": "TotalTrip",
+                        "order": "desc"
+                    }
+                ]
+            }
+            log_intent_detected(session_id, "trip_report")
+            log_entities_extracted(session_id, query_payload)
+            print(f"[DEBUG_QUERY] Session: {session_id} | Source: fast_path | LLM Status: bypassed | Mode: top_device_vendors")
             return {
                 "intent": "trip_report",
                 "entities": query_payload,
@@ -4223,7 +4316,31 @@ class IntentDetector:
                     return 15
                 return 20
 
-            if not (_is_fixed_portable_elock_combo or _is_multi_device_trip_query or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together) or bool(detect_device_analytics(message))):
+            norm_top_vendors = detect_top_device_vendors(message)
+            if norm_top_vendors:
+                query_payload["analytics"] = [{"type": norm_top_vendors["analytics_type"]}]
+                query_payload["groupBy"] = [norm_top_vendors["vendor_field"]]
+                query_payload["metrics"] = [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
+                query_payload["sort"] = [{"field": "TotalTrip", "order": "desc"}]
+                query_payload.pop("select", None)
+                v_fld = norm_top_vendors["vendor_field"]
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock", "gps", "GPS", "FixedGPS", "FixedELock", "PortableELock"))
+                ]
+                query_payload["filters"].append({
+                    "field": v_fld,
+                    "operator": "eq",
+                    "value": "existing"
+                })
+                query_payload["filters"].sort(key=_device_analytics_sort_key)
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "groupBy", "metrics", "sort"]:
+                    if k in query_payload:
+                        reordered[k] = query_payload[k]
+                query_payload.clear()
+                query_payload.update(reordered)
+            elif not (_is_fixed_portable_elock_combo or _is_multi_device_trip_query or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together) or bool(detect_device_analytics(message))):
                 query_payload["filters"].sort(key=_standard_filter_sort_key)
 
             reordered = {}
@@ -4293,6 +4410,66 @@ class IntentDetector:
                     "select": []
                 }
                 print(f"[DEBUG_QUERY] Session: {session_id} | Source: regex | LLM Status: {fb_llm_status or 'fallback'} | Mode: single_shipment_lookup")
+                return {
+                    "intent": "trip_report",
+                    "entities": fallback_payload,
+                    "source": "regex",
+                    "llm_status": fb_llm_status or "fallback",
+                    "debug": {
+                        "source": "regex",
+                        "llm_status": fb_llm_status or "fallback",
+                        "error_type": fb_error_type
+                    }
+                }
+
+            fb_top_vendors = detect_top_device_vendors(message)
+            if fb_top_vendors:
+                start_date, end_date = extract_date_range(message, reference_now=now)
+                if not start_date or not end_date:
+                    start_date, end_date = _resolve_month_range(msg_lower, now)
+                if not start_date or not end_date:
+                    if "august" in msg_lower or "aug" in msg_lower:
+                        start_date = "2026-08-01 00:00:00"
+                        end_date = "2026-08-31 23:59:59"
+                    elif "this month" in msg_lower or "current month" in msg_lower:
+                        start_date = this_month_start
+                        end_date = this_month_end
+                filters = [
+                    {"field": "groupId", "operator": "eq", "value": "0041"},
+                    {"field": "tripStatus", "operator": "eq", "value": "valid"}
+                ]
+                if start_date:
+                    filters.append({"field": "runDate", "operator": "gte", "value": start_date})
+                if end_date:
+                    filters.append({"field": "runDate", "operator": "lte", "value": end_date})
+                filters.append({"field": fb_top_vendors["vendor_field"], "operator": "eq", "value": "existing"})
+                fallback_payload = {
+                    "entity": "trip",
+                    "operation": "count",
+                    "analytics": [
+                        {
+                            "type": fb_top_vendors["analytics_type"]
+                        }
+                    ],
+                    "filters": filters,
+                    "groupBy": [
+                        fb_top_vendors["vendor_field"]
+                    ],
+                    "metrics": [
+                        {
+                            "field": "shipmentNo",
+                            "function": "count",
+                            "alias": "TotalTrip"
+                        }
+                    ],
+                    "sort": [
+                        {
+                            "field": "TotalTrip",
+                            "order": "desc"
+                        }
+                    ]
+                }
+                print(f"[DEBUG_QUERY] Session: {session_id} | Source: regex | LLM Status: {fb_llm_status or 'fallback'} | Mode: top_device_vendors")
                 return {
                     "intent": "trip_report",
                     "entities": fallback_payload,

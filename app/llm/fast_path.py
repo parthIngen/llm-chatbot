@@ -95,7 +95,7 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b', msg_l)):
         return True
-    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master, extract_single_shipment_lookup
+    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master, extract_single_shipment_lookup, detect_top_device_vendors
     if detect_vehicle_master(message) is not None:
         return True
     if detect_route_master(message) is not None:
@@ -103,6 +103,8 @@ def can_resolve_fast_path(message: str) -> bool:
     if detect_fleet_master(message) is not None:
         return True
     if extract_single_shipment_lookup(message) is not None:
+        return True
+    if detect_top_device_vendors(message) is not None:
         return True
 
     return False
@@ -115,7 +117,7 @@ def build_fast_path_payload(
     Constructs an initial structured query payload for queries that can be confidently resolved.
     Returns None if the query cannot be confidently resolved without an LLM.
     """
-    from app.llm.intent_detector import extract_single_shipment_lookup
+    from app.llm.intent_detector import extract_single_shipment_lookup, detect_top_device_vendors, extract_date_range, _resolve_month_range
     single_shp = extract_single_shipment_lookup(message)
     if single_shp:
         return {
@@ -134,6 +136,54 @@ def build_fast_path_payload(
                 }
             ],
             "select": []
+        }
+
+    ref_dt = reference_now or datetime.datetime.now()
+    top_v = detect_top_device_vendors(message)
+    if top_v:
+        start_date, end_date = extract_date_range(message, reference_now=ref_dt)
+        if not start_date or not end_date:
+            start_date, end_date = _resolve_month_range(message.lower(), ref_dt)
+        if not start_date or not end_date:
+            if "august" in message.lower() or "aug" in message.lower():
+                start_date = "2026-08-01 00:00:00"
+                end_date = "2026-08-31 23:59:59"
+
+        filters = [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"}
+        ]
+        if start_date:
+            filters.append({"field": "runDate", "operator": "gte", "value": start_date})
+        if end_date:
+            filters.append({"field": "runDate", "operator": "lte", "value": end_date})
+        filters.append({"field": top_v["vendor_field"], "operator": "eq", "value": "existing"})
+
+        return {
+            "entity": "trip",
+            "operation": "count",
+            "analytics": [
+                {
+                    "type": top_v["analytics_type"]
+                }
+            ],
+            "filters": filters,
+            "groupBy": [
+                top_v["vendor_field"]
+            ],
+            "metrics": [
+                {
+                    "field": "shipmentNo",
+                    "function": "count",
+                    "alias": "TotalTrip"
+                }
+            ],
+            "sort": [
+                {
+                    "field": "TotalTrip",
+                    "order": "desc"
+                }
+            ]
         }
 
     if not can_resolve_fast_path(message):

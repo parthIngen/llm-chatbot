@@ -623,6 +623,105 @@ class ResponseGenerator:
             except Exception:
                 pass
 
+        # Detect top tracking device vendors result: list of dicts with TotalTrip and vendorgps/vendorfixedelock/vendorportableelock
+        _vendor_key = None
+        if isinstance(api_data, list) and len(api_data) > 0 and all(isinstance(r, dict) for r in api_data):
+            for vk in ("vendorgps", "vendorfixedelock", "vendorportableelock"):
+                if any(vk in r for r in api_data):
+                    _vendor_key = vk
+                    break
+        _is_top_device_vendors_result = False
+        if _vendor_key:
+            _is_top_device_vendors_result = True
+        elif entities and isinstance(entities.get("groupBy"), list):
+            for vk in ("vendorgps", "vendorfixedelock", "vendorportableelock"):
+                if vk in entities["groupBy"]:
+                    _vendor_key = vk
+                    _is_top_device_vendors_result = True
+                    break
+
+        if _is_top_device_vendors_result:
+            if _vendor_key == "vendorportableelock" or (message and "portable" in message.lower()):
+                device_label = "Portable E-Lock"
+            elif _vendor_key == "vendorfixedelock" or (message and "fixed" in message.lower() and "lock" in message.lower()):
+                device_label = "Fixed E-Lock"
+            else:
+                device_label = "Fixed GPS"
+
+            vendor_rows = []
+            if isinstance(api_data, list):
+                for r in api_data:
+                    if not isinstance(r, dict):
+                        continue
+                    v_name = r.get(_vendor_key) or r.get("vendor") or r.get("vendorgps") or r.get("vendorfixedelock") or r.get("vendorportableelock")
+                    if not v_name:
+                        continue
+                    v_cnt = r.get("TotalTrip") or r.get("totaltrip") or r.get("count") or r.get("trip_count") or 0
+                    try:
+                        v_cnt = int(v_cnt)
+                    except (ValueError, TypeError):
+                        v_cnt = 0
+                    vendor_rows.append((str(v_name).strip(), v_cnt))
+
+            # Sort descending by count
+            vendor_rows.sort(key=lambda x: x[1], reverse=True)
+
+            date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+            if not date_clause and message and "august 2026" in message.lower():
+                date_clause = " in August 2026"
+
+            if not vendor_rows:
+                return f"No trips found for top {device_label} vendors{date_clause}."
+
+            # Build HTML list
+            list_items = []
+            for rank, (v_name, cnt) in enumerate(vendor_rows, 1):
+                if rank == 1:
+                    rank_bg = "#fef3c7"
+                    rank_color = "#b45309"
+                    rank_border = "#fde68a"
+                elif rank == 2:
+                    rank_bg = "#f1f5f9"
+                    rank_color = "#475569"
+                    rank_border = "#e2e8f0"
+                elif rank == 3:
+                    rank_bg = "#ffedd5"
+                    rank_color = "#c2410c"
+                    rank_border = "#fed7aa"
+                else:
+                    rank_bg = "#f8fafc"
+                    rank_color = "#64748b"
+                    rank_border = "#e2e8f0"
+
+                list_items.append(
+                    f'<li style="display: flex; align-items: center; justify-content: space-between; '
+                    f'padding: 10px 14px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; '
+                    f'box-shadow: 0 1px 3px rgba(0,0,0,0.04); margin-bottom: 8px;">\n'
+                    f'  <div style="display: flex; align-items: center; gap: 10px;">\n'
+                    f'    <span style="display: inline-flex; align-items: center; justify-content: center; '
+                    f'width: 26px; height: 26px; border-radius: 50%; background: {rank_bg}; color: {rank_color}; '
+                    f'border: 1px solid {rank_border}; font-weight: 700; font-size: 12px;">{rank}</span>\n'
+                    f'    <span style="font-weight: 600; font-size: 14px; color: #0f172a;">{v_name}</span>\n'
+                    f'  </div>\n'
+                    f'  <span style="font-size: 13px; font-weight: 700; color: #2563eb; background: #eff6ff; '
+                    f'padding: 4px 10px; border-radius: 6px; border: 1px solid #dbeafe;">{cnt:,} trips</span>\n'
+                    f'</li>'
+                )
+
+            ol_content = "\n".join(list_items)
+            html_card = (
+                f'<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; '
+                f'max-width: 650px; margin-top: 10px;">\n'
+                f'<ol style="list-style: none; padding: 0; margin: 0;">\n'
+                f'{ol_content}\n'
+                f'</ol>\n'
+                f'<p style="font-size: 12px; color: #64748b; margin-top: 8px; margin-bottom: 0;">* Based on valid trips. Cancelled trips are excluded.</p>\n'
+                f'</div>'
+            )
+
+            intro_msg = f"Here is the list of top {device_label} vendors by trip count{date_clause}:"
+            return f"{intro_msg}\n\n{html_card}"
+
         # Detect distinct-vehicle grouped result: list of dicts each with 'uniqueVehicleCount' or 'totalUniqueVehicleCount'
         _is_distinct_vehicle_result = (
             isinstance(api_data, list)

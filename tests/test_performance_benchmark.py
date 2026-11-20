@@ -1037,6 +1037,77 @@ def test_shipment_details_exact_payload_and_reply(query):
         assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
 
 
+@pytest.mark.parametrize("query,expected_analytics,expected_vendor_field,expected_label", [
+    ("How many trips used the top Fixed GPS vendors in August 2026?", "gps", "vendorgps", "Fixed GPS"),
+    ("How many trips used the top Fixed elock vendors in August 2026?", "fixedelock", "vendorfixedelock", "Fixed E-Lock"),
+    ("How many trips used the top portable elock GPS vendors in August 2026?", "portablelock", "vendorportableelock", "Portable E-Lock"),
+    ("How many trips used the top portable elock vendors in August 2026?", "portablelock", "vendorportableelock", "Portable E-Lock"),
+])
+def test_top_device_vendors_payload_and_reply(query, expected_analytics, expected_vendor_field, expected_label):
+    """
+    Validates exact payload, field order, and HTML list response for top tracking device vendor queries.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [
+            {
+                "TotalTrip": 77145,
+                expected_vendor_field: "SECUTRAK"
+            },
+            {
+                "TotalTrip": 42310,
+                expected_vendor_field: "WHEELSEYE"
+            }
+        ]
+    }
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "test-top-vendors",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert "select" not in entities
+        assert entities.get("analytics") == [{"type": expected_analytics}]
+        assert entities.get("groupBy") == [expected_vendor_field]
+        assert entities.get("metrics") == [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
+        assert entities.get("sort") == [{"field": "TotalTrip", "order": "desc"}]
+
+        filters = entities["filters"]
+        assert len(filters) == 5
+        assert filters[0] == {"field": "groupId", "operator": "eq", "value": "0041"}
+        assert filters[1] == {"field": "tripStatus", "operator": "eq", "value": "valid"}
+        assert filters[2] == {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}
+        assert filters[3] == {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        assert filters[4] == {"field": expected_vendor_field, "operator": "eq", "value": "existing"}
+
+        reply = res["reply"]
+        assert "<ol" in reply
+        assert "<li" in reply
+        assert "SECUTRAK" in reply
+        assert "77,145 trips" in reply
+        assert "WHEELSEYE" in reply
+        assert "42,310 trips" in reply
+        assert expected_label in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
 
 
 
