@@ -72,11 +72,12 @@ _YMD_DATE_PAT = re.compile(
 )
 
 def _resolve_month_range(text: str, reference_now: datetime.datetime) -> tuple[str | None, str | None]:
-    """Return (start, end) date-time strings for the first month name found in *text*.
+    """Return (start, end) date-time strings for month name(s) found in *text*.
 
+    If multiple months are found (e.g. 'between August 2026 and October 2026' or 'August to October 2026'),
+    returns a range from the start of the first month to the end of the last month.
     If the message also contains a 4-digit year (e.g. '2026'), that year is used.
-    Otherwise the most-recently-passed occurrence of that month relative to
-    *reference_now* is used (so 'august' in September 2026 → August 2026).
+    Otherwise the most-recently-passed occurrence relative to *reference_now* is used.
     """
     if (
         _SPECIFIC_DATE_PAT1.search(text)
@@ -88,27 +89,54 @@ def _resolve_month_range(text: str, reference_now: datetime.datetime) -> tuple[s
     ):
         return None, None
 
-    m = _MONTH_PATTERN.search(text)
-    if not m:
+    all_matches = list(_MONTH_PATTERN.finditer(text))
+    if not all_matches:
         return None, None
 
-    month_num = _MONTH_MAP.get(m.group(1).lower())
-    if not month_num:
+    # Determine explicit year in text if present
+    text_year_match = re.search(r'\b(20\d{2})\b', text)
+    explicit_year = int(text_year_match.group(1)) if text_year_match else None
+
+    # First month
+    m1 = all_matches[0]
+    month_num1 = _MONTH_MAP.get(m1.group(1).lower())
+    if not month_num1:
         return None, None
 
-    # Explicit year wins; otherwise pick most-recently-passed month occurrence
-    year_str = m.group("year")
-    if year_str:
-        year = int(year_str)
+    year_str1 = m1.group("year")
+    if year_str1:
+        year1 = int(year_str1)
+    elif explicit_year:
+        year1 = explicit_year
     else:
-        year = reference_now.year
-        # If the named month is still in the future this calendar year, use last year
-        if month_num > reference_now.month:
-            year -= 1
+        year1 = reference_now.year
+        if month_num1 > reference_now.month:
+            year1 -= 1
 
-    last_day = calendar.monthrange(year, month_num)[1]
-    start = f"{year}-{month_num:02d}-01 00:00:00"
-    end   = f"{year}-{month_num:02d}-{last_day:02d} 23:59:59"
+    # Last month (if multiple months mentioned, e.g. "August to October 2026")
+    m2 = all_matches[-1]
+    month_num2 = _MONTH_MAP.get(m2.group(1).lower())
+    if not month_num2:
+        month_num2 = month_num1
+        year2 = year1
+    else:
+        year_str2 = m2.group("year")
+        if year_str2:
+            year2 = int(year_str2)
+        elif explicit_year:
+            year2 = explicit_year
+        else:
+            year2 = year1
+            if month_num2 > reference_now.month:
+                year2 -= 1
+
+    if year1 > year2 or (year1 == year2 and month_num1 > month_num2):
+        year1, year2 = year2, year1
+        month_num1, month_num2 = month_num2, month_num1
+
+    last_day2 = calendar.monthrange(year2, month_num2)[1]
+    start = f"{year1}-{month_num1:02d}-01 00:00:00"
+    end   = f"{year2}-{month_num2:02d}-{last_day2:02d} 23:59:59"
     return start, end
 
 def extract_date_range(text: str, reference_now: datetime.datetime | None = None) -> tuple[str | None, str | None]:
@@ -420,6 +448,35 @@ def detect_top_device_vendors(text: str) -> Optional[Dict[str, str]]:
             "vendor_field": "vendorgps",
             "label": "Fixed GPS"
         }
+    return None
+
+def detect_date_grouping(text: str) -> Optional[str]:
+    """
+    Detects whether query requests date grouping (daywise or monthwise).
+    Returns "day", "month", or None.
+    """
+    if not text:
+        return None
+    text_l = text.lower()
+
+    # Day-wise patterns:
+    # "dayswise", "daywise", "day wise", "days wise", "breakdown each day", "breakdown of each day",
+    # "details of each day", "each day", "every day", "daily breakdown", "per day", "by day", "daily", "day-by-day"
+    if bool(re.search(
+        r'\b(?:days?[\s-]?wise|breakdown\s+(?:of\s+|for\s+)?(?:each|every|per)\s+day|breakdown\s+by\s+day|details?\s+of\s+(?:each|every)\s+day|day[\s-]by[\s-]day|daily\s+breakdown|per\s+day|each\s+day|by\s+day|daily)\b',
+        text_l
+    )):
+        return "day"
+
+    # Month-wise patterns:
+    # "monthwise", "month wise", "months-wise", "breakdown each month", "breakdown of each month",
+    # "details of each month", "each month", "every month", "monthly breakdown", "per month", "by month", "monthly", "month-by-month"
+    if bool(re.search(
+        r'\b(?:months?[\s-]?wise|breakdown\s+(?:of\s+|for\s+)?(?:each|every|per)\s+month|breakdown\s+by\s+month|details?\s+of\s+(?:each|every)\s+month|month[\s-]by[\s-]month|monthly\s+breakdown|per\s+month|each\s+month|by\s+month|monthly)\b',
+        text_l
+    )):
+        return "month"
+
     return None
 
 def detect_shipment_methods(text: str) -> list[str]:
@@ -3752,6 +3809,12 @@ class IntentDetector:
                         "operator": "eq",
                         "value": rm_detected
                     })
+                if rm_detected == "outside":
+                    query_payload.setdefault("filters", []).append({
+                        "field": "shipmentMethod",
+                        "operator": "nin",
+                        "value": ["Pick Up", "Delivery", "Pick Up and Delivery"]
+                    })
                 query_payload["select"] = []
                 query_payload.pop("groupBy", None)
                 query_payload.pop("metrics", None)
@@ -3777,6 +3840,12 @@ class IntentDetector:
                         "field": "fleetMaster",
                         "operator": "eq",
                         "value": fm_detected
+                    })
+                if fm_detected == "outside":
+                    query_payload.setdefault("filters", []).append({
+                        "field": "shipmentMethod",
+                        "operator": "nin",
+                        "value": ["Pick Up", "Delivery", "Pick Up and Delivery"]
                     })
                 query_payload["select"] = []
                 query_payload.pop("groupBy", None)
@@ -4389,8 +4458,28 @@ class IntentDetector:
             elif not (_is_fixed_portable_elock_combo or _is_multi_device_trip_query or _is_transporter_unique_vehicles_query or is_vendor_running_query or _is_active_device_elock_query or _is_active_device_portable_query or _is_distinct_transporter_query or _is_portable_elock_trip_query or _is_fixed_elock_trip_query or _is_fixed_gps_combo or _is_fixed_gps_only or _is_portable_elock_only or _is_fixed_elock_only or _is_trip_type_breakdown_query or _is_network_vs_local_query or _is_no_gps_vehicle_query or _is_gps_trip_query or (target_vendor and not _is_devices_together) or bool(detect_device_analytics(message))):
                 query_payload["filters"].sort(key=_standard_filter_sort_key)
 
+            date_grp = detect_date_grouping(message)
+            if date_grp:
+                query_payload["groupBy"] = ["runDate"]
+                query_payload["groupByFormat"] = {"runDate": date_grp}
+                query_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "TotalTrip"
+                    }
+                ]
+                query_payload["sort"] = [
+                    {
+                        "field": "runDate",
+                        "order": "asc"
+                    }
+                ]
+                if "select" not in query_payload:
+                    query_payload["select"] = []
+
             reordered = {}
-            for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+            for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "groupByFormat", "metrics", "sort"]:
                 if k in query_payload:
                     reordered[k] = query_payload[k]
             for k, v in query_payload.items():
@@ -6885,6 +6974,12 @@ class IntentDetector:
                         "operator": "eq",
                         "value": fb_rm_detected
                     })
+                if fb_rm_detected == "outside":
+                    fallback_payload.setdefault("filters", []).append({
+                        "field": "shipmentMethod",
+                        "operator": "nin",
+                        "value": ["Pick Up", "Delivery", "Pick Up and Delivery"]
+                    })
                 fallback_payload["select"] = []
                 fallback_payload.pop("groupBy", None)
                 fallback_payload.pop("metrics", None)
@@ -6910,6 +7005,12 @@ class IntentDetector:
                         "field": "fleetMaster",
                         "operator": "eq",
                         "value": fb_fm_detected
+                    })
+                if fb_fm_detected == "outside":
+                    fallback_payload.setdefault("filters", []).append({
+                        "field": "shipmentMethod",
+                        "operator": "nin",
+                        "value": ["Pick Up", "Delivery", "Pick Up and Delivery"]
                     })
                 fallback_payload["select"] = []
                 fallback_payload.pop("groupBy", None)
@@ -6960,8 +7061,28 @@ class IntentDetector:
             if not (fb_is_fixed_portable_elock_combo or fb_is_multi_device_trip_query or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query or fb_is_active_device_elock_query or fb_is_active_device_portable_query or fb_is_distinct_transporter_query or fb_is_portable_elock_trip_query or fb_is_fixed_elock_trip_query or fb_is_fixed_gps_combo or fb_is_fixed_gps_only or fb_is_portable_elock_only or fb_is_fixed_elock_only or fb_is_trip_type_breakdown_query or fb_is_network_vs_local_query or fb_is_no_gps_vehicle_query or fb_is_gps_trip_query or (fb_target_vendor and not fb_is_devices_together) or bool(detect_device_analytics(message))):
                 fallback_payload["filters"].sort(key=_fb_standard_filter_sort_key)
 
+            fb_date_grp = detect_date_grouping(message)
+            if fb_date_grp:
+                fallback_payload["groupBy"] = ["runDate"]
+                fallback_payload["groupByFormat"] = {"runDate": fb_date_grp}
+                fallback_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "TotalTrip"
+                    }
+                ]
+                fallback_payload["sort"] = [
+                    {
+                        "field": "runDate",
+                        "order": "asc"
+                    }
+                ]
+                if "select" not in fallback_payload:
+                    fallback_payload["select"] = []
+
             reordered = {}
-            for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
+            for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "groupByFormat", "metrics", "sort"]:
                 if k in fallback_payload:
                     reordered[k] = fallback_payload[k]
             for k, v in fallback_payload.items():

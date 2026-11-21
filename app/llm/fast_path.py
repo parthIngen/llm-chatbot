@@ -109,7 +109,7 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b', msg_l)):
         return True
-    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master, extract_single_shipment_lookup, detect_top_device_vendors
+    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master, extract_single_shipment_lookup, detect_top_device_vendors, detect_date_grouping
     if detect_vehicle_master(message) is not None:
         return True
     if detect_route_master(message) is not None:
@@ -119,6 +119,8 @@ def can_resolve_fast_path(message: str) -> bool:
     if extract_single_shipment_lookup(message) is not None:
         return True
     if detect_top_device_vendors(message) is not None:
+        return True
+    if detect_date_grouping(message) is not None:
         return True
 
     return False
@@ -526,6 +528,12 @@ def build_fast_path_payload(
             if not (isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master", "fleetMaster", "fleet_master", "Route", "route", "RouteName", "routeName", "shipmentMethod"))
         ]
         payload["filters"].append({"field": "routeMaster", "operator": "eq", "value": rm})
+        if rm == "outside":
+            payload["filters"].append({
+                "field": "shipmentMethod",
+                "operator": "nin",
+                "value": ["Pick Up", "Delivery", "Pick Up and Delivery"]
+            })
         payload.pop("groupBy", None)
         payload.pop("metrics", None)
         payload.pop("analytics", None)
@@ -536,6 +544,12 @@ def build_fast_path_payload(
             if not (isinstance(f, dict) and f.get("field") in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "Route", "route", "RouteName", "routeName", "shipmentMethod"))
         ]
         payload["filters"].append({"field": "fleetMaster", "operator": "eq", "value": fm})
+        if fm == "outside":
+            payload["filters"].append({
+                "field": "shipmentMethod",
+                "operator": "nin",
+                "value": ["Pick Up", "Delivery", "Pick Up and Delivery"]
+            })
         payload.pop("groupBy", None)
         payload.pop("metrics", None)
         payload.pop("analytics", None)
@@ -556,4 +570,76 @@ def build_fast_path_payload(
         elif not bool(re.search(r'\bincluding\s+cancel|include\s+cancel\b', msg_l)):
             payload["filters"].append({"field": "tripStatus", "operator": "eq", "value": "valid"})
 
-    return payload
+    from app.llm.intent_detector import detect_date_grouping, extract_date_range, _resolve_month_range
+    date_grp = detect_date_grouping(message)
+    if date_grp:
+        payload["groupBy"] = ["runDate"]
+        payload["groupByFormat"] = {"runDate": date_grp}
+        payload["metrics"] = [
+            {
+                "field": "shipmentNo",
+                "function": "count",
+                "alias": "TotalTrip"
+            }
+        ]
+        payload["sort"] = [
+            {
+                "field": "runDate",
+                "order": "asc"
+            }
+        ]
+        if "select" not in payload:
+            payload["select"] = []
+
+    has_run_date = any(isinstance(f, dict) and f.get("field") == "runDate" for f in payload["filters"])
+    if not has_run_date:
+        s_d, e_d = extract_date_range(message, reference_now=ref_dt)
+        if not s_d or not e_d:
+            s_d, e_d = _resolve_month_range(msg_l, ref_dt)
+        if s_d and e_d:
+            payload["filters"].append({"field": "runDate", "operator": "gte", "value": s_d})
+            payload["filters"].append({"field": "runDate", "operator": "lte", "value": e_d})
+
+    def _fast_path_filter_sort_key(flt):
+        if not isinstance(flt, dict):
+            return 99
+        field = flt.get("field")
+        op = flt.get("operator")
+        if field == "groupId":
+            return 1
+        elif field == "tripStatus":
+            return 2
+        elif field in ("GPS", "FixedGPS", "FixedELock", "PortableELock", "gps", "fixedgps"):
+            return 2.5
+        elif field == "runDate" and op == "gte":
+            return 3
+        elif field == "runDate" and op == "lte":
+            return 4
+        elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
+            return 4.5
+        elif field in ("source", "destination", "From", "To"):
+            return 5
+        elif field == "region":
+            return 6
+        elif field in ("vehicleNo", "vehicle_no", "vehicle"):
+            return 7
+        elif field in ("Route", "route", "RouteName", "routeName"):
+            return 8
+        elif field in ("transporter", "Transporter"):
+            return 9
+        elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+            return 10
+        elif field == "shipmentMethod":
+            return 11
+        return 20
+
+    payload["filters"].sort(key=_fast_path_filter_sort_key)
+
+    reordered = {}
+    for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "groupByFormat", "metrics", "sort"]:
+        if k in payload:
+            reordered[k] = payload[k]
+    for k, v in payload.items():
+        if k not in reordered:
+            reordered[k] = v
+    return reordered

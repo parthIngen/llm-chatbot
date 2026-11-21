@@ -24,6 +24,7 @@ def build_natural_response(
 
     # Extract filter fields
     filter_map: Dict[str, Any] = {}
+    filter_ops: Dict[str, str] = {}
     for f in filters:
         if not isinstance(f, dict):
             continue
@@ -37,6 +38,7 @@ def build_natural_response(
                 end_date = val
         elif field and field != "groupId":
             filter_map[field] = val
+            filter_ops[field] = op
 
     # Handle analytics (e.g. delayed departure/arrival)
     for a in analytics:
@@ -101,7 +103,7 @@ def build_natural_response(
         prefix_adjs = []
         if route_category in ("intercity", "intracity"):
             prefix_adjs.append(route_category)
-        if shipment_method:
+        if shipment_method and filter_ops.get("shipmentMethod") != "nin":
             if isinstance(shipment_method, list):
                 prefix_adjs.append(" and ".join(shipment_method).lower())
             else:
@@ -202,7 +204,7 @@ def build_natural_response(
     if route_category in ("intercity", "intracity"):
         prefix_parts.append(route_category)
 
-    if shipment_method:
+    if shipment_method and filter_ops.get("shipmentMethod") != "nin":
         if isinstance(shipment_method, list):
             prefix_parts.append(" and ".join(shipment_method).lower())
         else:
@@ -720,6 +722,139 @@ class ResponseGenerator:
             )
 
             intro_msg = f"Here is the list of top {device_label} vendors by trip count{date_clause}:"
+            return f"{intro_msg}\n\n{html_card}"
+
+        # Detect date-wise (day-wise or month-wise) grouped result: list of dicts with 'runDate' and 'TotalTrip' (or similar count)
+        _is_date_grouped_result = False
+        if isinstance(api_data, list) and len(api_data) > 0 and all(isinstance(r, dict) for r in api_data):
+            has_rundate_key = any("rundate" in k.lower() for k in api_data[0].keys())
+            has_trip_count = any(k in ("TotalTrip", "totaltrip", "count", "trip_count", "TotalTrips") for k in api_data[0].keys())
+            if has_rundate_key and has_trip_count:
+                _is_date_grouped_result = True
+            elif entities and (
+                entities.get("groupBy") == ["runDate"]
+                or "runDate" in (entities.get("groupBy") or [])
+                or bool(entities.get("groupByFormat"))
+            ):
+                _is_date_grouped_result = True
+
+        if _is_date_grouped_result:
+            sample_rd = ""
+            for r in api_data:
+                val = str(r.get("runDate") or r.get("rundate") or "").strip()
+                if val:
+                    sample_rd = val
+                    break
+
+            grp_fmt = entities.get("groupByFormat", {}).get("runDate") if (entities and isinstance(entities.get("groupByFormat"), dict)) else None
+            is_month = False
+            if grp_fmt == "month":
+                is_month = True
+            elif grp_fmt == "day":
+                is_month = False
+            elif len(sample_rd) == 7 and "-" in sample_rd:
+                is_month = True
+            elif len(sample_rd) == 10 and sample_rd.count("-") == 2:
+                is_month = False
+            elif message and ("month" in message.lower() or "monthly" in message.lower()):
+                is_month = True
+
+            date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+
+            grand_total = 0
+            for r in api_data:
+                c = r.get("TotalTrip") or r.get("totaltrip") or r.get("count") or r.get("trip_count") or r.get("TotalTrips") or 0
+                try:
+                    grand_total += int(c)
+                except (ValueError, TypeError):
+                    pass
+
+            MONTH_NAMES = {
+                "01": "January", "02": "February", "03": "March", "04": "April",
+                "05": "May", "06": "June", "07": "July", "08": "August",
+                "09": "September", "10": "October", "11": "November", "12": "December"
+            }
+
+            if is_month:
+                period_col_name = "Month"
+                card_title = "Month-wise Trip Breakdown"
+                intro_msg = f"Here is the month-wise breakdown of trips{date_clause}:"
+            else:
+                period_col_name = "Date"
+                card_title = "Day-wise Trip Breakdown"
+                intro_msg = f"Here is the day-wise breakdown of trips{date_clause}:"
+
+            table_rows_html = []
+            for i, r in enumerate(api_data):
+                rd = str(r.get("runDate") or r.get("rundate") or "").strip()
+                cnt_val = r.get("TotalTrip") or r.get("totaltrip") or r.get("count") or r.get("trip_count") or r.get("TotalTrips") or 0
+                try:
+                    cnt = int(cnt_val)
+                except (ValueError, TypeError):
+                    cnt = 0
+
+                bg = "#fafbfc" if i % 2 == 1 else "#ffffff"
+
+                if is_month and len(rd) == 7 and "-" in rd:
+                    y, m = rd.split("-", 1)
+                    m_name = MONTH_NAMES.get(m, m)
+                    date_display = f'<span style="font-weight: 600; color: #1e293b;">{m_name} {y}</span> <span style="font-size: 11px; color: #94a3b8; font-weight: 500;">({rd})</span>'
+                else:
+                    date_display = f'<span style="font-weight: 600; color: #1e293b;">{rd}</span>'
+
+                pct_str = f"{(cnt / grand_total * 100):.1f}%" if grand_total > 0 else "0%"
+
+                table_rows_html.append(
+                    f'<tr style="background: {bg}; border-bottom: 1px solid #f1f5f9;">'
+                    f'<td style="padding: 10px 16px; font-size: 13px;">{date_display}</td>'
+                    f'<td style="padding: 10px 16px; text-align: right; font-size: 13px;">'
+                    f'<span style="font-weight: 700; color: #2563eb; background: #eff6ff; padding: 3px 9px; border-radius: 6px; border: 1px solid #dbeafe;">{cnt:,}</span>'
+                    f'</td>'
+                    f'<td style="padding: 10px 16px; text-align: right; font-size: 12px; font-weight: 600; color: #64748b;">{pct_str}</td>'
+                    f'</tr>'
+                )
+
+            table_content = "\n".join(table_rows_html)
+            scroll_style = "max-height: 480px; overflow-y: auto;" if len(api_data) > 12 else ""
+
+            html_card = (
+                f'<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; '
+                f'max-width: 650px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; '
+                f'box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-top: 10px;">\n'
+                f'  <div style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #e2e8f0; display: flex; '
+                f'align-items: center; justify-content: space-between;">\n'
+                f'    <span style="font-size: 15px; font-weight: 700; color: #1e293b;">📅 {card_title}</span>\n'
+                f'    <span style="background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 700; '
+                f'padding: 3px 10px; border-radius: 9999px; border: 1px solid #bfdbfe;">{grand_total:,} Total Trips</span>\n'
+                f'  </div>\n'
+                f'  <div style="{scroll_style}">\n'
+                f'    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">\n'
+                f'      <thead style="position: sticky; top: 0; z-index: 2;">\n'
+                f'        <tr style="background: #f1f5f9; border-bottom: 1px solid #e2e8f0;">\n'
+                f'          <th style="padding: 10px 16px; text-align: left; font-weight: 700; color: #475569; font-size: 13px;">{period_col_name}</th>\n'
+                f'          <th style="padding: 10px 16px; text-align: right; font-weight: 700; color: #475569; font-size: 13px;">Trips</th>\n'
+                f'          <th style="padding: 10px 16px; text-align: right; font-weight: 700; color: #475569; font-size: 13px;">Share</th>\n'
+                f'        </tr>\n'
+                f'      </thead>\n'
+                f'      <tbody>\n'
+                f'{table_content}\n'
+                f'      </tbody>\n'
+                f'      <tfoot>\n'
+                f'        <tr style="background: #f8fafc; border-top: 2px solid #cbd5e1; font-weight: 700;">\n'
+                f'          <td style="padding: 10px 16px; color: #0f172a; font-size: 13px;">Total</td>\n'
+                f'          <td style="padding: 10px 16px; text-align: right; font-size: 13px;">\n'
+                f'            <span style="font-weight: 700; color: #1d4ed8; background: #dbeafe; padding: 4px 10px; border-radius: 6px; border: 1px solid #bfdbfe;">{grand_total:,}</span>\n'
+                f'          </td>\n'
+                f'          <td style="padding: 10px 16px; text-align: right; font-size: 12px; color: #0f172a;">100%</td>\n'
+                f'        </tr>\n'
+                f'      </tfoot>\n'
+                f'    </table>\n'
+                f'  </div>\n'
+                f'  <div style="background: #fafbfc; padding: 8px 16px; border-top: 1px solid #f1f5f9; font-size: 12px; color: #64748b;">\n'
+                f'    * Based on valid trips. Cancelled trips are excluded.\n'
+                f'  </div>\n'
+                f'</div>'
+            )
             return f"{intro_msg}\n\n{html_card}"
 
         # Detect distinct-vehicle grouped result: list of dicts each with 'uniqueVehicleCount' or 'totalUniqueVehicleCount'

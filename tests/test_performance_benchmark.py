@@ -856,13 +856,19 @@ def test_route_master_queries_exact_payload_and_reply(query, expected_rm):
 
         filters = entities["filters"]
         field_order = [f.get("field") for f in filters]
-        assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "routeMaster"], f"Unexpected field order: {field_order}"
+        if expected_rm == "outside":
+            assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "routeMaster", "shipmentMethod"], f"Unexpected field order: {field_order}"
+        else:
+            assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "routeMaster"], f"Unexpected field order: {field_order}"
 
         f_map = {f["field"]: f for f in filters if "field" in f}
         assert f_map["groupId"]["value"] == "0041"
         assert f_map["tripStatus"]["value"] == "valid"
         assert f_map["routeMaster"]["value"] == expected_rm
         assert f_map["routeMaster"]["operator"] == "eq"
+        if expected_rm == "outside":
+            assert f_map["shipmentMethod"]["operator"] == "nin"
+            assert f_map["shipmentMethod"]["value"] == ["Pick Up", "Delivery", "Pick Up and Delivery"]
 
         date_filters = [f for f in filters if f.get("field") == "runDate"]
         assert len(date_filters) == 2
@@ -923,13 +929,19 @@ def test_fleet_master_queries_exact_payload_and_reply(query, expected_fm):
 
         filters = entities["filters"]
         field_order = [f.get("field") for f in filters]
-        assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "fleetMaster"], f"Unexpected field order: {field_order}"
+        if expected_fm == "outside":
+            assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "fleetMaster", "shipmentMethod"], f"Unexpected field order: {field_order}"
+        else:
+            assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "fleetMaster"], f"Unexpected field order: {field_order}"
 
         f_map = {f["field"]: f for f in filters if "field" in f}
         assert f_map["groupId"]["value"] == "0041"
         assert f_map["tripStatus"]["value"] == "valid"
         assert f_map["fleetMaster"]["value"] == expected_fm
         assert f_map["fleetMaster"]["operator"] == "eq"
+        if expected_fm == "outside":
+            assert f_map["shipmentMethod"]["operator"] == "nin"
+            assert f_map["shipmentMethod"]["value"] == ["Pick Up", "Delivery", "Pick Up and Delivery"]
 
         date_filters = [f for f in filters if f.get("field") == "runDate"]
         assert len(date_filters) == 2

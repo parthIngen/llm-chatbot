@@ -40,6 +40,12 @@ TRIP DOMAIN RULES:
    - "closed automatically via geofence" -> closeremark eq "geofence"
    - Allowed values: "manual", "forcefully", "geofence", "polygon", "api", "backend", "web"
 
+8. DATE GROUPING / BREAKDOWN (daywise or monthwise):
+   - "dayswise", "daywise", "breakdown each day", "details of each day", "daily breakdown", "each day", "by day", "day-by-day" ->
+     "groupBy": ["runDate"], "groupByFormat": {"runDate": "day"}, "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "runDate", "order": "asc"}]
+   - "monthwise", "month wise", "breakdown each month", "details of each month", "monthly breakdown", "each month", "by month", "month-by-month" ->
+     "groupBy": ["runDate"], "groupByFormat": {"runDate": "month"}, "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "runDate", "order": "asc"}]
+
 TRIP EXAMPLES:
 - "Show all running trips" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}], "select": []}
@@ -72,11 +78,11 @@ TRIP EXAMPLES:
 - "total trips with vehicle inside of master in August 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "vehicleMaster", "operator": "eq", "value": "inside"}], "select": []}
 - "Total trips with route outside of master (Route NA in Network Module) in August 2026" / "Total trips with (Route NA in Network Module in August 2026" / "Total trips with route outside of master in August 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeMaster", "operator": "eq", "value": "outside"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeMaster", "operator": "eq", "value": "outside"}, {"field": "shipmentMethod", "operator": "nin", "value": ["Pick Up", "Delivery", "Pick Up and Delivery"]}], "select": []}
 - "Total trips with route inside of master in August 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "routeMaster", "operator": "eq", "value": "inside"}], "select": []}
 - "Total trips with fleet outside of master (Fleet NA in Network Module) in August 2026" / "Total trips with fleet outside of master in August 2026" / "Total trips with Fleet NA in Network Module in August 2026" ->
-  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fleetMaster", "operator": "eq", "value": "outside"}], "select": []}
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fleetMaster", "operator": "eq", "value": "outside"}, {"field": "shipmentMethod", "operator": "nin", "value": ["Pick Up", "Delivery", "Pick Up and Delivery"]}], "select": []}
 - "Total trips with fleet inside of master in August 2026" / "Total trips with fleet in Network Module in August 2026" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "fleetMaster", "operator": "eq", "value": "inside"}], "select": []}
 - "Lis of the vehicle was on trip this month for the transporter - DIDAR SINGH" / "how many vehicle was on trip this month for the transporter - DIDAR SINGH" ->
@@ -97,5 +103,9 @@ TRIP EXAMPLES:
   {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedlockonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
 - "How many trips in August 2026 used Portable E-Lock only?" / "How many trips in August 2026 used Portable E-Lock only (without Fixed GPS or Fixed E-Lock)?" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "portablelockonly"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": []}
+- "monthwise breakdown of trips between August 2026 and October 2026" / "breakdown each month between August 2026 and October 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-10-31 23:59:59"}], "select": [], "groupBy": ["runDate"], "groupByFormat": {"runDate": "month"}, "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "runDate", "order": "asc"}]}
+- "daywise breakdown of trips in August 2026" / "details of each day in August 2026" / "dayswise trip count in August 2026" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["runDate"], "groupByFormat": {"runDate": "day"}, "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "runDate", "order": "asc"}]}
 """
 
