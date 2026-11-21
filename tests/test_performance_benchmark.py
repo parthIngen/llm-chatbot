@@ -39,6 +39,7 @@ BENCHMARK_QUERIES = [
     ("Show trips with Fixed GPS and Fixed E-Lock.", "fixed_gps_and_elock", {"analytics": "withgps"}),
     ("Show trips with Fixed E-Lock and Portable E-Lock together.", "elock_together", {"analytics": "withgps"}),
     ("Show trips without any device.", "without_any_device", {"analytics": "withoutanygps"}),
+    ("How many trips in August 2026 had Fixed GPS connectivity on Empty route type trips?", "fixed_gps_connectivity_empty", {"analytics": "gps", "GPS": "active", "shipmentMethod": "empty", "tripStatus": "valid", "has_dates": True, "no_group_by": True}),
 
     # Comparisons and analytics
     ("Compare Network and Local trips.", "network_vs_local", {"groupBy": "tripType"}),
@@ -1306,6 +1307,49 @@ def test_unique_vehicles_intercity_no_fixed_gps():
         assert "with GPS" not in reply
         assert "3121" in reply
         assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+def test_fixed_gps_connectivity_on_empty_trips_exact_payload():
+    """
+    Test exact payload for:
+    'How many trips in August 2026 had Fixed GPS connectivity on Empty route type trips?'
+    """
+    query = "How many trips in August 2026 had Fixed GPS connectivity on Empty route type trips?"
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {"success": True, "data": 842}
+
+    with patch("requests.post", return_value=mock_api_res) as mock_post:
+        start_time = time.perf_counter()
+        response = client.post("/api/v1/chat", json={"message": query})
+        duration = time.perf_counter() - start_time
+
+        assert response.status_code == 200
+        res = response.json()
+        assert res["intent"] == "trip_report"
+        entities = res["entities"]
+
+        assert entities["entity"] == "trip"
+        assert entities["operation"] == "count"
+        assert entities.get("analytics") == [{"type": "gps"}]
+        assert entities.get("select") == []
+        assert "groupBy" not in entities
+
+        filters = entities["filters"]
+        expected_filters = [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "GPS", "operator": "eq", "value": "active"},
+            {"field": "shipmentMethod", "operator": "eq", "value": "empty"}
+        ]
+        assert filters == expected_filters
+
+        reply = res["reply"]
+        assert "842" in reply
+        assert "active" in reply.lower()
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
 
 
 

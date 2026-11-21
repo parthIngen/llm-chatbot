@@ -983,8 +983,19 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
         or re.search(r'\bnon\s+gps\b', msg_l)
         or re.search(r'\bnogps\b', msg_l)
     )
-    is_inactive = bool(re.search(r'\b(?:inactive|no\s+connectivity|connectivity)\b', msg_l))
-    is_active = bool(re.search(r'\bactive\b', msg_l)) and not bool(re.search(r'\bactive\s+trips?\b', msg_l))
+    is_inactive = bool(
+        re.search(r'\b(?:inactive|no\s+connectivity|without\s+connectivity|lost\s+connectivity|zero\s+connectivity|lacking\s+connectivity)\b', msg_l)
+    )
+    is_active = (
+        bool(
+            re.search(r'\bactive\b', msg_l)
+            or re.search(r'\bconnectivity\s+on\b', msg_l)
+            or re.search(r'\b(?:had|with)\s+(?:fixed[\s-]*(?:gps|e?locks?)\s+|portable[\s-]*e?locks?\s+|gps\s+|device\s+)?connectivity\b', msg_l)
+            or (bool(re.search(r'\bconnectivity\b', msg_l)) and not is_inactive)
+        )
+        and not bool(re.search(r'\bactive\s+trips?\b', msg_l))
+        and not is_inactive
+    )
     is_only_or_single = bool(re.search(r'\b(?:single|only|sole|alone|exclusive)\b', msg_l))
 
     # Download / export queries without explicit device status are report downloads, not device analytics
@@ -2598,7 +2609,9 @@ class IntentDetector:
                     return "nogps "
                 elif re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg):
                     return "nogps"
-                elif re.search(r'\bactive\b', msg):
+                elif re.search(r'\b(?:no|without|lost|lacking|zero)\s+connectivity\b', msg):
+                    return "inactive"
+                elif re.search(r'\bactive\b|\bconnectivity\s+on\b|\b(?:had|with)\s+(?:fixed[\s-]*)?gps\s+connectivity\b|\b(?:fixed[\s-]*)?gps\s+connectivity\b', msg):
                     return "active"
                 elif re.search(r'\binactive\b', msg):
                     return "inactive"
@@ -5147,7 +5160,9 @@ class IntentDetector:
                     return "nogps "
                 elif re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg):
                     return "nogps"
-                elif re.search(r'\bactive\b', msg):
+                elif re.search(r'\b(?:no|without|lost|lacking|zero)\s+connectivity\b', msg):
+                    return "inactive"
+                elif re.search(r'\bactive\b|\bconnectivity\s+on\b|\b(?:had|with)\s+(?:fixed[\s-]*)?gps\s+connectivity\b|\b(?:fixed[\s-]*)?gps\s+connectivity\b', msg):
                     return "active"
                 elif re.search(r'\binactive\b', msg):
                     return "inactive"

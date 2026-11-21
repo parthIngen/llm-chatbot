@@ -16,6 +16,7 @@ def can_resolve_fast_path(message: str) -> bool:
     # except device status / device analytics count queries (e.g. "Download all trips where GPS is active")
     is_device_status_count = bool(
         re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)
+        or re.search(r'\b(?:had\s+(?:fixed[\s-]?)?gps\s+connectivity|with\s+(?:fixed[\s-]?)?gps\s+connectivity|(?:fixed[\s-]?)?gps\s+connectivity\s+on|(?:fixed[\s-]?)?gps\s+connectivity)\b', msg_l)
         or re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_l)
         or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_l)
         or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_l)
@@ -69,7 +70,7 @@ def can_resolve_fast_path(message: str) -> bool:
         or re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)
     ):
         return True
-    if bool(re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)):
+    if bool(re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)) or bool(re.search(r'\b(?:had\s+(?:fixed[\s-]?)?gps\s+connectivity|with\s+(?:fixed[\s-]?)?gps\s+connectivity|(?:fixed[\s-]?)?gps\s+connectivity\s+on|(?:fixed[\s-]?)?gps\s+connectivity)\b', msg_l)):
         return True
     if bool(re.search(r'\b(?:secutrak_tp|secutrak|wheelseye|fleetx|axestrack|gtropy|eicher|g[\s-]?trac|ashok|tata|kiasaint)\b', msg_l)):
         return True
@@ -328,12 +329,23 @@ def build_fast_path_payload(
         or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_l)
         or re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)
     )
+    is_fast_gps_active = bool(
+        re.search(r'\bactive\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?active\b', msg_l)
+        or re.search(r'\b(?:had\s+(?:fixed[\s-]?)?gps\s+connectivity|with\s+(?:fixed[\s-]?)?gps\s+connectivity|(?:fixed[\s-]?)?gps\s+connectivity\s+on|(?:fixed[\s-]?)?gps\s+connectivity)\b', msg_l)
+        or (bool(re.search(r'\bconnectivity\s+on\b', msg_l)) and bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', msg_l)))
+    ) and not bool(re.search(r'\b(?:no|without|lost|lacking|zero)\s+connectivity\b', msg_l))
+
+    is_fast_gps_inactive = bool(
+        re.search(r'\binactive\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive\b', msg_l)
+        or re.search(r'\b(?:no|without|lost|lacking|zero)\s+(?:(?:fixed[\s-]?)?gps\s+)?connectivity\b', msg_l)
+    )
+
     if is_fast_no_gps:
         payload.setdefault("analytics", []).append({"type": "gpsna"})
-    elif bool(re.search(r'\bactive\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?active\b', msg_l)):
+    elif is_fast_gps_active:
         payload.setdefault("analytics", []).append({"type": "gps"})
         payload["filters"].append({"field": "GPS", "operator": "eq", "value": "active"})
-    elif bool(re.search(r'\binactive\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive\b', msg_l)):
+    elif is_fast_gps_inactive:
         payload.setdefault("analytics", []).append({"type": "gps"})
         payload["filters"].append({"field": "GPS", "operator": "eq", "value": "inactive"})
 
@@ -631,12 +643,12 @@ def build_fast_path_payload(
             return 2
         elif field in ["transporter", "Transporter"]:
             return 3
-        elif field in ("GPS", "FixedGPS", "FixedELock", "PortableELock", "gps", "fixedgps"):
-            return 3.5
         elif field == "runDate" and op == "gte":
             return 4
         elif field == "runDate" and op == "lte":
             return 5
+        elif field in ("GPS", "FixedGPS", "FixedELock", "PortableELock", "gps", "fixedgps"):
+            return 5.2
         elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
             return 5.5
         elif field in ("routeCategory", "routeType", "tripType"):
