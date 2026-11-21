@@ -420,6 +420,76 @@ def build_natural_response(
     return resp
 
 
+def _render_vehicle_list_html_card(vehicle_list: List[str], total_veh: int) -> str:
+    """
+    Renders an elegant, modern HTML card displaying vehicle registration numbers in a sleek table.
+    """
+    display_items = vehicle_list[:10]
+    badge_text = f"Showing 10 of {total_veh:,}" if total_veh > 10 else f"{total_veh} vehicle{'s' if total_veh != 1 else ''}"
+
+    rows_html = []
+    for idx, v_no in enumerate(display_items, 1):
+        bg = "#ffffff" if idx % 2 != 0 else "#f8fafc"
+        clean_v_no = str(v_no).strip().upper()
+        row = (
+            f'<tr style="border-bottom: 1px solid #f1f5f9; background: {bg};">\n'
+            f'  <td style="padding: 10px 16px; color: #64748b; font-weight: 600; width: 44px; text-align: center; font-size: 12px;">{idx}</td>\n'
+            f'  <td style="padding: 10px 16px;">\n'
+            f'    <span style="display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; font-weight: 700; color: #0f172a; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; border: 1px solid #cbd5e1; letter-spacing: 0.5px;">\n'
+            f'      <span style="font-size: 10px; font-weight: 800; color: #2563eb; background: #dbeafe; padding: 1px 4px; border-radius: 3px;">IND</span> {clean_v_no}\n'
+            f'    </span>\n'
+            f'  </td>\n'
+            f'  <td style="padding: 10px 16px; text-align: right;">\n'
+            f'    <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #059669; font-weight: 600; background: #ecfdf5; padding: 3px 8px; border-radius: 9999px; border: 1px solid #a7f3d0;">\n'
+            f'      <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981;"></span> On Trip\n'
+            f'    </span>\n'
+            f'  </td>\n'
+            f'</tr>'
+        )
+        rows_html.append(row)
+
+    tbody_content = "\n".join(rows_html)
+
+    footer_note = ""
+    if total_veh > 10:
+        footer_note = (
+            f'<div style="background: #f8fafc; padding: 8px 16px; border-top: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #64748b;">\n'
+            f'  <span>Showing first 10 of {total_veh:,} vehicles</span>\n'
+            f'  <span style="font-weight: 500; color: #3b82f6;">Complete list available in Excel export</span>\n'
+            f'</div>\n'
+        )
+
+    html = (
+        f'<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; '
+        f'max-width: 650px; margin: 12px 0; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; '
+        f'box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden;">\n'
+        f'  <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); padding: 12px 16px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between;">\n'
+        f'    <div style="display: flex; align-items: center; gap: 8px;">\n'
+        f'      <span style="font-size: 16px;">🚛</span>\n'
+        f'      <span style="font-weight: 600; font-size: 14px; color: #1e293b;">Vehicles on Trip</span>\n'
+        f'    </div>\n'
+        f'    <span style="background: #e0e7ff; color: #3730a3; font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 9999px;">\n'
+        f'      {badge_text}\n'
+        f'    </span>\n'
+        f'  </div>\n'
+        f'  <table style="width: 100%; border-collapse: collapse; font-size: 13px;">\n'
+        f'    <thead>\n'
+        f'      <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">\n'
+        f'        <th style="padding: 8px 16px; color: #64748b; font-weight: 600; width: 44px; text-align: center;">#</th>\n'
+        f'        <th style="padding: 8px 16px; color: #64748b; font-weight: 600;">Vehicle Registration</th>\n'
+        f'        <th style="padding: 8px 16px; color: #64748b; font-weight: 600; text-align: right;">Status</th>\n'
+        f'      </tr>\n'
+        f'    </thead>\n'
+        f'    <tbody>\n'
+        f'{tbody_content}\n'
+        f'    </tbody>\n'
+        f'  </table>\n'
+        f'{footer_note}'
+        f'</div>'
+    )
+    return html
+
+
 class ResponseGenerator:
     def __init__(self, llm_client: LLMClient = None):
         from app.config import settings
@@ -1193,17 +1263,14 @@ class ResponseGenerator:
                 date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
                 trans_clause = f" for the transporter {transporter_val}" if transporter_val else ""
 
+                card_html = _render_vehicle_list_html_card(vehicle_list, total_veh)
                 if total_veh <= 10:
-                    lines = [f"Total {total_veh} vehicles were on trip{trans_clause}{date_clause}:"]
-                    for idx, v_no in enumerate(vehicle_list, 1):
-                        lines.append(f"{idx}. {v_no}")
-                    return "\n".join(lines)
+                    header = f"Total {total_veh} vehicles were on trip{trans_clause}{date_clause}:"
+                    return f"{header}\n\n{card_html}"
                 else:
-                    lines = [f"Total {total_veh} vehicles were on trip{trans_clause}{date_clause}. Here is the list of first 10 vehicles:"]
-                    for idx, v_no in enumerate(vehicle_list[:10], 1):
-                        lines.append(f"{idx}. {v_no}")
-                    lines.append(f"\nShowing first 10 of {total_veh} vehicles. Download complete Excel list: {{DOWNLOAD_URL}}")
-                    return "\n".join(lines)
+                    header = f"Total {total_veh} vehicles were on trip{trans_clause}{date_clause}. Here is the list of first 10 vehicles:"
+                    footer = f"Showing first 10 of {total_veh} vehicles. Download complete Excel list: {{DOWNLOAD_URL}}"
+                    return f"{header}\n\n{card_html}\n\n{footer}"
 
             return natural_formatted_response
 
