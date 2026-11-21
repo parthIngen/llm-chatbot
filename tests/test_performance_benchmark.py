@@ -1246,6 +1246,69 @@ async def test_device_only_queries_exact_payload():
         assert "all three devices together" not in reply
 
 
+def test_unique_vehicles_intercity_no_fixed_gps():
+    query = "How many unique vehicles operated Intercity trips in August 2026 with no Fixed GPS device?"
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {
+        "success": True,
+        "data": [{"uniqueVehicleCount": 3121}]
+    }
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"entity": "trip", "operation": "count"}'
+        mock_post.return_value = mock_api_res
+
+        t_start = time.perf_counter()
+        response = client.post("/api/v1/chat", json={
+            "message": query,
+            "history": [],
+            "session_id": "test-unique-vehicles-no-gps",
+            "AccessToken": "test-token"
+        })
+        duration = time.perf_counter() - t_start
+
+        assert response.status_code == 200
+        res = response.json()
+
+        assert res["source"] == "fast_path"
+        assert res["llm_status"] == "bypassed"
+        entities = res["entities"]
+        assert entities.get("entity") == "trip"
+        assert entities.get("operation") == "count"
+        assert entities.get("analytics") == [{"type": "gpsna"}]
+        assert entities.get("groupBy") == ["vehicleNo"]
+        assert entities.get("metrics") == [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        assert "select" not in entities
+
+        filters = entities["filters"]
+        field_order = [f.get("field") for f in filters]
+        assert field_order == ["groupId", "tripStatus", "runDate", "runDate", "routeCategory"], f"Unexpected field order: {field_order}"
+
+        f_map = {f["field"]: f for f in filters if "field" in f}
+        assert f_map["groupId"]["value"] == "0041"
+        assert f_map["tripStatus"]["value"] == "valid"
+        assert f_map["routeCategory"]["value"] == "intercity"
+
+        date_filters = [f for f in filters if f.get("field") == "runDate"]
+        assert len(date_filters) == 2
+        assert date_filters[0]["operator"] == "gte"
+        assert date_filters[0]["value"] == "2026-08-01 00:00:00"
+        assert date_filters[1]["operator"] == "lte"
+        assert date_filters[1]["value"] == "2026-08-31 23:59:59"
+
+        # Ensure NO GPS filter in filters
+        for f in filters:
+            assert f.get("field") not in ["GPS", "FixedGPS", "FixedELock", "PortableELock"]
+
+        reply = res["reply"]
+        assert "with GPS" not in reply
+        assert "3121" in reply
+        assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+
+
 
 
 

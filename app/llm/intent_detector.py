@@ -2579,7 +2579,12 @@ class IntentDetector:
             has_fixed_gps = (bool(re.search(r'\bfixed[\s-]gps\b', pos_text)) or bool(re.search(r'\bfixed[\s-]gps\b', msg_lower))) and not without_gps
             _is_devices_together = bool(re.search(r'\btogether\b', msg_lower))
             _is_device_trips = bool(re.search(r'\b(?:device\s+trips?|device\s+data|device\s+report)\b', msg_lower))
-            _is_gps_na = bool(re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower))
+            _is_gps_na = bool(
+                re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_lower)
+                or re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower)
+                or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_lower)
+                or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_lower)
+            )
             _is_fixed_portable_elock_combo = (
                 has_fixed_elock
                 and has_portable_elock
@@ -2697,14 +2702,10 @@ class IntentDetector:
             # 4a. No GPS / Vehicles without GPS (e.g. "How many vehicles had no GPS in Aug 2026?")
             _is_no_gps_vehicle_query = bool(
                 (
-                    re.search(r'\bno\s+gps\b', msg_lower)
-                    or re.search(r'\bwithout\s+gps\b', msg_lower)
-                    or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
-                    or re.search(r'\bgps\s+not\s+available\b', msg_lower)
-                    or re.search(r'\bgps\s+absent\b', msg_lower)
-                    or re.search(r'\blacking\s+gps\b', msg_lower)
-                    or re.search(r'\bnon[\s\-_]*gps\b', msg_lower)
-                    or re.search(r'\bnon\s+gps\b', msg_lower)
+                    re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_lower)
+                    or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_lower)
+                    or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_lower)
+                    or re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower)
                 )
                 and re.search(r'\bvehicles?\b', msg_lower)
             )
@@ -3310,27 +3311,20 @@ class IntentDetector:
                     if not (isinstance(f, dict) and f.get("field") in [
                         "GPS", "FixedGPS", "FixedELock", "PortableELock",
                         "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
-                        "gps", "fixedelock", "portableelock", "tripStatus"
+                        "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                query_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
+                has_trip_status = any(isinstance(f, dict) and f.get("field") == "tripStatus" for f in query_payload["filters"])
+                if not has_trip_status:
+                    query_payload["filters"].append({"field": "tripStatus", "operator": "eq", "value": "valid"})
                 if specific_transporter:
                     query_payload.pop("analytics", None)
                     query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
+                    if "select" not in query_payload:
+                        query_payload["select"] = []
                 else:
                     query_payload["analytics"] = [{"type": "gpsna"}]
-                    # Reorder keys to place analytics before filters
-                    reordered = {}
-                    for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
-                        if k in query_payload:
-                            reordered[k] = query_payload[k]
-                    for k, v in query_payload.items():
-                        if k not in reordered:
-                            reordered[k] = v
-                    query_payload.clear()
-                    query_payload.update(reordered)
-                if "select" not in query_payload:
-                    query_payload["select"] = []
+                    query_payload.pop("select", None)
                 query_payload["groupBy"] = ["vehicleNo"]
                 query_payload["metrics"] = [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
             elif _is_gps_trip_query:
@@ -4157,21 +4151,36 @@ class IntentDetector:
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "tripStatus":
+                    if field == "groupId":
                         return 1
-                    elif field == "groupId":
+                    elif field == "tripStatus":
                         return 2
                     elif field in ["transporter", "Transporter"]:
                         return 3
                     elif field == "GPS":
-                        return 4
+                        return 3.5
                     elif field == "runDate" and op == "gte":
-                        return 5
+                        return 4
                     elif field == "runDate" and op == "lte":
+                        return 5
+                    elif field in ["routeCategory", "routeType", "tripType"]:
                         return 6
+                    elif field == "shipmentMethod":
+                        return 7
                     return 10
 
                 query_payload["filters"].sort(key=_no_gps_vehicle_sort_key)
+                if not specific_transporter:
+                    query_payload.pop("select", None)
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "groupBy", "metrics"]:
+                    if k in query_payload:
+                        reordered[k] = query_payload[k]
+                for k, v in query_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                query_payload.clear()
+                query_payload.update(reordered)
             elif _is_gps_trip_query:
                 def _gps_trip_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -4742,14 +4751,10 @@ class IntentDetector:
             fb_specific_transporter = extract_specific_transporter(message)
             fb_is_no_gps_vehicle_query = bool(
                 (
-                    re.search(r'\bno\s+gps\b', msg_lower)
-                    or re.search(r'\bwithout\s+gps\b', msg_lower)
-                    or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
-                    or re.search(r'\bgps\s+not\s+available\b', msg_lower)
-                    or re.search(r'\bgps\s+absent\b', msg_lower)
-                    or re.search(r'\blacking\s+gps\b', msg_lower)
-                    or re.search(r'\bnon[\s\-_]*gps\b', msg_lower)
-                    or re.search(r'\bnon\s+gps\b', msg_lower)
+                    re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_lower)
+                    or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_lower)
+                    or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_lower)
+                    or re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower)
                 )
                 and re.search(r'\bvehicles?\b', msg_lower)
             )
@@ -5123,7 +5128,12 @@ class IntentDetector:
             fb_has_fixed_gps = (bool(re.search(r'\bfixed[\s-]gps\b', fb_pos_text)) or bool(re.search(r'\bfixed[\s-]gps\b', msg_lower))) and not fb_without_gps
             fb_is_devices_together = bool(re.search(r'\btogether\b', msg_lower))
             fb_is_device_trips = bool(re.search(r'\b(?:device\s+trips?|device\s+data|device\s+report)\b', msg_lower))
-            fb_is_gps_na = bool(re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower))
+            fb_is_gps_na = bool(
+                re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_lower)
+                or re.search(r'\bgps\s+is\s+(?:na|inactive|not\s+applicable|not\s+captured)\b', msg_lower)
+                or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_lower)
+                or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_lower)
+            )
             fb_is_fixed_portable_elock_combo = (
                 fb_has_fixed_elock
                 and fb_has_portable_elock
@@ -5240,14 +5250,10 @@ class IntentDetector:
 
             fb_is_no_gps_vehicle_query = bool(
                 (
-                    re.search(r'\bno\s+gps\b', msg_lower)
-                    or re.search(r'\bwithout\s+gps\b', msg_lower)
-                    or re.search(r'\bhad\s+no\s+gps\b', msg_lower)
-                    or re.search(r'\bgps\s+not\s+available\b', msg_lower)
-                    or re.search(r'\bgps\s+absent\b', msg_lower)
-                    or re.search(r'\blacking\s+gps\b', msg_lower)
-                    or re.search(r'\bnon[\s\-_]*gps\b', msg_lower)
-                    or re.search(r'\bnon\s+gps\b', msg_lower)
+                    re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_lower)
+                    or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_lower)
+                    or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_lower)
+                    or re.search(r'\b(?:non[\s-]?gps|no[\s-]?gps|without\s+(?:any\s+)?gps|had\s+no\s+(?:any\s+)?gps|nogps)\b', msg_lower)
                 )
                 and re.search(r'\bvehicles?\b', msg_lower)
             )
@@ -5770,27 +5776,20 @@ class IntentDetector:
                     if not (isinstance(f, dict) and f.get("field") in [
                         "GPS", "FixedGPS", "FixedELock", "PortableELock",
                         "fixed-gps status", "fixed-e-lock status", "portable-e-lock status",
-                        "gps", "fixedelock", "portableelock", "tripStatus"
+                        "gps", "fixedelock", "portableelock"
                     ])
                 ]
-                fallback_payload["filters"].insert(0, {"field": "tripStatus", "operator": "eq", "value": "valid"})
+                has_trip_status = any(isinstance(f, dict) and f.get("field") == "tripStatus" for f in fallback_payload["filters"])
+                if not has_trip_status:
+                    fallback_payload["filters"].append({"field": "tripStatus", "operator": "eq", "value": "valid"})
                 if fb_specific_transporter:
                     fallback_payload.pop("analytics", None)
                     fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "nogps"})
+                    if "select" not in fallback_payload:
+                        fallback_payload["select"] = []
                 else:
                     fallback_payload["analytics"] = [{"type": "gpsna"}]
-                    # Reorder keys to place analytics before filters
-                    reordered = {}
-                    for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "metrics"]:
-                        if k in fallback_payload:
-                            reordered[k] = fallback_payload[k]
-                    for k, v in fallback_payload.items():
-                        if k not in reordered:
-                            reordered[k] = v
-                    fallback_payload.clear()
-                    fallback_payload.update(reordered)
-                if "select" not in fallback_payload:
-                    fallback_payload["select"] = []
+                    fallback_payload.pop("select", None)
                 fallback_payload["groupBy"] = ["vehicleNo"]
                 fallback_payload["metrics"] = [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
             elif fb_is_gps_trip_query:
@@ -6518,21 +6517,36 @@ class IntentDetector:
                         return 99
                     field = flt.get("field")
                     op = flt.get("operator")
-                    if field == "tripStatus":
+                    if field == "groupId":
                         return 1
-                    elif field == "groupId":
+                    elif field == "tripStatus":
                         return 2
                     elif field in ["transporter", "Transporter"]:
                         return 3
                     elif field == "GPS":
-                        return 4
+                        return 3.5
                     elif field == "runDate" and op == "gte":
-                        return 5
+                        return 4
                     elif field == "runDate" and op == "lte":
+                        return 5
+                    elif field in ["routeCategory", "routeType", "tripType"]:
                         return 6
+                    elif field == "shipmentMethod":
+                        return 7
                     return 10
 
                 fallback_payload["filters"].sort(key=_fb_no_gps_vehicle_sort_key)
+                if not fb_specific_transporter:
+                    fallback_payload.pop("select", None)
+                reordered = {}
+                for k in ["entity", "operation", "analytics", "filters", "groupBy", "metrics"]:
+                    if k in fallback_payload:
+                        reordered[k] = fallback_payload[k]
+                for k, v in fallback_payload.items():
+                    if k not in reordered:
+                        reordered[k] = v
+                fallback_payload.clear()
+                fallback_payload.update(reordered)
             elif fb_is_gps_trip_query:
                 def _fb_gps_trip_sort_key(flt):
                     if not isinstance(flt, dict):

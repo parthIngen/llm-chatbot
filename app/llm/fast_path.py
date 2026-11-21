@@ -16,6 +16,9 @@ def can_resolve_fast_path(message: str) -> bool:
     # except device status / device analytics count queries (e.g. "Download all trips where GPS is active")
     is_device_status_count = bool(
         re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)
+        or re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_l)
+        or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_l)
+        or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_l)
         or re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)
         or re.search(r'\b(?:trips\s+with\s+fixed\s+e[\s-]?lock|inactive\s+portable\s+e[\s-]?lock|active\s+fixed\s+e[\s-]?lock)\b', msg_l)
     )
@@ -59,7 +62,12 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
 
     # 5. Non-GPS / GPS queries
-    if bool(re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)):
+    if bool(
+        re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_l)
+        or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_l)
+        or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_l)
+        or re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)
+    ):
         return True
     if bool(re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)):
         return True
@@ -314,7 +322,13 @@ def build_fast_path_payload(
         payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
 
     # 3. GPS & E-Lock analytics
-    if bool(re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)):
+    is_fast_no_gps = bool(
+        re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+(?:a\s+)?(?:fixed[\s-]*)?gps(?:\s+device)?\b', msg_l)
+        or re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:is\s+)?(?:not\s+available|absent|na)\b', msg_l)
+        or re.search(r'\bnon[\s\-_]*(?:fixed[\s-]*)?gps\b', msg_l)
+        or re.search(r'\b(?:without\s+(?:any\s+)?gps|no\s+gps|non[\s-]?gps|gps\s+na)\b', msg_l)
+    )
+    if is_fast_no_gps:
         payload.setdefault("analytics", []).append({"type": "gpsna"})
     elif bool(re.search(r'\bactive\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?active\b', msg_l)):
         payload.setdefault("analytics", []).append({"type": "gps"})
@@ -495,6 +509,12 @@ def build_fast_path_payload(
     ):
         payload["groupBy"] = ["vehicleNo"]
         payload["metrics"] = [{"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}]
+        payload.pop("select", None)
+
+    if bool(re.search(r'\bintercity\b', msg_l)) and not bool(re.search(r'\bintracity\b', msg_l)):
+        payload["filters"].append({"field": "routeCategory", "operator": "eq", "value": "intercity"})
+    elif bool(re.search(r'\bintracity\b', msg_l)) and not bool(re.search(r'\bintercity\b', msg_l)):
+        payload["filters"].append({"field": "routeCategory", "operator": "eq", "value": "intracity"})
 
     from app.llm.intent_detector import extract_specific_transporter
     spec_transporter = extract_specific_transporter(message)
@@ -609,36 +629,40 @@ def build_fast_path_payload(
             return 1
         elif field == "tripStatus":
             return 2
-        elif field in ("GPS", "FixedGPS", "FixedELock", "PortableELock", "gps", "fixedgps"):
-            return 2.5
-        elif field == "runDate" and op == "gte":
+        elif field in ["transporter", "Transporter"]:
             return 3
-        elif field == "runDate" and op == "lte":
+        elif field in ("GPS", "FixedGPS", "FixedELock", "PortableELock", "gps", "fixedgps"):
+            return 3.5
+        elif field == "runDate" and op == "gte":
             return 4
-        elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
-            return 4.5
-        elif field in ("source", "destination", "From", "To"):
+        elif field == "runDate" and op == "lte":
             return 5
-        elif field == "region":
+        elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
+            return 5.5
+        elif field in ("routeCategory", "routeType", "tripType"):
             return 6
-        elif field in ("vehicleNo", "vehicle_no", "vehicle"):
+        elif field in ("source", "destination", "From", "To"):
             return 7
-        elif field in ("Route", "route", "RouteName", "routeName"):
+        elif field == "region":
             return 8
-        elif field in ("transporter", "Transporter"):
+        elif field in ("vehicleNo", "vehicle_no", "vehicle"):
             return 9
-        elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
+        elif field in ("Route", "route", "RouteName", "routeName"):
             return 10
-        elif field == "shipmentMethod":
+        elif field in ("vendor", "vendorgps", "vendorfixedelock", "vendorportableelock"):
             return 11
+        elif field == "shipmentMethod":
+            return 12
         return 20
 
     payload["filters"].sort(key=_fast_path_filter_sort_key)
 
     reordered = {}
-    for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "groupByFormat", "metrics", "sort"]:
+    for k in ["entity", "operation", "analytics", "filters", "groupBy", "groupByFormat", "metrics", "sort"]:
         if k in payload:
             reordered[k] = payload[k]
+    if "groupBy" not in payload and "select" in payload:
+        reordered["select"] = payload["select"]
     for k, v in payload.items():
         if k not in reordered:
             reordered[k] = v
