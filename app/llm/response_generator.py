@@ -356,10 +356,18 @@ def build_natural_response(
         device_qualifiers.append("where Portable E-Lock is not available")
     elif filter_map.get("fixedlock"):
         if fixed_elock not in ("active", "inactive"):
-            device_qualifiers.append("equipped with Fixed E-Lock")
+            v_lock = filter_map.get("vendorfixedelock")
+            if v_lock:
+                device_qualifiers.append(f"equipped with {v_lock} Fixed E-Lock")
+            else:
+                device_qualifiers.append("equipped with Fixed E-Lock")
     elif filter_map.get("portablelock"):
         if portable_elock not in ("active", "inactive"):
-            device_qualifiers.append("equipped with Portable E-Lock")
+            v_lock = filter_map.get("vendorportableelock")
+            if v_lock:
+                device_qualifiers.append(f"equipped with {v_lock} Portable E-Lock")
+            else:
+                device_qualifiers.append("equipped with Portable E-Lock")
     elif filter_map.get("gps"):
         if gps not in ("active", "inactive"):
             device_qualifiers.append("with Fixed GPS")
@@ -427,7 +435,9 @@ def build_natural_response(
         context_qualifiers.append("using 3rd-party devices")
     elif vendor:
         v_raw = filter_map.get('vendor') or filter_map.get('vendorgps') or filter_map.get('vendorfixedelock') or filter_map.get('vendorportableelock')
-        if "tracked by" in msg_lower or "tracked" in msg_lower:
+        if any(v_raw in dq for dq in device_qualifiers):
+            pass
+        elif "tracked by" in msg_lower or "tracked" in msg_lower:
             context_qualifiers.append(f"tracked by {v_raw}")
         else:
             context_qualifiers.append(f"for {v_raw} vendor")

@@ -137,5 +137,7 @@ TRIP EXAMPLES:
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "vendorgps", "operator": "contains", "value": "ashokleyland"}], "select": []}
 - "How many trips in August 2026 were tracked by wheelseye_bluedart Fixed GPS?" ->
   {"entity": "trip", "operation": "count", "analytics": [{"type": "gps"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "vendorgps", "operator": "contains", "value": "wheelseye_bluedart"}], "select": []}
+- "How many trips in August 2026 used Lynkit Fixed E-Lock?" ->
+  {"entity": "trip", "operation": "count", "analytics": [{"type": "fixedlock"}], "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "vendorfixedelock", "operator": "contains", "value": "Lynkit"}], "select": []}
 """
 

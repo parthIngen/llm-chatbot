@@ -75,7 +75,7 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)) or bool(re.search(r'\b(?:had\s+(?:fixed[\s-]?)?gps\s+connectivity|with\s+(?:fixed[\s-]?)?gps\s+connectivity|(?:fixed[\s-]?)?gps\s+connectivity\s+on|(?:fixed[\s-]?)?gps\s+connectivity)\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:secutrak_tp|secutrak|wheelseye|wheelseye_bluedart|fleetx|axestrack|gtropy|eicher|g[\s-]?trac|ashok|ashokleyland|tata|tatamotors|kiasaint)\b', msg_l)):
+    if bool(re.search(r'\b(?:secutrak_tp|secutrak|wheelseye|wheelseye_bluedart|fleetx|axestrack|gtropy|eicher|g[\s-]?trac|ashok|ashokleyland|tata|tatamotors|kiasaint|lynkit)\b', msg_l)):
         return True
 
     # 6. E-Lock queries
@@ -423,7 +423,7 @@ def build_fast_path_payload(
     # 4. Vendors
     from app.llm.intent_detector import extract_device_vendor
     vendor = extract_device_vendor(message)
-    if vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart"]:
+    if vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart", "Lynkit"]:
         is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
         is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
         has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_l))

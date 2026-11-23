@@ -339,6 +339,8 @@ def extract_device_vendor(text: str) -> Optional[str]:
         return "Tata"
     elif re.search(r'\bkiasaint\b', text_l):
         return "Kiasaint"
+    elif re.search(r'\blynkit\b', text_l):
+        return "Lynkit"
     elif re.search(r'\bwheelseye\b', text_l):
         return "Wheelseye"
     elif re.search(r'\b(?:secutrak|icici|ilgic)\b', text_l):
@@ -2709,7 +2711,7 @@ class IntentDetector:
             dev_vendor_match = None
 
             known_device_vendor = extract_device_vendor(msg_lower)
-            if known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart"]:
+            if known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart", "Lynkit"]:
                 target_vendor = known_device_vendor
                 canonical_vendor = known_device_vendor
                 op = "contains"
@@ -2779,7 +2781,7 @@ class IntentDetector:
                             target_vendor = f.get("value")
                             break
 
-            if target_vendor and not (known_device_vendor and known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint"]):
+            if target_vendor and not (known_device_vendor and known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart", "Lynkit"]):
                 if target_vendor.lower() == "wheelseye":
                     canonical_vendor = "Wheelseye"
                 elif target_vendor.lower() in ["secutrak", "icici", "ilgic"]:
@@ -6586,7 +6588,7 @@ class IntentDetector:
             fb_is_past_running = False
 
             fb_known_device_vendor = extract_device_vendor(msg_lower)
-            if fb_known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart"]:
+            if fb_known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart", "Lynkit"]:
                 fb_target_vendor = fb_known_device_vendor
                 fb_canonical_vendor = fb_known_device_vendor
                 fb_op = "contains"
@@ -6643,7 +6645,7 @@ class IntentDetector:
                     if candidate.lower() not in ["the", "a", "an", "generate", "download", "get", "show", "fetch", "all", "party", "gps", "elock", "e-lock"]:
                         fb_target_vendor = candidate
 
-            if fb_target_vendor and not (fb_known_device_vendor and fb_known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint"]):
+            if fb_target_vendor and not (fb_known_device_vendor and fb_known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart", "Lynkit"]):
                 if fb_target_vendor.lower() == "wheelseye":
                     fb_canonical_vendor = "Wheelseye"
                 elif fb_target_vendor.lower() in ["secutrak", "icici", "ilgic"]:
