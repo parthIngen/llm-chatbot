@@ -349,12 +349,20 @@ def detect_vehicle_master(text: str) -> Optional[str]:
     if bool(re.search(r'\broutes?\b|\bnetwork\s+module\b|\bfleets?\b', text_l)) and not bool(re.search(r'\bvehicles?\b', text_l)):
         return None
     # Check outside first (as it might contain "vehicle master" or "in vehicle master")
-    if bool(re.search(r'\b(?:vehicle\s+outside\s+(?:of\s+)?master|outside\s+of\s+master|vehicle\s+na\s+in\s+(?:vehicle\s+)?master|na\s+in\s+vehicle\s+master|not\s+in\s+vehicle\s+master)\b', text_l)) or (
-        bool(re.search(r'\boutside\s+(?:of\s+)?(?:vehicle\s+)?master\b', text_l)) and bool(re.search(r'\bvehicles?\b', text_l))
+    if (
+        bool(re.search(r'\b(?:vehicle\s+outside\s+(?:of\s+)?(?:the\s+)?(?:vehicle\s+)?master|outside\s+(?:of\s+)?(?:the\s+)?(?:vehicle\s+)?master|vehicle\s+na\s+in\s+(?:the\s+)?(?:vehicle\s+)?master|na\s+in\s+(?:the\s+)?vehicle\s+master|not\s+in\s+(?:the\s+)?vehicle\s+master|vehicle\s+not\s+in\s+(?:the\s+)?(?:vehicle\s+)?master)\b', text_l))
+        or (
+            bool(re.search(r'\boutside\s+(?:of\s+)?(?:the\s+)?(?:vehicle\s+)?master\b', text_l))
+            and bool(re.search(r'\bvehicles?\b', text_l))
+        )
     ):
         return "outside"
-    elif bool(re.search(r'\b(?:vehicle\s+inside\s+(?:of\s+)?master|inside\s+of\s+master|in\s+vehicle\s+master)\b', text_l)) or (
-        bool(re.search(r'\binside\s+(?:of\s+)?(?:vehicle\s+)?master\b', text_l)) and bool(re.search(r'\bvehicles?\b', text_l))
+    elif (
+        bool(re.search(r'\b(?:vehicle\s+inside\s+(?:of\s+)?(?:the\s+)?(?:vehicle\s+)?master|inside\s+(?:of\s+)?(?:the\s+)?(?:vehicle\s+)?master|in\s+(?:the\s+)?vehicle\s+master|vehicle\s+in\s+(?:the\s+)?(?:vehicle\s+)?master)\b', text_l))
+        or (
+            bool(re.search(r'\binside\s+(?:of\s+)?(?:the\s+)?(?:vehicle\s+)?master\b', text_l))
+            and bool(re.search(r'\bvehicles?\b', text_l))
+        )
     ):
         return "inside"
     return None
@@ -364,15 +372,23 @@ def detect_route_master(text: str) -> Optional[str]:
     Returns: 'outside' or 'inside', or None if not applicable.
     """
     text_l = text.lower()
-    if bool(re.search(r'\bfleets?\b', text_l)) and not bool(re.search(r'\broutes?\b', text_l)):
+    if bool(re.search(r'\bvehicles?\b|\bvehicle\s+master\b|\bfleets?\b', text_l)) and not bool(re.search(r'\broutes?\b|\bnetwork\s+module\b', text_l)):
         return None
     # Check outside first
-    if bool(re.search(r'\b(?:route\s+outside\s+(?:of\s+)?(?:route\s+)?master|route\s+na\s+in\s+(?:network\s+)?module|na\s+in\s+network\s+module|not\s+in\s+network\s+module|route\s+not\s+in\s+(?:route\s+)?master)\b', text_l)) or (
-        bool(re.search(r'\boutside\s+(?:of\s+)?(?:route\s+)?master\b', text_l)) and bool(re.search(r'\broutes?\b', text_l))
+    if (
+        bool(re.search(r'\b(?:route\s+outside\s+(?:of\s+)?(?:the\s+)?(?:route\s+)?master|outside\s+(?:of\s+)?(?:the\s+)?route\s+master|route\s+na\s+in\s+(?:the\s+)?(?:network\s+)?module|na\s+in\s+(?:the\s+)?network\s+module|not\s+in\s+(?:the\s+)?network\s+module|route\s+not\s+in\s+(?:the\s+)?(?:route\s+)?master)\b', text_l))
+        or (
+            bool(re.search(r'\boutside\s+(?:of\s+)?(?:the\s+)?(?:route\s+)?master\b', text_l))
+            and bool(re.search(r'\broutes?\b|\bnetwork\s+module\b', text_l))
+        )
     ):
         return "outside"
-    elif bool(re.search(r'\b(?:route\s+inside\s+(?:of\s+)?(?:route\s+)?master|route\s+in\s+(?:route\s+)?master|(?:present|available)\s+in\s+network\s+module|in\s+network\s+module)\b', text_l)) or (
-        bool(re.search(r'\binside\s+(?:of\s+)?(?:route\s+)?master\b', text_l)) and bool(re.search(r'\broutes?\b', text_l))
+    elif (
+        bool(re.search(r'\b(?:route\s+inside\s+(?:of\s+)?(?:the\s+)?(?:route\s+)?master|inside\s+(?:of\s+)?(?:the\s+)?route\s+master|route\s+in\s+(?:the\s+)?(?:route\s+)?master|(?:present|available)\s+in\s+(?:the\s+)?network\s+module|in\s+(?:the\s+)?network\s+module)\b', text_l))
+        or (
+            bool(re.search(r'\binside\s+(?:of\s+)?(?:the\s+)?(?:route\s+)?master\b', text_l))
+            and bool(re.search(r'\broutes?\b|\bnetwork\s+module\b', text_l))
+        )
     ):
         return "inside"
     return None
@@ -386,13 +402,13 @@ def detect_fleet_master(text: str) -> Optional[str]:
         return None
     # Check outside first
     if (
-        bool(re.search(r'\b(?:fleet\s+outside\s+(?:of\s+)?(?:fleet\s+)?master|fleet\s+na\s+in\s+(?:network\s+)?module|na\s+in\s+network\s+module|not\s+in\s+network\s+module|fleet\s+not\s+in\s+(?:fleet\s+)?master)\b', text_l))
-        or bool(re.search(r'\boutside\s+(?:of\s+)?(?:fleet\s+)?master\b', text_l))
+        bool(re.search(r'\b(?:fleet\s+outside\s+(?:of\s+)?(?:the\s+)?(?:fleet\s+)?master|outside\s+(?:of\s+)?(?:the\s+)?(?:fleet\s+)?master|fleet\s+na\s+in\s+(?:the\s+)?(?:network\s+)?module|na\s+in\s+(?:the\s+)?network\s+module|not\s+in\s+(?:the\s+)?network\s+module|fleet\s+not\s+in\s+(?:the\s+)?(?:fleet\s+)?master)\b', text_l))
+        or bool(re.search(r'\boutside\s+(?:of\s+)?(?:the\s+)?(?:fleet\s+)?master\b', text_l))
     ):
         return "outside"
     elif (
-        bool(re.search(r'\b(?:fleet\s+inside\s+(?:of\s+)?(?:fleet\s+)?master|fleet\s+in\s+(?:fleet\s+)?master|fleet\s+in\s+(?:network\s+)?module|(?:present|available)\s+in\s+network\s+module)\b', text_l))
-        or bool(re.search(r'\binside\s+(?:of\s+)?(?:fleet\s+)?master\b', text_l))
+        bool(re.search(r'\b(?:fleet\s+inside\s+(?:of\s+)?(?:the\s+)?(?:fleet\s+)?master|inside\s+(?:of\s+)?(?:the\s+)?(?:fleet\s+)?master|fleet\s+in\s+(?:the\s+)?(?:fleet\s+)?master|fleet\s+in\s+(?:the\s+)?(?:network\s+)?module|(?:present|available)\s+in\s+(?:the\s+)?network\s+module)\b', text_l))
+        or bool(re.search(r'\binside\s+(?:of\s+)?(?:the\s+)?(?:fleet\s+)?master\b', text_l))
     ):
         return "inside"
     return None
