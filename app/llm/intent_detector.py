@@ -495,6 +495,8 @@ def detect_shipment_methods(text: str) -> list[str]:
     msg_lower = re.sub(r'\bvs(?=[a-zA-Z0-9])', 'vs ', msg_lower)
     # Mask out non-shipment-method phrases like 'network module'
     msg_lower = re.sub(r'\bnetwork\s+module\b', lambda m: ' ' * len(m.group(0)), msg_lower)
+    msg_lower = re.sub(r'\b(?:major\s+)?(?:route\s+types?|feeder\s+types)\b', lambda m: ' ' * len(m.group(0)), msg_lower)
+    msg_lower = re.sub(r'\b(?:major\s+)?shipment\s+methods?\b', lambda m: ' ' * len(m.group(0)), msg_lower)
     methods: list[tuple[str, int]] = []
 
     # 1. Pick Up and Delivery (e.g. 'pick & delivery', 'pick up and delivery', 'pickup and delivery')
@@ -1111,7 +1113,11 @@ _STOP_LOCATION_WORDS = {
     "is", "are", "was", "were", "be", "been", "being", "as", "at", "in", "on", "of", "for",
     "to", "from", "with", "where", "which", "that", "and", "or", "not", "show", "get", "give",
     "list", "find", "trip", "trips", "secutrak", "icici", "ilgic", "thirdparty",
-    "total", "na", "fixed", "portable", "fixedgps", "fixedelock", "portableelock", "status", "count", "tal"
+    "total", "na", "fixed", "portable", "fixedgps", "fixedelock", "portableelock", "status", "count", "tal",
+    "comm", "bz", "out", "in", "shipment", "shipments", "method", "methods", "feeder", "empty", "surface",
+    "sfc", "speed", "air", "delivery", "pickup", "network", "combined", "together", "both", "either",
+    "each", "every", "transporter", "transporters", "fleet", "contractor", "contractors", "vehicle",
+    "vehicles", "route", "routes", "master", "module", "category", "type", "types", "priority"
 }
 
 _ATD_ATA_VALUE_MAP = {
@@ -2070,7 +2076,7 @@ class IntentDetector:
                 )
             )
             _is_shipment_method_breakdown_query = bool(
-                re.search(r'\b(?:across|by|in|each|all|breakdown)\s+(?:major\s+)?(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_lower)
+                re.search(r'\b(?:across|by|each|all|breakdown|in\s+(?:each|every))\s+(?:major\s+)?(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_lower)
                 or re.search(r'\b(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\s+breakdown\b', msg_lower)
                 or re.search(r'\btrip\s+count\s+across\s+(?:major\s+)?(?:feeder|route|shipment)\b', msg_lower)
                 or re.search(r'\bmajor\s+(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_lower)
@@ -3738,7 +3744,13 @@ class IntentDetector:
 
             has_dest_filter = any(isinstance(f, dict) and f.get("field") == "destination" for f in query_payload.get("filters", []))
             if not has_dest_filter:
-                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                msg_dest_clean = re.sub(
+                    r'\b(?:belong(?:ed|ing|s)?|relat(?:ed|ing|es?)|pertain(?:ed|ing|s)?|prior|due|according|thanks|similar|close|next|equal)\s+to\b',
+                    lambda m: ' ' * len(m.group(0)),
+                    message,
+                    flags=re.IGNORECASE
+                )
+                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', msg_dest_clean, re.IGNORECASE)
                 if dest_match:
                     val = dest_match.group(1).strip()
                     if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
@@ -3750,12 +3762,7 @@ class IntentDetector:
 
             # --- ShipmentMethod Post-Processing ---
             # Full list of recognized shipmentMethod values.
-            if _is_shipment_method_breakdown_query:
-                query_payload["filters"] = [
-                    f for f in query_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") in ["shipmentMethod", "Route", "route", "RouteName", "routeName", "routeCategory", "routeType", "tripType"])
-                ]
-            elif detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and not _is_across_trip_types:
+            if detected_sms and not _is_network_vs_local_query and not _is_trip_type_breakdown_query and not _is_across_trip_types:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -3785,6 +3792,19 @@ class IntentDetector:
                     query_payload.pop("metrics", None)
                 if detect_device_analytics(message):
                     query_payload["filters"].sort(key=_device_analytics_sort_key)
+            elif _is_shipment_method_breakdown_query:
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in ["shipmentMethod", "Route", "route", "RouteName", "routeName", "routeCategory", "routeType", "tripType"])
+                ]
+                query_payload["groupBy"] = ["shipmentMethod"]
+                query_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "trip_count"
+                    }
+                ]
             elif _is_across_trip_types:
                 query_payload["filters"] = [
                     f for f in query_payload["filters"]
@@ -4795,7 +4815,7 @@ class IntentDetector:
                 )
             )
             fb_is_shipment_method_breakdown_query = bool(
-                re.search(r'\b(?:across|by|in|each|all|breakdown)\s+(?:major\s+)?(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_lower)
+                re.search(r'\b(?:across|by|each|all|breakdown|in\s+(?:each|every))\s+(?:major\s+)?(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_lower)
                 or re.search(r'\b(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\s+breakdown\b', msg_lower)
                 or re.search(r'\btrip\s+count\s+across\s+(?:major\s+)?(?:feeder|route|shipment)\b', msg_lower)
                 or re.search(r'\bmajor\s+(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_lower)
@@ -6053,12 +6073,7 @@ class IntentDetector:
             fb_sms = detect_shipment_methods(message)
             if fb_is_across_trip_types:
                 fb_sms = [sm for sm in fb_sms if sm != 'network']
-            if fb_is_shipment_method_breakdown_query:
-                fallback_payload["filters"] = [
-                    f for f in fallback_payload["filters"]
-                    if not (isinstance(f, dict) and f.get("field") in ["shipmentMethod", "Route", "route", "RouteName", "routeName", "routeCategory", "routeType", "tripType"])
-                ]
-            elif fb_sms and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and not fb_is_across_trip_types:
+            if fb_sms and not fb_is_network_vs_local_query and not fb_is_trip_type_breakdown_query and not fb_is_across_trip_types:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
                     if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")
@@ -6084,6 +6099,19 @@ class IntentDetector:
                     fallback_payload.pop("metrics", None)
                 if detect_device_analytics(message):
                     fallback_payload["filters"].sort(key=_fb_device_analytics_sort_key)
+            elif fb_is_shipment_method_breakdown_query:
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload["filters"]
+                    if not (isinstance(f, dict) and f.get("field") in ["shipmentMethod", "Route", "route", "RouteName", "routeName", "routeCategory", "routeType", "tripType"])
+                ]
+                fallback_payload["groupBy"] = ["shipmentMethod"]
+                fallback_payload["metrics"] = [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "trip_count"
+                    }
+                ]
             elif fb_is_across_trip_types:
                 fallback_payload["filters"] = [
                     f for f in fallback_payload["filters"]
@@ -7024,7 +7052,13 @@ class IntentDetector:
 
             fb_has_dest = any(isinstance(f, dict) and f.get("field") == "destination" for f in fallback_payload.get("filters", []))
             if not fb_has_dest:
-                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
+                msg_dest_clean = re.sub(
+                    r'\b(?:belong(?:ed|ing|s)?|relat(?:ed|ing|es?)|pertain(?:ed|ing|s)?|prior|due|according|thanks|similar|close|next|equal)\s+to\b',
+                    lambda m: ' ' * len(m.group(0)),
+                    message,
+                    flags=re.IGNORECASE
+                )
+                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', msg_dest_clean, re.IGNORECASE)
                 if dest_match:
                     val = dest_match.group(1).strip()
                     if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():

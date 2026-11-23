@@ -484,14 +484,11 @@ def build_fast_path_payload(
             payload["filters"].append({"field": "vendor", "operator": "eq", "value": "ThirdParty"})
 
     # 5. Comparisons and Grouping
-    _is_sm_breakdown = bool(re.search(r'\b(?:across|by|in|each|all|breakdown)\s+(?:major\s+)?(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_l)) or bool(re.search(r'\b(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\s+breakdown\b', msg_l)) or bool(re.search(r'\btrip\s+count\s+across\s+(?:major\s+)?(?:feeder|route|shipment)\b', msg_l)) or bool(re.search(r'\bmajor\s+(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_l))
+    _is_sm_breakdown = bool(re.search(r'\b(?:across|by|each|all|breakdown|in\s+(?:each|every))\s+(?:major\s+)?(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_l)) or bool(re.search(r'\b(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\s+breakdown\b', msg_l)) or bool(re.search(r'\btrip\s+count\s+across\s+(?:major\s+)?(?:feeder|route|shipment)\b', msg_l)) or bool(re.search(r'\bmajor\s+(?:feeder\s+types?|route\s+types?|shipment\s+methods?)\b', msg_l))
 
     from app.llm.intent_detector import detect_shipment_methods
     sms = detect_shipment_methods(message)
-    if _is_sm_breakdown:
-        payload["groupBy"] = ["shipmentMethod"]
-        payload["metrics"] = [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}]
-    elif sms and not bool(re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or)\s+local\b|\bintercity\s+(?:vs\.?|versus|and|or)\s+intracity\b', msg_l)):
+    if sms and not bool(re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or)\s+local\b|\bintercity\s+(?:vs\.?|versus|and|or)\s+intracity\b', msg_l)):
         if len(sms) > 1:
             payload["filters"].append({
                 "field": "shipmentMethod",
@@ -506,6 +503,9 @@ def build_fast_path_payload(
                 "operator": "eq",
                 "value": sms[0]
             })
+    elif _is_sm_breakdown:
+        payload["groupBy"] = ["shipmentMethod"]
+        payload["metrics"] = [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}]
     elif bool(re.search(r'\bnetwork\s+(?:vs\.?|versus|and|or)\s+local\b|\bintercity\s+(?:vs\.?|versus|and|or)\s+intracity\b|\bcompare\s+network\s+and\s+local\b', msg_l)):
         payload["groupBy"] = ["tripType"]
         payload["metrics"] = [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
@@ -690,11 +690,9 @@ def build_fast_path_payload(
     payload["filters"].sort(key=_fast_path_filter_sort_key)
 
     reordered = {}
-    for k in ["entity", "operation", "analytics", "filters", "groupBy", "groupByFormat", "metrics", "sort"]:
+    for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "groupByFormat", "metrics", "sort"]:
         if k in payload:
             reordered[k] = payload[k]
-    if "groupBy" not in payload and "select" in payload:
-        reordered["select"] = payload["select"]
     for k, v in payload.items():
         if k not in reordered:
             reordered[k] = v
