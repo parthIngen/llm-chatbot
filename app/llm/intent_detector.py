@@ -4266,21 +4266,27 @@ class IntentDetector:
                             "operator": "eq",
                             "value": "valid"
                         })
-                has_transporter_filter = False
-                trans_op = "in" if isinstance(specific_transporter, list) else "eq"
-                for f in query_payload["filters"]:
-                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
-                        f["field"] = "transporter"
-                        f["operator"] = trans_op
-                        f["value"] = specific_transporter
-                        has_transporter_filter = True
-                        break
-                if not has_transporter_filter:
-                    query_payload["filters"].append({
-                        "field": "transporter",
-                        "operator": trans_op,
-                        "value": specific_transporter
-                    })
+                if specific_transporter:
+                    has_transporter_filter = False
+                    trans_op = "in" if isinstance(specific_transporter, list) else "eq"
+                    for f in query_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                            f["field"] = "transporter"
+                            f["operator"] = trans_op
+                            f["value"] = specific_transporter
+                            has_transporter_filter = True
+                            break
+                    if not has_transporter_filter:
+                        query_payload["filters"].append({
+                            "field": "transporter",
+                            "operator": trans_op,
+                            "value": specific_transporter
+                        })
+                else:
+                    query_payload["filters"] = [
+                        f for f in query_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"])
+                    ]
             elif _is_distinct_vehicle_query:
                 # Query asks to list / count distinct vehicles (grouped by vehicleNo)
                 query_payload["groupBy"] = ["vehicleNo"]
@@ -4897,6 +4903,12 @@ class IntentDetector:
                 ]
                 if "select" not in query_payload:
                     query_payload["select"] = []
+
+            if "filters" in query_payload and isinstance(query_payload["filters"], list):
+                query_payload["filters"] = [
+                    f for f in query_payload["filters"]
+                    if isinstance(f, dict) and f.get("value") is not None and str(f.get("value")).lower() != "null"
+                ]
 
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "groupByFormat", "metrics", "sort"]:
@@ -6569,21 +6581,27 @@ class IntentDetector:
                             "operator": "eq",
                             "value": target_status
                         })
-                has_fb_transporter_filter = False
-                fb_trans_op = "in" if isinstance(fb_specific_transporter, list) else "eq"
-                for f in fallback_payload["filters"]:
-                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
-                        f["field"] = "transporter"
-                        f["operator"] = fb_trans_op
-                        f["value"] = fb_specific_transporter
-                        has_fb_transporter_filter = True
-                        break
-                if not has_fb_transporter_filter:
-                    fallback_payload["filters"].append({
-                        "field": "transporter",
-                        "operator": fb_trans_op,
-                        "value": fb_specific_transporter
-                    })
+                if fb_specific_transporter:
+                    has_fb_transporter_filter = False
+                    fb_trans_op = "in" if isinstance(fb_specific_transporter, list) else "eq"
+                    for f in fallback_payload["filters"]:
+                        if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                            f["field"] = "transporter"
+                            f["operator"] = fb_trans_op
+                            f["value"] = fb_specific_transporter
+                            has_fb_transporter_filter = True
+                            break
+                    if not has_fb_transporter_filter:
+                        fallback_payload["filters"].append({
+                            "field": "transporter",
+                            "operator": fb_trans_op,
+                            "value": fb_specific_transporter
+                        })
+                else:
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload["filters"]
+                        if not (isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"])
+                    ]
             elif fb_is_distinct_vehicle_query:
                 fallback_payload["groupBy"] = ["vehicleNo"]
                 fallback_payload["metrics"] = [
@@ -7584,6 +7602,12 @@ class IntentDetector:
                 ]
                 if "select" not in fallback_payload:
                     fallback_payload["select"] = []
+
+            if "filters" in fallback_payload and isinstance(fallback_payload["filters"], list):
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload["filters"]
+                    if isinstance(f, dict) and f.get("value") is not None and str(f.get("value")).lower() != "null"
+                ]
 
             reordered = {}
             for k in ["entity", "operation", "analytics", "filters", "select", "groupBy", "groupByFormat", "metrics", "sort"]:
