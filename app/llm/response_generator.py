@@ -245,11 +245,11 @@ def build_natural_response(
     has_withgps = bool(filter_map.get("withgps")) or (analytics and any(isinstance(a, dict) and a.get("type") == "withgps" for a in analytics))
     if has_withgps:
         if portable_elock == "na" and (gps in ("existing", "active") or fixed_gps in ("existing", "active") or "gps" in msg_lower) and (fixed_elock in ("existing", "active") or "fixed" in msg_lower):
-            device_qualifiers.append("using Fixed GPS and Fixed E-Lock together (without Portable E-Lock)")
+            device_qualifiers.append("using Fixed GPS and Fixed E-Lock together (without Portable E-Lock)" if "together" in msg_lower else "using Fixed GPS and Fixed E-Lock without Portable E-Lock")
         elif fixed_elock == "na" and (gps in ("existing", "active") or fixed_gps in ("existing", "active") or "gps" in msg_lower) and (portable_elock in ("existing", "active") or "portable" in msg_lower):
-            device_qualifiers.append("using Fixed GPS and Portable E-Lock together (without Fixed E-Lock)")
+            device_qualifiers.append("using Fixed GPS and Portable E-Lock together (without Fixed E-Lock)" if "together" in msg_lower else "using Fixed GPS and Portable E-Lock without Fixed E-Lock")
         elif (gps == "na" or fixed_gps == "na") and (fixed_elock in ("existing", "active") or "fixed" in msg_lower) and (portable_elock in ("existing", "active") or "portable" in msg_lower):
-            device_qualifiers.append("using Fixed E-Lock and Portable E-Lock together (without Fixed GPS)")
+            device_qualifiers.append("using Fixed E-Lock and Portable E-Lock together (without Fixed GPS)" if "together" in msg_lower else "using Fixed E-Lock and Portable E-Lock without Fixed GPS")
         else:
             has_gps_present = any(k.lower() in ("gps", "fixedgps", "fixed-gps-status") for k in filter_map) or "gps" in msg_lower
             has_fixed_present = any(k.lower() in ("fixedelock", "fixed-elock-status") for k in filter_map) or "fixed" in msg_lower

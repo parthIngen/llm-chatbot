@@ -915,7 +915,7 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
     without_fixed_elock_det = bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\b', without_text_det)) or bool(re.search(r'\b(?:without|excluding|except)\s+(?:any\s+)?fixed[\s-]*(?:e[\s-]?)?locks?\b', msg_l))
     without_gps_det = bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', without_text_det)) or bool(re.search(r'\b(?:without|excluding|except)\s+(?:any\s+)?(?:fixed[\s-]*)?gps\b', msg_l))
 
-    if is_devices_together and has_gps_mention_together and has_fixed_elock_mention_together and without_portable_det:
+    if (is_devices_together or without_portable_det) and has_gps_mention_together and has_fixed_elock_mention_together and without_portable_det:
         dev_val = "existing"
         if re.search(r'\b(?:inactive|no\s+connectivity)\b', msg_l):
             dev_val = "inactive"
@@ -923,15 +923,20 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
             dev_val = "active"
         elif re.search(r'\b(?:na|n/a|not\s+available|not\s+applicable)\b', msg_l):
             dev_val = "na"
+        flts = [
+            {"field": "FixedELock", "operator": "eq", "value": dev_val},
+            {"field": "PortableELock", "operator": "eq", "value": "na"},
+            {"field": "GPS", "operator": "eq", "value": dev_val}
+        ] if not is_devices_together else [
+            {"field": "GPS", "operator": "eq", "value": dev_val},
+            {"field": "FixedELock", "operator": "eq", "value": dev_val},
+            {"field": "PortableELock", "operator": "eq", "value": "na"}
+        ]
         return {
             "analytics_type": "withgps",
-            "device_filters": [
-                {"field": "GPS", "operator": "eq", "value": dev_val},
-                {"field": "FixedELock", "operator": "eq", "value": dev_val},
-                {"field": "PortableELock", "operator": "eq", "value": "na"}
-            ]
+            "device_filters": flts
         }
-    elif is_devices_together and has_gps_mention_together and has_portable_mention_together and without_fixed_elock_det:
+    elif (is_devices_together or without_fixed_elock_det) and has_gps_mention_together and has_portable_mention_together and without_fixed_elock_det:
         dev_val = "existing"
         if re.search(r'\b(?:inactive|no\s+connectivity)\b', msg_l):
             dev_val = "inactive"
@@ -939,15 +944,20 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
             dev_val = "active"
         elif re.search(r'\b(?:na|n/a|not\s+available|not\s+applicable)\b', msg_l):
             dev_val = "na"
+        flts = [
+            {"field": "FixedELock", "operator": "eq", "value": "na"},
+            {"field": "PortableELock", "operator": "eq", "value": dev_val},
+            {"field": "GPS", "operator": "eq", "value": dev_val}
+        ] if not is_devices_together else [
+            {"field": "GPS", "operator": "eq", "value": dev_val},
+            {"field": "FixedELock", "operator": "eq", "value": "na"},
+            {"field": "PortableELock", "operator": "eq", "value": dev_val}
+        ]
         return {
             "analytics_type": "withgps",
-            "device_filters": [
-                {"field": "GPS", "operator": "eq", "value": dev_val},
-                {"field": "FixedELock", "operator": "eq", "value": "na"},
-                {"field": "PortableELock", "operator": "eq", "value": dev_val}
-            ]
+            "device_filters": flts
         }
-    elif is_devices_together and has_fixed_elock_mention_together and has_portable_mention_together and without_gps_det:
+    elif (is_devices_together or without_gps_det) and has_fixed_elock_mention_together and has_portable_mention_together and without_gps_det:
         dev_val = "existing"
         if re.search(r'\b(?:inactive|no\s+connectivity)\b', msg_l):
             dev_val = "inactive"
@@ -955,13 +965,18 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
             dev_val = "active"
         elif re.search(r'\b(?:na|n/a|not\s+available|not\s+applicable)\b', msg_l):
             dev_val = "na"
+        flts = [
+            {"field": "FixedELock", "operator": "eq", "value": dev_val},
+            {"field": "PortableELock", "operator": "eq", "value": dev_val},
+            {"field": "GPS", "operator": "eq", "value": "na"}
+        ] if not is_devices_together else [
+            {"field": "GPS", "operator": "eq", "value": "na"},
+            {"field": "FixedELock", "operator": "eq", "value": dev_val},
+            {"field": "PortableELock", "operator": "eq", "value": dev_val}
+        ]
         return {
             "analytics_type": "withgps",
-            "device_filters": [
-                {"field": "GPS", "operator": "eq", "value": "na"},
-                {"field": "FixedELock", "operator": "eq", "value": dev_val},
-                {"field": "PortableELock", "operator": "eq", "value": dev_val}
-            ]
+            "device_filters": flts
         }
     elif is_devices_together and (
         (has_gps_mention_together and has_fixed_elock_mention_together and has_portable_mention_together)

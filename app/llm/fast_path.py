@@ -772,6 +772,8 @@ def build_fast_path_payload(
             payload["filters"].append({"field": "runDate", "operator": "gte", "value": s_d})
             payload["filters"].append({"field": "runDate", "operator": "lte", "value": e_d})
 
+    is_together_in_query = bool(re.search(r'\btogether\b', msg_l))
+
     def _fast_path_filter_sort_key(flt):
         if not isinstance(flt, dict):
             return 99
@@ -781,16 +783,22 @@ def build_fast_path_payload(
             return 1
         elif field == "tripStatus":
             return 2
-        elif field in ("GPS", "fixed-gps-status", "gps", "fixedgps"):
+        elif is_together_in_query and field in ("GPS", "fixed-gps-status", "gps", "fixedgps"):
             return 3
-        elif field in ("FixedELock", "fixed-elock-status", "fixedelock"):
+        elif is_together_in_query and field in ("FixedELock", "fixed-elock-status", "fixedelock"):
             return 3.1
-        elif field in ("PortableELock", "portable-elock-status", "portableelock"):
+        elif is_together_in_query and field in ("PortableELock", "portable-elock-status", "portableelock"):
             return 3.2
         elif field == "runDate" and op == "gte":
             return 4
         elif field == "runDate" and op == "lte":
             return 5
+        elif not is_together_in_query and field in ("FixedELock", "fixed-elock-status", "fixedelock"):
+            return 5.1
+        elif not is_together_in_query and field in ("PortableELock", "portable-elock-status", "portableelock"):
+            return 5.2
+        elif not is_together_in_query and field in ("GPS", "fixed-gps-status", "gps", "fixedgps"):
+            return 5.3
         elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
             return 5.5
         elif field in ["transporter", "Transporter"]:
