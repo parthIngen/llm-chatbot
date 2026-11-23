@@ -1117,8 +1117,69 @@ _STOP_LOCATION_WORDS = {
     "comm", "bz", "out", "in", "shipment", "shipments", "method", "methods", "feeder", "empty", "surface",
     "sfc", "speed", "air", "delivery", "pickup", "network", "combined", "together", "both", "either",
     "each", "every", "transporter", "transporters", "fleet", "contractor", "contractors", "vehicle",
-    "vehicles", "route", "routes", "master", "module", "category", "type", "types", "priority"
+    "vehicles", "route", "routes", "master", "module", "category", "type", "types", "priority",
+    "ated", "ating", "origin", "originated", "originating", "destination", "source", "site", "hub", "station", "branch", "city"
 }
+
+def extract_source_location(text: str) -> Optional[str]:
+    """
+    Extracts the source/origin location name from user query.
+    Handles phrases like 'originated from location BOB', 'from location BOB',
+    'origin BOB', 'starting from BOB', etc.
+    """
+    if not text:
+        return None
+    # Mask out non-location date ranges like 'from 2026-08-01'
+    clean_text = re.sub(r'\bfrom\s+\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b', lambda m: ' ' * len(m.group(0)), text, flags=re.IGNORECASE)
+    pat = re.compile(
+        r'\b(?:(?:source|origin|originat(?:ed|ing|es?))\b\s*(?:is|from|at|as)?|start(?:ing|ed|s)?\s+(?:from|at)|\bfrom\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?(?:location\s+|hub\s+|city\s+|station\s+|branch\s+|site\s+)?([A-Za-z0-9_-]+)(?:\s+(?:location|hub|city|station|branch|site))?\b',
+        re.IGNORECASE
+    )
+    for m in pat.finditer(clean_text):
+        val = m.group(1).strip()
+        val_lower = val.lower()
+        if (
+            val_lower not in _STOP_LOCATION_WORDS
+            and not re.match(r'^\d{4}', val)
+            and not val.isdigit()
+            and not re.match(r'^\d{1,4}[-/.]', val)
+            and len(val) > 1
+        ):
+            return val
+    return None
+
+def extract_destination_location(text: str) -> Optional[str]:
+    """
+    Extracts the destination location name from user query.
+    Handles phrases like 'destination BOB', 'reaching BOB', 'ends at location BOB', 'to location BOB', etc.
+    """
+    if not text:
+        return None
+    # Mask out non-destination phrases like 'belonged to', 'related to', etc.
+    clean_text = re.sub(
+        r'\b(?:belong(?:ed|ing|s)?|relat(?:ed|ing|es?)|pertain(?:ed|ing|s)?|prior|due|according|thanks|similar|close|next|equal)\s+to\b',
+        lambda m: ' ' * len(m.group(0)),
+        text,
+        flags=re.IGNORECASE
+    )
+    # Mask out date ranges like 'to 2026-08-31'
+    clean_text = re.sub(r'\bto\s+\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b', lambda m: ' ' * len(m.group(0)), clean_text, flags=re.IGNORECASE)
+    pat = re.compile(
+        r'\b(?:(?:destination|destinat(?:ed|ing|es?))\b\s*(?:is|to|at|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?(?:location\s+|hub\s+|city\s+|station\s+|branch\s+|site\s+)?([A-Za-z0-9_-]+)(?:\s+(?:location|hub|city|station|branch|site))?\b',
+        re.IGNORECASE
+    )
+    for m in pat.finditer(clean_text):
+        val = m.group(1).strip()
+        val_lower = val.lower()
+        if (
+            val_lower not in _STOP_LOCATION_WORDS
+            and not re.match(r'^\d{4}', val)
+            and not val.isdigit()
+            and not re.match(r'^\d{1,4}[-/.]', val)
+            and len(val) > 1
+        ):
+            return val
+    return None
 
 _ATD_ATA_VALUE_MAP = {
     "notcaptured": "notcaptured",
@@ -3732,33 +3793,23 @@ class IntentDetector:
 
             has_source_filter = any(isinstance(f, dict) and f.get("field") == "source" for f in query_payload.get("filters", []))
             if not has_source_filter:
-                src_match = re.search(r'\b(?:(?:source|origin)\s*(?:is|from|as)?|starting\s+(?:from|at)?|\bfrom\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
-                if src_match:
-                    val = src_match.group(1).strip()
-                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
-                        query_payload["filters"].append({
-                            "field": "source",
-                            "operator": "eq",
-                            "value": val
-                        })
+                src_val = extract_source_location(message)
+                if src_val:
+                    query_payload["filters"].append({
+                        "field": "source",
+                        "operator": "eq",
+                        "value": src_val
+                    })
 
             has_dest_filter = any(isinstance(f, dict) and f.get("field") == "destination" for f in query_payload.get("filters", []))
             if not has_dest_filter:
-                msg_dest_clean = re.sub(
-                    r'\b(?:belong(?:ed|ing|s)?|relat(?:ed|ing|es?)|pertain(?:ed|ing|s)?|prior|due|according|thanks|similar|close|next|equal)\s+to\b',
-                    lambda m: ' ' * len(m.group(0)),
-                    message,
-                    flags=re.IGNORECASE
-                )
-                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', msg_dest_clean, re.IGNORECASE)
-                if dest_match:
-                    val = dest_match.group(1).strip()
-                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
-                        query_payload["filters"].append({
-                            "field": "destination",
-                            "operator": "eq",
-                            "value": val
-                        })
+                dest_val = extract_destination_location(message)
+                if dest_val:
+                    query_payload["filters"].append({
+                        "field": "destination",
+                        "operator": "eq",
+                        "value": dest_val
+                    })
 
             # --- ShipmentMethod Post-Processing ---
             # Full list of recognized shipmentMethod values.
@@ -7040,33 +7091,23 @@ class IntentDetector:
 
             fb_has_source = any(isinstance(f, dict) and f.get("field") == "source" for f in fallback_payload.get("filters", []))
             if not fb_has_source:
-                src_match = re.search(r'\b(?:(?:source|origin)\s*(?:is|from|as)?|starting\s+(?:from|at)?|\bfrom\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', message, re.IGNORECASE)
-                if src_match:
-                    val = src_match.group(1).strip()
-                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
-                        fallback_payload["filters"].append({
-                            "field": "source",
-                            "operator": "eq",
-                            "value": val
-                        })
+                src_val = extract_source_location(message)
+                if src_val:
+                    fallback_payload["filters"].append({
+                        "field": "source",
+                        "operator": "eq",
+                        "value": src_val
+                    })
 
             fb_has_dest = any(isinstance(f, dict) and f.get("field") == "destination" for f in fallback_payload.get("filters", []))
             if not fb_has_dest:
-                msg_dest_clean = re.sub(
-                    r'\b(?:belong(?:ed|ing|s)?|relat(?:ed|ing|es?)|pertain(?:ed|ing|s)?|prior|due|according|thanks|similar|close|next|equal)\s+to\b',
-                    lambda m: ' ' * len(m.group(0)),
-                    message,
-                    flags=re.IGNORECASE
-                )
-                dest_match = re.search(r'\b(?:destination\s*(?:is|to|as)?|reaching|ends?\s+(?:at|on)?|arrival\s+(?:at)?|\bto\b)\s*[:=]?\s*(?:the\s+|a\s+|an\s+)?([A-Za-z0-9_-]+)(?:\s+location)?\b', msg_dest_clean, re.IGNORECASE)
-                if dest_match:
-                    val = dest_match.group(1).strip()
-                    if val.lower() not in _STOP_LOCATION_WORDS and not re.match(r'^\d{4}', val) and not val.isdigit():
-                        fallback_payload["filters"].append({
-                            "field": "destination",
-                            "operator": "eq",
-                            "value": val
-                        })
+                dest_val = extract_destination_location(message)
+                if dest_val:
+                    fallback_payload["filters"].append({
+                        "field": "destination",
+                        "operator": "eq",
+                        "value": dest_val
+                    })
 
             # --- Vehicle Number Fallback Post-Processing ---
             fb_has_vehicle = any(isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no") for f in fallback_payload.get("filters", []))

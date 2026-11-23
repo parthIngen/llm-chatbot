@@ -135,6 +135,9 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if detect_date_grouping(message) is not None:
         return True
+    from app.llm.intent_detector import extract_source_location, extract_destination_location
+    if bool(re.search(r'\btrips?\b', msg_l)) and (extract_source_location(message) is not None or extract_destination_location(message) is not None):
+        return True
 
     return False
 
@@ -531,6 +534,14 @@ def build_fast_path_payload(
         payload["filters"].append({"field": "routeCategory", "operator": "eq", "value": "intercity"})
     elif bool(re.search(r'\bintracity\b', msg_l)) and not bool(re.search(r'\bintercity\b', msg_l)):
         payload["filters"].append({"field": "routeCategory", "operator": "eq", "value": "intracity"})
+
+    from app.llm.intent_detector import extract_source_location, extract_destination_location
+    src_loc = extract_source_location(message)
+    if src_loc:
+        payload["filters"].append({"field": "source", "operator": "eq", "value": src_loc})
+    dest_loc = extract_destination_location(message)
+    if dest_loc:
+        payload["filters"].append({"field": "destination", "operator": "eq", "value": dest_loc})
 
     from app.llm.intent_detector import extract_specific_transporter
     has_no_transporter = bool(
