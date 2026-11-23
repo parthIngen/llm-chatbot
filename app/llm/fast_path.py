@@ -32,7 +32,10 @@ def can_resolve_fast_path(message: str) -> bool:
     if bool(re.search(r'\bactive\s+vehicles\s+operating\s+on\s+the\s+field\b', msg_l)):
         return True
 
-    # 2. Distinct transporter queries
+    # 2. Distinct / Top transporter queries
+    from app.llm.intent_detector import is_top_transporters_query
+    if is_top_transporters_query(message):
+        return True
     if bool(re.search(r'\b(?:unique\s+transporters?|distinct\s+transporters?|total\s+number\s+of\s+unique\s+transporters?)\b', msg_l)):
         return True
 
@@ -154,7 +157,7 @@ def build_fast_path_payload(
     Constructs an initial structured query payload for queries that can be confidently resolved.
     Returns None if the query cannot be confidently resolved without an LLM.
     """
-    from app.llm.intent_detector import extract_single_shipment_lookup, detect_top_device_vendors, extract_date_range, _resolve_month_range
+    from app.llm.intent_detector import extract_single_shipment_lookup, detect_top_device_vendors, extract_date_range, _resolve_month_range, is_top_transporters_query
     single_shp = extract_single_shipment_lookup(message)
     if single_shp:
         return {
@@ -526,6 +529,26 @@ def build_fast_path_payload(
     elif bool(re.search(r'\b(?:unique\s+transporters?|distinct\s+transporters?)\b', msg_l)):
         payload["groupBy"] = ["Transporter"]
         payload["metrics"] = [{"field": "Transporter", "function": "countDistinct", "alias": "uniqueTransporterCount"}]
+    elif is_top_transporters_query(message):
+        payload["filters"] = [
+            f for f in payload.get("filters", [])
+            if not (isinstance(f, dict) and f.get("field") in ("transporter", "Transporter"))
+        ]
+        payload["groupBy"] = ["transporter"]
+        payload["metrics"] = [
+            {
+                "field": "shipmentNo",
+                "function": "count",
+                "alias": "trip_count"
+            }
+        ]
+        payload["sort"] = [
+            {
+                "field": "trip_count",
+                "order": "desc"
+            }
+        ]
+        payload["select"] = []
     elif bool(re.search(r'\b(?:unique\s+vehicles?|distinct\s+vehicles?|active\s+vehicles\s+operating\s+on\s+the\s+field)\b', msg_l)) or (
         bool(re.search(r'\bvehicles?\b', msg_l)) and bool(re.search(r'\b(?:gps|e[\s-]?lock)\b', msg_l))
     ) or (

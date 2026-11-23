@@ -31,5 +31,7 @@ TRANSPORTER EXAMPLES:
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "transporter", "operator": "eq", "value": "PRADEESH N V"}], "select": []}
 - "How many trips in August 2026 had no Transporter?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "transporter", "operator": "eq", "value": "na"}], "select": []}
+- "Which top 5 transporters recorded the highest trip volumes in August 2026?" / "Which top transporters recorded the highest trip volumes in August 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["transporter"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "trip_count"}], "sort": [{"field": "trip_count", "order": "desc"}]}
 """
 

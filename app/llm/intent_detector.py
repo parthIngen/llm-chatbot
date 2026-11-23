@@ -597,11 +597,27 @@ _TRANSPORTER_STOP_WORDS = {
     "recorded", "operating", "operated", "active", "running", "listed",
     "registered", "available", "found", "present", "working", "assigned",
     "involved", "participated", "total", "number", "numbers", "breakdown",
-    "details", "summary", "list", "each", "every", "per"
+    "details", "summary", "list", "each", "every", "per",
+    "highest", "volume", "volumes", "leading", "top", "most", "maximum"
 }
+
+def is_top_transporters_query(text: str) -> bool:
+    """Detects whether query asks for top transporters by trip volume/count."""
+    text_l = text.lower()
+    if not bool(re.search(r'\btransporters?\b', text_l)):
+        return False
+    return bool(
+        re.search(r'\b(?:top\s*\d*|highest|maximum|most|leading)\s+(?:\w+\s+){0,3}transporters?\b', text_l)
+        or re.search(r'\btransporters?\s+(?:that\s+|which\s+)?(?:recorded|had|have|with|generated)\s+(?:the\s+)?(?:highest|maximum|most|top)\s+(?:trip\s+volumes?|trips?|trip\s+counts?)\b', text_l)
+        or re.search(r'\btransporters?\s+by\s+(?:trip\s+volumes?|trip\s+counts?|trips)\b', text_l)
+        or re.search(r'\b(?:top\s*\d*|highest)\s+(?:trip\s+volumes?|trip\s+counts?|trips?)\s+(?:by|for|of|across)\s+transporters?\b', text_l)
+        or (re.search(r'\btransporters?\b', text_l) and re.search(r'\b(?:highest|top\s*\d*|maximum)\s+trip\s+volumes?\b', text_l))
+    )
 
 def extract_specific_transporter(text: str) -> str | list[str] | None:
     """Extract specific transporter name(s) from user message if mentioned."""
+    if is_top_transporters_query(text):
+        return None
     msg_l = text.lower()
 
     # 1. Combined multiple transporters: 'operated by X and Y [combined/together]'
@@ -2290,6 +2306,7 @@ class IntentDetector:
                 and has_count_unique_distinct
                 and not has_vehicle_mention
                 and not has_no_transporter
+                and not is_top_transporters_query(message)
             )
 
             if has_no_transporter:
@@ -4130,6 +4147,19 @@ class IntentDetector:
                 ]
                 # Remove select key — not needed for grouped vehicle queries
                 query_payload.pop("select", None)
+            elif is_top_transporters_query(message):
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"])
+                ]
+                query_payload["groupBy"] = ["transporter"]
+                query_payload["metrics"] = [
+                    {"field": "shipmentNo", "function": "count", "alias": "trip_count"}
+                ]
+                query_payload["sort"] = [
+                    {"field": "trip_count", "order": "desc"}
+                ]
+                query_payload["select"] = []
             elif _is_distinct_transporter_query:
                 # Query asks for total number of unique/distinct transporters
                 query_payload["filters"] = [
@@ -4229,6 +4259,19 @@ class IntentDetector:
                     return 10
 
                 query_payload["filters"].sort(key=_active_device_sort_key)
+            elif is_top_transporters_query(message):
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"])
+                ]
+                query_payload["groupBy"] = ["transporter"]
+                query_payload["metrics"] = [
+                    {"field": "shipmentNo", "function": "count", "alias": "trip_count"}
+                ]
+                query_payload["sort"] = [
+                    {"field": "trip_count", "order": "desc"}
+                ]
+                query_payload["select"] = []
             elif _is_distinct_transporter_query:
                 def _transporter_sort_key(flt):
                     if not isinstance(flt, dict):
@@ -5003,6 +5046,7 @@ class IntentDetector:
                 and fb_has_count_unique_distinct
                 and not fb_has_vehicle_mention
                 and not fb_has_no_transporter
+                and not is_top_transporters_query(message)
             )
 
             if fb_has_no_transporter:

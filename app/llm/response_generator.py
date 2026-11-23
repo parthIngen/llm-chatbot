@@ -424,6 +424,11 @@ def build_natural_response(
     dev_str = (" " + " and ".join(device_qualifiers)) if device_qualifiers else ""
     ctx_str = (" " + " ".join(context_qualifiers)) if context_qualifiers else ""
 
+    from app.llm.intent_detector import is_top_transporters_query
+    if is_top_transporters_query(message):
+        date_str = f" {date_clause}" if date_clause else ""
+        return f"Total {total_count} valid trips recorded by top transporters{date_str}. It does not include cancelled trips."
+
     sentence_parts = [f"Total {total_count} {prefix_str}{trip_noun}{dev_str} found{ctx_str}".strip()]
     if date_clause:
         if not ctx_str and not dev_str and not prefix_str and date_clause.startswith("in date range"):
@@ -810,6 +815,54 @@ class ResponseGenerator:
 
             intro_msg = f"Here is the list of top {device_label} vendors by trip count{date_clause}:"
             return f"{intro_msg}\n\n{html_card}"
+
+        # Detect top transporters result
+        from app.llm.intent_detector import is_top_transporters_query
+        _is_top_transporters_result = (
+            isinstance(api_data, list)
+            and len(api_data) > 0
+            and (
+                (entities.get("groupBy") == ["transporter"] if entities else False)
+                or any(isinstance(r, dict) and ("transporter" in r or "Transporter" in r) for r in api_data)
+            )
+            and is_top_transporters_query(message)
+        )
+        if _is_top_transporters_result:
+            transporter_rows = []
+            for r in api_data:
+                if not isinstance(r, dict):
+                    continue
+                t_name = r.get("transporter") or r.get("Transporter")
+                if not t_name:
+                    continue
+                t_cnt = r.get("trip_count") or r.get("count") or r.get("TotalTrip") or r.get("shipments") or 0
+                try:
+                    t_cnt = int(t_cnt)
+                except (ValueError, TypeError):
+                    t_cnt = 0
+                transporter_rows.append((str(t_name).strip(), t_cnt))
+
+            transporter_rows.sort(key=lambda x: x[1], reverse=True)
+
+            top_n_match = re.search(r'\btop\s*(\d+)\b', message, re.IGNORECASE)
+            limit = int(top_n_match.group(1)) if top_n_match else 5
+            transporter_rows = transporter_rows[:limit]
+
+            date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+
+            if not transporter_rows:
+                return f"No trips found for top transporters{date_clause}."
+
+            list_items = []
+            for rank, (t_name, cnt) in enumerate(transporter_rows, 1):
+                list_items.append(f"{rank}. {t_name} ({cnt:,} trips)")
+
+            lines_str = "\n".join(list_items)
+            return (
+                f"Here are the top {len(transporter_rows)} transporters by trip volume{date_clause}:\n"
+                f"{lines_str}\n\n"
+                f"It does not include cancelled trips."
+            )
 
         # Detect date-wise (day-wise or month-wise) grouped result: list of dicts with 'runDate' and 'TotalTrip' (or similar count)
         _is_date_grouped_result = False
