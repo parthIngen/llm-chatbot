@@ -91,6 +91,12 @@ def _resolve_month_range(text: str, reference_now: datetime.datetime) -> tuple[s
 
     all_matches = list(_MONTH_PATTERN.finditer(text))
     if not all_matches:
+        if "this month" in text.lower() or "current month" in text.lower():
+            last_day = calendar.monthrange(reference_now.year, reference_now.month)[1]
+            return (
+                f"{reference_now.year:04d}-{reference_now.month:02d}-01 00:00:00",
+                f"{reference_now.year:04d}-{reference_now.month:02d}-{last_day:02d} 23:59:59"
+            )
         return None, None
 
     # Determine explicit year in text if present
@@ -576,31 +582,66 @@ _TRANSPORTER_STOP_WORDS = {
     "details", "summary", "list", "each", "every", "per"
 }
 
-def extract_specific_transporter(text: str) -> str | None:
-    """Extract a specific transporter name from user message if mentioned."""
+def extract_specific_transporter(text: str) -> str | list[str] | None:
+    """Extract specific transporter name(s) from user message if mentioned."""
     msg_l = text.lower()
+
+    # 1. Combined multiple transporters: 'operated by X and Y [combined/together]'
+    combined_pat = (
+        r'\b(?:operated\s+by|handled\s+by|run\s+by)\s+(?:transporters?\s+)?'
+        r'([A-Za-z0-9&._\-()]+(?:\s+[A-Za-z0-9&._\-()]+)*)\s+and\s+'
+        r'([A-Za-z0-9&._\-()]+(?:\s+[A-Za-z0-9&._\-()]+)*)(?:\s+(?:combined|together))?'
+    )
+    m_comb = re.search(combined_pat, text, re.IGNORECASE)
+    if m_comb:
+        t1 = m_comb.group(1).strip()
+        t2 = m_comb.group(2).strip()
+        t2 = re.sub(r'\s+(?:combined|together)\b', '', t2, flags=re.IGNORECASE).strip(' ?.,')
+        t2 = re.sub(r'\s+(?:in|for|from|during|between|with|on)\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|\d{4}).*', '', t2, flags=re.IGNORECASE).strip(' ?.,')
+        if t1.lower() not in _TRANSPORTER_STOP_WORDS and t2.lower() not in _TRANSPORTER_STOP_WORDS:
+            return [t1, t2]
+
     # If the query asks for unique/distinct/total count of transporters, it's a distinct transporter query,
     # not a filter for a specific transporter (unless explicitly named, e.g. 'named ...' or 'called ...')
     if (
-        re.search(r'\b(?:unique|distinct|how\s+many|total\s+number|count\s+of|count)\b.*?\btransporters?\b', msg_l)
+        (
+            re.search(r'\b(?:unique|distinct|total\s+number|count\s+of)\s+transporters?\b', msg_l)
+            or re.search(r'\bhow\s+many\s+transporters?\b', msg_l)
+            or re.search(r'\bshow\s+(?:all\s+)?unique\s+transporters?\b', msg_l)
+        )
         and not re.search(r'\b(?:unique|distinct|how\s+many|total\s+number|count\s+of|count)\b.*?\bvehicles?\b', msg_l)
-        and not re.search(r'\btransporters?\s+(?:named|called|is|:|=)\b', msg_l)
+        and not re.search(r'\btransporters?\s+(?:named|called|is|:|=|-)\b', msg_l)
     ):
         return None
 
-    pat = r'\btransporters?\s+(?:is\s+|as\s+|named\s+|called\s+|[:\-=]+\s*)?([A-Za-z0-9&._\-()]+(?:\s+[A-Za-z0-9&._\-()]+)*)'
-    m = re.search(pat, text, re.IGNORECASE)
+    # 2. Single transporter with 'transporter' keyword
+    single_pat = r'\btransporters?\s+(?:is\s+|as\s+|named\s+|called\s+|[:\-=]+\s*)?([A-Za-z0-9&._\-()]+(?:\s+[A-Za-z0-9&._\-()]+)*)'
+    m = re.search(single_pat, text, re.IGNORECASE)
     if m:
         candidate = m.group(1).strip()
         candidate = re.sub(r'^(?:used\s+by|belonging\s+to|of)\s+', '', candidate, flags=re.IGNORECASE).strip()
         parts = re.split(r'\s+(?:in|for|from|during|between|with|having|on|where|whose|dated?)\b', candidate, flags=re.IGNORECASE)
-        candidate = parts[0].strip(".,;: \t\r\n-–—")
+        candidate = parts[0].strip(".,;: \t\r\n-–—?")
+        candidate = re.sub(r'\s+(?:combined|together)\b', '', candidate, flags=re.IGNORECASE).strip(".,;: \t\r\n-–—?")
         month_names = {"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"}
         cand_words = set(candidate.lower().split())
-        if cand_words.intersection(month_names) or any(re.match(r'^(?:19|20)\d{2}$', w) for w in cand_words):
-            return None
-        if candidate.lower() not in _TRANSPORTER_STOP_WORDS and len(candidate) > 1:
-            return candidate
+        if not cand_words.intersection(month_names) and not any(re.match(r'^(?:19|20)\d{2}$', w) for w in cand_words):
+            if candidate.lower() not in _TRANSPORTER_STOP_WORDS and len(candidate) > 1:
+                return candidate
+
+    # 3. 'operated by <Name>' without explicit 'transporter' keyword
+    op_pat = r'\b(?:operated\s+by|run\s+by|handled\s+by)\s+([A-Za-z0-9&._\-()]+(?:\s+[A-Za-z0-9&._\-()]+)*)'
+    m_op = re.search(op_pat, text, re.IGNORECASE)
+    if m_op:
+        cand = m_op.group(1).strip(' ?.,')
+        cand = re.sub(r'\s+(?:in|for|from|during|between|with|on)\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|\d{4}).*', '', cand, flags=re.IGNORECASE).strip()
+        cand = re.sub(r'\s+(?:combined|together)\b', '', cand, flags=re.IGNORECASE).strip(' ?.,')
+        cand_words = set(cand.lower().split())
+        month_names = {'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'}
+        if not cand_words.intersection(month_names) and not any(re.match(r'^(?:19|20)\d{2}$', w) for w in cand_words):
+            if cand.lower() not in _TRANSPORTER_STOP_WORDS and len(cand) > 1:
+                return cand
+
     return None
 
 def detect_regions(text: str) -> list[str]:
@@ -2089,6 +2130,10 @@ class IntentDetector:
             has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
             has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
+            has_no_transporter = bool(
+                re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+transporters?\b', msg_lower)
+                or re.search(r'\btransporters?\s+(?:is\s+)?(?:na|not\s+available)\b', msg_lower)
+            )
             _is_transporter_unique_vehicles_query = bool(
                 specific_transporter and has_vehicle_mention and not _is_no_gps_vehicle_query and (
                     has_count_unique_distinct
@@ -2100,22 +2145,40 @@ class IntentDetector:
                 has_transporter_mention
                 and has_count_unique_distinct
                 and not has_vehicle_mention
+                and not has_no_transporter
             )
 
-            if specific_transporter:
+            if has_no_transporter:
                 transporter_field_name = "transporter"
                 has_transporter_flt = False
                 for f in query_payload.get("filters", []):
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
                         f["field"] = transporter_field_name
                         f["operator"] = "eq"
-                        f["value"] = specific_transporter
+                        f["value"] = "na"
                         has_transporter_flt = True
                         break
                 if not has_transporter_flt:
                     query_payload.setdefault("filters", []).append({
                         "field": transporter_field_name,
                         "operator": "eq",
+                        "value": "na"
+                    })
+            elif specific_transporter:
+                transporter_field_name = "transporter"
+                trans_op = "in" if isinstance(specific_transporter, list) else "eq"
+                has_transporter_flt = False
+                for f in query_payload.get("filters", []):
+                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                        f["field"] = transporter_field_name
+                        f["operator"] = trans_op
+                        f["value"] = specific_transporter
+                        has_transporter_flt = True
+                        break
+                if not has_transporter_flt:
+                    query_payload.setdefault("filters", []).append({
+                        "field": transporter_field_name,
+                        "operator": trans_op,
                         "value": specific_transporter
                     })
 
@@ -3756,6 +3819,7 @@ class IntentDetector:
                 has_transporter_mention
                 and has_count_unique_distinct
                 and not has_vehicle_mention
+                and not has_no_transporter
             )
 
             # --- Vehicle Number Post-Processing ---
@@ -3896,17 +3960,18 @@ class IntentDetector:
                             "value": "valid"
                         })
                 has_transporter_filter = False
+                trans_op = "in" if isinstance(specific_transporter, list) else "eq"
                 for f in query_payload["filters"]:
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
                         f["field"] = "transporter"
-                        f["operator"] = "eq"
+                        f["operator"] = trans_op
                         f["value"] = specific_transporter
                         has_transporter_filter = True
                         break
                 if not has_transporter_filter:
                     query_payload["filters"].append({
                         "field": "transporter",
-                        "operator": "eq",
+                        "operator": trans_op,
                         "value": specific_transporter
                     })
             elif _is_distinct_vehicle_query:
@@ -4781,26 +4846,48 @@ class IntentDetector:
                     or bool(re.search(r'\b(?:on\s+trip|was\s+on|were\s+on)\b', msg_lower))
                 )
             )
+            fb_has_no_transporter = bool(
+                re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+transporters?\b', msg_lower)
+                or re.search(r'\btransporters?\s+(?:is\s+)?(?:na|not\s+available)\b', msg_lower)
+            )
             fb_is_distinct_transporter_query = bool(
                 fb_has_transporter_mention
                 and fb_has_count_unique_distinct
                 and not fb_has_vehicle_mention
+                and not fb_has_no_transporter
             )
 
-            if fb_specific_transporter:
+            if fb_has_no_transporter:
                 transporter_field_name = "transporter"
                 has_fb_transporter_flt = False
                 for f in fallback_payload["filters"]:
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
                         f["field"] = transporter_field_name
                         f["operator"] = "eq"
-                        f["value"] = fb_specific_transporter
+                        f["value"] = "na"
                         has_fb_transporter_flt = True
                         break
                 if not has_fb_transporter_flt:
                     fallback_payload["filters"].append({
                         "field": transporter_field_name,
                         "operator": "eq",
+                        "value": "na"
+                    })
+            elif fb_specific_transporter:
+                transporter_field_name = "transporter"
+                fb_trans_op = "in" if isinstance(fb_specific_transporter, list) else "eq"
+                has_fb_transporter_flt = False
+                for f in fallback_payload["filters"]:
+                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                        f["field"] = transporter_field_name
+                        f["operator"] = fb_trans_op
+                        f["value"] = fb_specific_transporter
+                        has_fb_transporter_flt = True
+                        break
+                if not has_fb_transporter_flt:
+                    fallback_payload["filters"].append({
+                        "field": transporter_field_name,
+                        "operator": fb_trans_op,
                         "value": fb_specific_transporter
                     })
 
@@ -6043,6 +6130,7 @@ class IntentDetector:
                 fb_has_transporter_mention
                 and fb_has_count_unique_distinct
                 and not fb_has_vehicle_mention
+                and not fb_has_no_transporter
             )
 
             if fb_is_shipment_method_breakdown_query:
@@ -6099,17 +6187,18 @@ class IntentDetector:
                             "value": target_status
                         })
                 has_fb_transporter_filter = False
+                fb_trans_op = "in" if isinstance(fb_specific_transporter, list) else "eq"
                 for f in fallback_payload["filters"]:
                     if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
                         f["field"] = "transporter"
-                        f["operator"] = "eq"
+                        f["operator"] = fb_trans_op
                         f["value"] = fb_specific_transporter
                         has_fb_transporter_filter = True
                         break
                 if not has_fb_transporter_filter:
                     fallback_payload["filters"].append({
                         "field": "transporter",
-                        "operator": "eq",
+                        "operator": fb_trans_op,
                         "value": fb_specific_transporter
                     })
             elif fb_is_distinct_vehicle_query:

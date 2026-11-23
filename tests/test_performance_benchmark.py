@@ -997,7 +997,9 @@ def test_shipment_details_exact_payload_and_reply(query):
         ]
     }
 
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"reply": "Total 842 trips with active Fixed GPS"}'
         mock_post.return_value = mock_api_res
 
         t_start = time.perf_counter()
@@ -1076,7 +1078,9 @@ def test_top_device_vendors_payload_and_reply(query, expected_analytics, expecte
         ]
     }
 
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"reply": "Total 842 trips with active Fixed GPS"}'
         mock_post.return_value = mock_api_res
 
         t_start = time.perf_counter()
@@ -1132,7 +1136,9 @@ def test_download_gps_active_trips_exact_payload():
         "data": 116085
     }
 
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"reply": "Total 842 trips with active Fixed GPS"}'
         mock_post.return_value = mock_api_res
 
         t_start = time.perf_counter()
@@ -1318,7 +1324,10 @@ def test_fixed_gps_connectivity_on_empty_trips_exact_payload():
     mock_api_res.status_code = 200
     mock_api_res.json.return_value = {"success": True, "data": 842}
 
-    with patch("requests.post", return_value=mock_api_res) as mock_post:
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"reply": "Total 842 trips with active Fixed GPS"}'
+        mock_post.return_value = mock_api_res
         start_time = time.perf_counter()
         response = client.post("/api/v1/chat", json={"message": query})
         duration = time.perf_counter() - start_time
@@ -1349,6 +1358,102 @@ def test_fixed_gps_connectivity_on_empty_trips_exact_payload():
         assert "842" in reply
         assert "active" in reply.lower()
         assert duration < 0.5, f"Expected fast-path sub-500ms execution, got {duration:.3f}s"
+
+def test_transporter_combined_and_single_trip_exact_payload():
+    """
+    Validates exact payload for:
+    - Combined transporters: LOCALCASH and DINESH TEMPO SERVICE combined, etc.
+    - Single transporter: PRADEESH N V, LOCALCASH, CCU CASH CONTRACTORS, etc.
+    """
+    mock_api_res = MagicMock()
+    mock_api_res.status_code = 200
+    mock_api_res.json.return_value = {"success": True, "data": 125}
+
+    combined_queries = [
+        ("How many trips in August 2026 were operated by LOCALCASH and DINESH TEMPO SERVICE combined?", ["LOCALCASH", "DINESH TEMPO SERVICE"]),
+        ("How many trips in August 2026 were operated by LOCALCASH and BWH CASH CONTRACTORS combined?", ["LOCALCASH", "BWH CASH CONTRACTORS"]),
+    ]
+
+    single_queries = [
+        ("How many trips in August 2026 were operated by transporter PRADEESH N V?", "PRADEESH N V"),
+        ("How many trips in August 2026 were operated by transporter LOCALCASH?", "LOCALCASH"),
+        ("How many trips in August 2026 were operated by transporter CCU CASH CONTRACTORS?", "CCU CASH CONTRACTORS"),
+        ("How many trips in August 2026 were operated by transporter D ROY ENTERPRISE?", "D ROY ENTERPRISE"),
+        ("How many trips in August 2026 were operated by transporter INSTANT TRANSPORT SOLUTION (P) LTD?", "INSTANT TRANSPORT SOLUTION (P) LTD"),
+        ("How many trips in August 2026 were operated by transporter AAKASH LOGISTIC?", "AAKASH LOGISTIC"),
+    ]
+
+    with patch("app.llm.client.LLMClient.generate", new_callable=AsyncMock) as mock_llm, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_llm.return_value = '{"reply": "Total 842 trips with active Fixed GPS"}'
+        mock_post.return_value = mock_api_res
+        for q, expected_trans in combined_queries:
+            t0 = time.perf_counter()
+            resp = client.post("/api/v1/chat", json={"message": q})
+            dur = time.perf_counter() - t0
+            assert resp.status_code == 200
+            res = resp.json()
+            ent = res["entities"]
+            assert ent["entity"] == "trip"
+            assert ent["operation"] == "count"
+            assert ent["select"] == []
+            assert "groupBy" not in ent
+            expected_filters = [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "tripStatus", "operator": "eq", "value": "valid"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "transporter", "operator": "in", "value": expected_trans}
+            ]
+            assert ent["filters"] == expected_filters, f"Mismatch for {q}: {ent['filters']}"
+            assert "125" in res["reply"]
+            assert dur < 0.5, f"Expected fast-path sub-500ms, got {dur:.3f}s"
+
+        for q, expected_trans in single_queries:
+            t0 = time.perf_counter()
+            resp = client.post("/api/v1/chat", json={"message": q})
+            dur = time.perf_counter() - t0
+            assert resp.status_code == 200
+            res = resp.json()
+            ent = res["entities"]
+            assert ent["entity"] == "trip"
+            assert ent["operation"] == "count"
+            assert ent["select"] == []
+            assert "groupBy" not in ent
+            expected_filters = [
+                {"field": "groupId", "operator": "eq", "value": "0041"},
+                {"field": "tripStatus", "operator": "eq", "value": "valid"},
+                {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+                {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+                {"field": "transporter", "operator": "eq", "value": expected_trans}
+            ]
+            assert ent["filters"] == expected_filters, f"Mismatch for {q}: {ent['filters']}"
+            assert "125" in res["reply"]
+            assert dur < 0.5, f"Expected fast-path sub-500ms, got {dur:.3f}s"
+
+        # No transporter test
+        no_trans_query = "How many trips in August 2026 had no Transporter?"
+        t0 = time.perf_counter()
+        resp = client.post("/api/v1/chat", json={"message": no_trans_query})
+        dur = time.perf_counter() - t0
+        assert resp.status_code == 200
+        res = resp.json()
+        ent = res["entities"]
+        assert ent["entity"] == "trip"
+        assert ent["operation"] == "count"
+        assert ent["select"] == []
+        assert "groupBy" not in ent
+        expected_no_trans_filters = [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+            {"field": "transporter", "operator": "eq", "value": "na"}
+        ]
+        assert ent["filters"] == expected_no_trans_filters, f"Mismatch for {no_trans_query}: {ent['filters']}"
+        assert "125" in res["reply"]
+        assert dur < 0.5, f"Expected fast-path sub-500ms, got {dur:.3f}s"
+
 
 
 

@@ -139,7 +139,11 @@ def build_natural_response(
 
         # Transporter
         if transporter:
-            if "vehicles were on trip" in base_entity:
+            if isinstance(transporter, list):
+                post_qualifiers.append(f"operated by {' and '.join(transporter)}")
+            elif str(transporter).lower() == "na":
+                post_qualifiers.append("with no transporter")
+            elif "vehicles were on trip" in base_entity:
                 post_qualifiers.append(f"for the transporter {transporter}")
             else:
                 post_qualifiers.append(f"used by transporter {transporter}")
@@ -389,7 +393,12 @@ def build_natural_response(
         context_qualifiers.append(f"for vehicle {vehicle_no}")
 
     if transporter:
-        context_qualifiers.append(f"for transporter {transporter}")
+        if isinstance(transporter, list):
+            context_qualifiers.append(f"operated by {' and '.join(transporter)}")
+        elif str(transporter).lower() == "na":
+            context_qualifiers.append("with no transporter")
+        else:
+            context_qualifiers.append(f"for transporter {transporter}")
 
     if region:
         reg_str = ", ".join(region) if isinstance(region, list) else region

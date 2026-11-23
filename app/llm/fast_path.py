@@ -114,6 +114,10 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\btrips\s+for\s+transporter\s+[a-z0-9_\s-]+\b', msg_l)):
         return True
+    if bool(re.search(r'\b(?:operated\s+by|by\s+transporter|for\s+transporter)\b', msg_l)):
+        return True
+    if bool(re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+transporters?\b|\btransporters?\s+(?:is\s+)?(?:na|not\s+available)\b', msg_l)):
+        return True
     if bool(re.search(r'\b(?:vehicles?|veh)\b', msg_l)) and bool(re.search(r'\btransporters?\b', msg_l)):
         return True
     if bool(re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b', msg_l)):
@@ -529,18 +533,34 @@ def build_fast_path_payload(
         payload["filters"].append({"field": "routeCategory", "operator": "eq", "value": "intracity"})
 
     from app.llm.intent_detector import extract_specific_transporter
+    has_no_transporter = bool(
+        re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+transporters?\b', msg_l)
+        or re.search(r'\btransporters?\s+(?:is\s+)?(?:na|not\s+available)\b', msg_l)
+    )
     spec_transporter = extract_specific_transporter(message)
-    if spec_transporter:
+    if has_no_transporter:
         trans_exists = False
         for f in payload["filters"]:
             if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
                 f["field"] = "transporter"
                 f["operator"] = "eq"
+                f["value"] = "na"
+                trans_exists = True
+                break
+        if not trans_exists:
+            payload["filters"].append({"field": "transporter", "operator": "eq", "value": "na"})
+    elif spec_transporter:
+        trans_op = "in" if isinstance(spec_transporter, list) else "eq"
+        trans_exists = False
+        for f in payload["filters"]:
+            if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                f["field"] = "transporter"
+                f["operator"] = trans_op
                 f["value"] = spec_transporter
                 trans_exists = True
                 break
         if not trans_exists:
-            payload["filters"].append({"field": "transporter", "operator": "eq", "value": spec_transporter})
+            payload["filters"].append({"field": "transporter", "operator": trans_op, "value": spec_transporter})
 
     # 6. Specific vehicle number filter
     veh_match = re.search(r'\b([A-Z]{2}\s*\d{1,2}\s*[A-Z]{1,3}\s*\d{4})\b', message)
@@ -641,8 +661,6 @@ def build_fast_path_payload(
             return 1
         elif field == "tripStatus":
             return 2
-        elif field in ["transporter", "Transporter"]:
-            return 3
         elif field == "runDate" and op == "gte":
             return 4
         elif field == "runDate" and op == "lte":
@@ -651,6 +669,8 @@ def build_fast_path_payload(
             return 5.2
         elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
             return 5.5
+        elif field in ["transporter", "Transporter"]:
+            return 5.8
         elif field in ("routeCategory", "routeType", "tripType"):
             return 6
         elif field in ("source", "destination", "From", "To"):
