@@ -244,17 +244,24 @@ def build_natural_response(
     # Devices
     has_withgps = bool(filter_map.get("withgps")) or (analytics and any(isinstance(a, dict) and a.get("type") == "withgps" for a in analytics))
     if has_withgps:
-        has_gps_present = any(k.lower() in ("gps", "fixedgps", "fixed-gps-status") for k in filter_map) or "gps" in msg_lower
-        has_fixed_present = any(k.lower() in ("fixedelock", "fixed-elock-status") for k in filter_map) or "fixed" in msg_lower
-        has_portable_present = any(k.lower() in ("portableelock", "portable-elock-status") for k in filter_map) or "portable" in msg_lower
-
-        if has_gps_present and (has_fixed_present or has_portable_present):
-            if fixed_gps == "active" or gps == "active" or fixed_elock == "active" or portable_elock == "active":
-                device_qualifiers.append("using active Fixed GPS, Fixed E-Lock, and Portable E-Lock together")
-            else:
-                device_qualifiers.append("using all three devices together (Fixed GPS, Fixed E-Lock, and Portable E-Lock)" if (has_fixed_present and has_portable_present) else "using Fixed GPS and Fixed E-Lock together")
+        if portable_elock == "na" and (gps in ("existing", "active") or fixed_gps in ("existing", "active") or "gps" in msg_lower) and (fixed_elock in ("existing", "active") or "fixed" in msg_lower):
+            device_qualifiers.append("using Fixed GPS and Fixed E-Lock together (without Portable E-Lock)")
+        elif fixed_elock == "na" and (gps in ("existing", "active") or fixed_gps in ("existing", "active") or "gps" in msg_lower) and (portable_elock in ("existing", "active") or "portable" in msg_lower):
+            device_qualifiers.append("using Fixed GPS and Portable E-Lock together (without Fixed E-Lock)")
+        elif (gps == "na" or fixed_gps == "na") and (fixed_elock in ("existing", "active") or "fixed" in msg_lower) and (portable_elock in ("existing", "active") or "portable" in msg_lower):
+            device_qualifiers.append("using Fixed E-Lock and Portable E-Lock together (without Fixed GPS)")
         else:
-            device_qualifiers.append("using both Fixed E-Lock and Portable E-Lock")
+            has_gps_present = any(k.lower() in ("gps", "fixedgps", "fixed-gps-status") for k in filter_map) or "gps" in msg_lower
+            has_fixed_present = any(k.lower() in ("fixedelock", "fixed-elock-status") for k in filter_map) or "fixed" in msg_lower
+            has_portable_present = (any(k.lower() in ("portableelock", "portable-elock-status") for k in filter_map) or "portable" in msg_lower) and portable_elock != "na"
+
+            if has_gps_present and (has_fixed_present or has_portable_present):
+                if fixed_gps == "active" or gps == "active" or fixed_elock == "active" or portable_elock == "active":
+                    device_qualifiers.append("using active Fixed GPS, Fixed E-Lock, and Portable E-Lock together")
+                else:
+                    device_qualifiers.append("using all three devices together (Fixed GPS, Fixed E-Lock, and Portable E-Lock)" if (has_fixed_present and has_portable_present) else "using Fixed GPS and Fixed E-Lock together")
+            else:
+                device_qualifiers.append("using both Fixed E-Lock and Portable E-Lock")
     else:
         if gps in ("nogps", "nogps ") or filter_map.get("gpsna"):
             device_qualifiers.append("without GPS")
