@@ -138,6 +138,11 @@ def can_resolve_fast_path(message: str) -> bool:
     from app.llm.intent_detector import extract_source_location, extract_destination_location
     if bool(re.search(r'\btrips?\b', msg_l)) and (extract_source_location(message) is not None or extract_destination_location(message) is not None):
         return True
+    from app.llm.intent_detector import detect_indian_states
+    if bool(re.search(r'\btrips?\b', msg_l)) and bool(detect_indian_states(message)):
+        return True
+    if bool(re.search(r'\b(?:in\s+each\s+state|state[\s-]wise|by\s+state|each\s+state|across\s+(?:each|all)\s+states?|state\s+breakdown)\b', msg_l)):
+        return True
 
     return False
 
@@ -543,6 +548,44 @@ def build_fast_path_payload(
     if dest_loc:
         payload["filters"].append({"field": "destination", "operator": "eq", "value": dest_loc})
 
+    from app.llm.intent_detector import detect_indian_states
+    detected_states = detect_indian_states(message)
+    _is_state_breakdown = bool(re.search(r'\b(?:in\s+each\s+state|state[\s-]wise|by\s+state|each\s+state|across\s+(?:each|all)\s+states?|state\s+breakdown)\b', msg_l))
+    if detected_states:
+        if len(detected_states) > 1:
+            payload["filters"].append({
+                "field": "state",
+                "operator": "in",
+                "value": detected_states
+            })
+        else:
+            payload["filters"].append({
+                "field": "state",
+                "operator": "eq",
+                "value": detected_states[0]
+            })
+        payload["groupBy"] = ["state"]
+        payload["metrics"] = [
+            {
+                "field": "shipmentNo",
+                "function": "count",
+                "alias": "trip_count"
+            }
+        ]
+        if "select" not in payload:
+            payload["select"] = []
+    elif _is_state_breakdown:
+        payload["groupBy"] = ["state"]
+        payload["metrics"] = [
+            {
+                "field": "shipmentNo",
+                "function": "count",
+                "alias": "trip_count"
+            }
+        ]
+        if "select" not in payload:
+            payload["select"] = []
+
     from app.llm.intent_detector import extract_specific_transporter
     has_no_transporter = bool(
         re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+transporters?\b', msg_l)
@@ -687,7 +730,9 @@ def build_fast_path_payload(
         elif field in ("source", "destination", "From", "To"):
             return 7
         elif field == "region":
-            return 8
+            return 7.5
+        elif field == "state":
+            return 7.8
         elif field in ("vehicleNo", "vehicle_no", "vehicle"):
             return 9
         elif field in ("Route", "route", "RouteName", "routeName"):

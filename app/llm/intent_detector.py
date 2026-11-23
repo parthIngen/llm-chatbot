@@ -1118,7 +1118,11 @@ _STOP_LOCATION_WORDS = {
     "sfc", "speed", "air", "delivery", "pickup", "network", "combined", "together", "both", "either",
     "each", "every", "transporter", "transporters", "fleet", "contractor", "contractors", "vehicle",
     "vehicles", "route", "routes", "master", "module", "category", "type", "types", "priority",
-    "ated", "ating", "origin", "originated", "originating", "destination", "source", "site", "hub", "station", "branch", "city"
+    "ated", "ating", "origin", "originated", "originating", "destination", "source", "site", "hub", "station", "branch", "city",
+    "maharashtra", "tamil", "nadu", "karnataka", "delhi", "punjab", "uttar", "pradesh", "gujarat", "rajasthan",
+    "haryana", "bihar", "bengal", "kerala", "andhra", "telangana", "odisha", "orissa", "assam", "jharkhand",
+    "chhattisgarh", "goa", "himachal", "uttarakhand", "uttaranchal", "sikkim", "tripura", "manipur", "meghalaya",
+    "mizoram", "nagaland", "chandigarh", "ladakh", "jammu", "kashmir", "puducherry", "pondicherry"
 }
 
 def extract_source_location(text: str) -> Optional[str]:
@@ -1180,6 +1184,63 @@ def extract_destination_location(text: str) -> Optional[str]:
         ):
             return val
     return None
+
+_INDIAN_STATES_MAP = [
+    ("Andhra Pradesh", r'\bandhra(?:\s+pradesh)?\b'),
+    ("Arunachal Pradesh", r'\barunachal(?:\s+pradesh)?\b'),
+    ("Assam", r'\bassam\b'),
+    ("Bihar", r'\bbihar\b'),
+    ("Chhattisgarh", r'\bchhatt?isgarh\b'),
+    ("Goa", r'\bgoa\b'),
+    ("Gujarat", r'\bgujarat\b'),
+    ("Haryana", r'\bharyana\b'),
+    ("Himachal Pradesh", r'\bhimachal(?:\s+pradesh)?\b'),
+    ("Jharkhand", r'\bjharkhand\b'),
+    ("Karnataka", r'\bkarnataka\b'),
+    ("Kerala", r'\bkerala\b'),
+    ("Madhya Pradesh", r'\bmadhya\s+pradesh\b'),
+    ("Maharashtra", r'\bmaharashtra\b'),
+    ("Manipur", r'\bmanipur\b'),
+    ("Meghalaya", r'\bmeghalaya\b'),
+    ("Mizoram", r'\bmizoram\b'),
+    ("Nagaland", r'\bnagaland\b'),
+    ("Odisha", r'\b(?:odisha|orissa)\b'),
+    ("Punjab", r'\bpunjab\b'),
+    ("Rajasthan", r'\brajasthan\b'),
+    ("Sikkim", r'\bsikkim\b'),
+    ("Tamil Nadu", r'\btamil\s*nadu\b'),
+    ("Telangana", r'\btelangana\b'),
+    ("Tripura", r'\btripura\b'),
+    ("Uttar Pradesh", r'\buttar\s+pradesh\b'),
+    ("Uttarakhand", r'\b(?:uttarakhand|uttaranchal)\b'),
+    ("West Bengal", r'\b(?:west\s+bengal|bengal)\b'),
+    ("Delhi", r'\b(?:new\s+)?delhi\b'),
+    ("Jammu and Kashmir", r'\b(?:jammu\s+(?:and|&)\s+kashmir|j&k|kashmir)\b'),
+    ("Ladakh", r'\bladakh\b'),
+    ("Chandigarh", r'\bchandigarh\b'),
+    ("Puducherry", r'\b(?:puducherry|pondicherry)\b'),
+]
+
+def detect_indian_states(text: str) -> list[str]:
+    """
+    Detects Indian states and UTs mentioned in text and returns canonical names
+    ordered by their position of appearance in the text.
+    """
+    if not text:
+        return []
+    text_lower = text.lower()
+    matches = []
+    for canon, pat in _INDIAN_STATES_MAP:
+        for m in re.finditer(pat, text_lower):
+            matches.append((canon, m.start()))
+    matches.sort(key=lambda x: x[1])
+    seen = set()
+    result = []
+    for canon, _ in matches:
+        if canon not in seen:
+            seen.add(canon)
+            result.append(canon)
+    return result
 
 _ATD_ATA_VALUE_MAP = {
     "notcaptured": "notcaptured",
