@@ -50,15 +50,15 @@ def can_resolve_fast_path(message: str) -> bool:
     # 4. Device combination queries
     if bool(re.search(r'\bwithout\s+any\s+device\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps\s+(?:only|single|sole|alone|exclusive)|portable[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive)|fixed[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive))\b', msg_l)):
+    if bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps\s+(?:only|single|sole|alone|exclusive|exclusively)|portable[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive|exclusively)|fixed[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive|exclusively))\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+(?:(?:fixed[\s-]*)?gps|portable[\s-]*(?:e[\s-]?)?locks?|fixed[\s-]*(?:e[\s-]?)?locks?)\b', msg_l)):
+    if bool(re.search(r'\b(?:only|single|sole|alone|exclusive|exclusively)\s+(?:(?:fixed[\s-]*)?gps|portable[\s-]*(?:e[\s-]?)?locks?|fixed[\s-]*(?:e[\s-]?)?locks?)\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)):
+    if bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive|exclusively)\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:portable[\s-]e[\s-]?locks?|portable[\s-]locks?)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)):
+    if bool(re.search(r'\b(?:portable[\s-]e[\s-]?locks?|portable[\s-]locks?)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive|exclusively)\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:fixed[\s-]e[\s-]?locks?|fixed[\s-]locks?)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)):
+    if bool(re.search(r'\b(?:fixed[\s-]e[\s-]?locks?|fixed[\s-]locks?)\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive|exclusively)\b', msg_l)):
         return True
     if bool(re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)) and bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l)):
         return True
@@ -75,7 +75,7 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\b(?:active|inactive)\s+(?:fixed[\s-]?)?gps\b|\b(?:fixed[\s-]?)?gps\s+(?:is\s+)?(?:active|inactive)\b', msg_l)) or bool(re.search(r'\b(?:had\s+(?:fixed[\s-]?)?gps\s+connectivity|with\s+(?:fixed[\s-]?)?gps\s+connectivity|(?:fixed[\s-]?)?gps\s+connectivity\s+on|(?:fixed[\s-]?)?gps\s+connectivity)\b', msg_l)):
         return True
-    if bool(re.search(r'\b(?:secutrak_tp|secutrak|wheelseye|fleetx|axestrack|gtropy|eicher|g[\s-]?trac|ashok|tata|kiasaint)\b', msg_l)):
+    if bool(re.search(r'\b(?:secutrak_tp|secutrak|wheelseye|wheelseye_bluedart|fleetx|axestrack|gtropy|eicher|g[\s-]?trac|ashok|ashokleyland|tata|tatamotors|kiasaint)\b', msg_l)):
         return True
 
     # 6. E-Lock queries
@@ -267,26 +267,13 @@ def build_fast_path_payload(
 
     # 2. Device combinations
     has_veh = bool(re.search(r'\bvehicles?\b', msg_l))
+    without_m = re.search(r'\b(?:without|excluding|except|no|not\s+having)\b\s*(.*)', msg_l)
+    pos_dev_text = re.sub(r'\b(?:without|excluding|except)\b.*', '', msg_l) if without_m else msg_l
+    is_only_single_device = bool(re.search(r'\b(only|single|sole|alone|exclusive|exclusively)\b', msg_l))
+
     if bool(re.search(r'\bwithout\s+any\s+device\b', msg_l)):
         payload.setdefault("analytics", []).append({"type": "withoutanygps"})
-    elif (
-        bool(re.search(r'\b(?:fixed[\s-]*)?gps\s+(?:only|single|sole|alone|exclusive)\b', msg_l))
-        or bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+(?:fixed[\s-]*)?gps\b', msg_l))
-        or (bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)) and not bool(re.search(r'\b(?:fixed[\s-]e[\s-]?lock|portable[\s-]e[\s-]?lock)\s+(?:only|single|sole|alone|exclusive)\b', msg_l)) and not bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+(?:fixed[\s-]e[\s-]?lock|portable[\s-]e[\s-]?lock)\b', msg_l)))
-    ):
-        if has_veh:
-            payload["filters"].extend([
-                {"field": "GPS", "operator": "eq", "value": "existing"},
-                {"field": "FixedELock", "operator": "eq", "value": "na"},
-                {"field": "PortableELock", "operator": "eq", "value": "na"}
-            ])
-        else:
-            payload.setdefault("analytics", []).append({"type": "gpsonly"})
-    elif (
-        bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive)\b', msg_l))
-        or bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+portab?le[\s-]*(?:e[\s-]?)?locks?\b', msg_l))
-        or (bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?)?locks?\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)))
-    ):
+    elif is_only_single_device and bool(re.search(r'\bportab?le[\s-]*(?:e[\s-]?)?locks?\b', pos_dev_text)):
         if has_veh:
             payload["filters"].extend([
                 {"field": "GPS", "operator": "eq", "value": "na"},
@@ -295,11 +282,7 @@ def build_fast_path_payload(
             ])
         else:
             payload.setdefault("analytics", []).append({"type": "portablelockonly"})
-    elif (
-        bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\s+(?:only|single|sole|alone|exclusive)\b', msg_l))
-        or bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\s+fixed[\s-]*(?:e[\s-]?)?locks?\b', msg_l))
-        or (bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\b', msg_l)) and bool(re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_l)))
-    ):
+    elif is_only_single_device and bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?)?locks?\b', pos_dev_text)):
         if has_veh:
             payload["filters"].extend([
                 {"field": "GPS", "operator": "eq", "value": "na"},
@@ -308,6 +291,15 @@ def build_fast_path_payload(
             ])
         else:
             payload.setdefault("analytics", []).append({"type": "fixedlockonly"})
+    elif is_only_single_device and bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', pos_dev_text)):
+        if has_veh:
+            payload["filters"].extend([
+                {"field": "GPS", "operator": "eq", "value": "existing"},
+                {"field": "FixedELock", "operator": "eq", "value": "na"},
+                {"field": "PortableELock", "operator": "eq", "value": "na"}
+            ])
+        else:
+            payload.setdefault("analytics", []).append({"type": "gpsonly"})
     elif (
         not bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\b', msg_l))
         and not bool(re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_l))
@@ -355,14 +347,15 @@ def build_fast_path_payload(
         or re.search(r'\b(?:no|without|lost|lacking|zero)\s+(?:(?:fixed[\s-]?)?gps\s+)?connectivity\b', msg_l)
     )
 
-    if is_fast_no_gps:
-        payload.setdefault("analytics", []).append({"type": "gpsna"})
-    elif is_fast_gps_active:
-        payload.setdefault("analytics", []).append({"type": "gps"})
-        payload["filters"].append({"field": "GPS", "operator": "eq", "value": "active"})
-    elif is_fast_gps_inactive:
-        payload.setdefault("analytics", []).append({"type": "gps"})
-        payload["filters"].append({"field": "GPS", "operator": "eq", "value": "inactive"})
+    if not payload.get("analytics"):
+        if is_fast_no_gps:
+            payload.setdefault("analytics", []).append({"type": "gpsna"})
+        elif is_fast_gps_active:
+            payload.setdefault("analytics", []).append({"type": "gps"})
+            payload["filters"].append({"field": "GPS", "operator": "eq", "value": "active"})
+        elif is_fast_gps_inactive:
+            payload.setdefault("analytics", []).append({"type": "gps"})
+            payload["filters"].append({"field": "GPS", "operator": "eq", "value": "inactive"})
 
     if bool(re.search(r'\binactive\s+portable\s+e[\s-]?lock\b', msg_l)):
         payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "inactive"})
@@ -380,7 +373,7 @@ def build_fast_path_payload(
     # 4. Vendors
     from app.llm.intent_detector import extract_device_vendor
     vendor = extract_device_vendor(message)
-    if vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint"]:
+    if vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart"]:
         is_fixed_elock_v = bool(re.search(r'\bfixed[\s-]e[\s-]?locks?\b|\bfixed[\s-]locks?\b|\bfixedelock\b', msg_l))
         is_portable_elock_v = bool(re.search(r'\bportab?le[\s-]e[\s-]?locks?\b|\bportab?le[\s-]locks?\b|\bportableelock\b', msg_l)) and not is_fixed_elock_v
         has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_l))

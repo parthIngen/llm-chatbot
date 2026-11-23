@@ -317,6 +317,8 @@ def extract_device_vendor(text: str) -> Optional[str]:
     text_l = text.lower()
     if re.search(r'\bsecutrak_tp\b', text_l):
         return "Secutrak_TP"
+    elif re.search(r'\bwheelseye_bluedart\b', text_l):
+        return "wheelseye_bluedart"
     elif re.search(r'\bfleetx(?:_bluedart)?\b', text_l):
         return "Fleetx"
     elif re.search(r'\baxestrack\b', text_l):
@@ -327,8 +329,12 @@ def extract_device_vendor(text: str) -> Optional[str]:
         return "Eicher"
     elif re.search(r'\bg[\s-]?trac\b', text_l):
         return "G-Trac"
+    elif re.search(r'\bashokleyland\b', text_l):
+        return "ashokleyland"
     elif re.search(r'\bashok(?:\s+leyland)?\b', text_l):
         return "Ashok"
+    elif re.search(r'\btatamotors\b', text_l):
+        return "tatamotors"
     elif re.search(r'\btata(?:\s+motors?)?\b', text_l):
         return "Tata"
     elif re.search(r'\bkiasaint\b', text_l):
@@ -1071,7 +1077,7 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
         and not bool(re.search(r'\bactive\s+trips?\b', msg_l))
         and not is_inactive
     )
-    is_only_or_single = bool(re.search(r'\b(?:single|only|sole|alone|exclusive)\b', msg_l))
+    is_only_or_single = bool(re.search(r'\b(?:single|only|sole|alone|exclusive|exclusively)\b', msg_l))
 
     # Download / export queries without explicit device status are report downloads, not device analytics
     if bool(re.search(r'\b(?:download|export)\b', msg_l)) and not (is_na or is_inactive or is_active or is_only_or_single or without_gps or without_elock or without_portable):
@@ -1079,8 +1085,6 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
 
     # --- PORTABLE E-LOCK ---
     if has_portable:
-        if is_na:
-            return {"analytics_type": "portablelockna", "device_filters": []}
         if is_only_or_single:
             if is_inactive:
                 return {"analytics_type": "portableelockonly", "device_filters": [{"field": "PortableELock", "operator": "eq", "value": "inactive"}]}
@@ -1088,6 +1092,8 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {"analytics_type": "portableelockonly", "device_filters": [{"field": "PortableELock", "operator": "eq", "value": "active"}]}
             else:
                 return {"analytics_type": "portablelockonly", "device_filters": []}
+        elif is_na:
+            return {"analytics_type": "portablelockna", "device_filters": []}
         else:
             if is_inactive:
                 return {"analytics_type": "portablelock", "device_filters": [{"field": "PortableELock", "operator": "eq", "value": "inactive"}]}
@@ -1098,8 +1104,6 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
 
     # --- FIXED E-LOCK ---
     if has_fixed_elock:
-        if is_na:
-            return {"analytics_type": "fixedlockna", "device_filters": []}
         if is_only_or_single:
             if is_inactive:
                 return {"analytics_type": "fixedelockonly", "device_filters": [{"field": "FixedELock", "operator": "eq", "value": "inactive"}]}
@@ -1107,6 +1111,8 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {"analytics_type": "fixedelockonly", "device_filters": [{"field": "FixedELock", "operator": "eq", "value": "active"}]}
             else:
                 return {"analytics_type": "fixedlockonly", "device_filters": []}
+        elif is_na:
+            return {"analytics_type": "fixedlockna", "device_filters": []}
         else:
             if is_inactive:
                 return {"analytics_type": "fixedlock", "device_filters": [{"field": "FixedELock", "operator": "eq", "value": "inactive"}]}
@@ -1728,7 +1734,7 @@ class IntentDetector:
             and not re.search(r'\bvehicles?\b', msg_lower)
             and not re.search(r'\btransporters?\b', msg_lower)
             and not _is_network_vs_local_query
-            and not re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_lower)
+            and not re.search(r'\b(only|single|sole|alone|exclusive|exclusively)\b', msg_lower)
             and not re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_lower)
         )
 
@@ -2623,7 +2629,7 @@ class IntentDetector:
             dev_vendor_match = None
 
             known_device_vendor = extract_device_vendor(msg_lower)
-            if known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint"]:
+            if known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart"]:
                 target_vendor = known_device_vendor
                 canonical_vendor = known_device_vendor
                 op = "contains"
@@ -2846,10 +2852,10 @@ class IntentDetector:
             # 1. Fixed GPS Only / Single Device
             _is_fixed_gps_only = (
                 not has_veh_mention and (
-                    bool(re.search(r'\bfixed[\s-]gps\b', msg_lower) and re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower))
+                    bool(re.search(r'\bfixed[\s-]gps\b', msg_lower) and re.search(r'\b(single|only|sole|alone|exclusive|exclusively)\b', msg_lower))
                     or bool(re.search(r'\bonly\s+fixed[\s-]gps\b', msg_lower))
                     or bool(re.search(r'\bfixed[\s-]gps\s+(as\s+)?(the\s+)?(single|only|sole)\b', msg_lower))
-                    or bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps)\s+(?:only|single|sole|alone|exclusive)\b', msg_lower))
+                    or bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps)\s+(?:only|single|sole|alone|exclusive|exclusively)\b', msg_lower))
                     or bool(re.search(r'\bonly\s+(?:fixed[\s-]*)?gps\b', msg_lower))
                 )
             )
@@ -2891,9 +2897,8 @@ class IntentDetector:
                 and not has_fixed_elock
                 and not _is_devices_together
                 and not _is_device_trips
-                and not _is_gps_na
                 and not _is_active_device_count
-                and bool(re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower))
+                and bool(re.search(r'\b(single|only|sole|alone|exclusive|exclusively)\b', msg_lower))
             )
 
             # 2b. Portable E-Lock Trip Query (regular count without "only")
@@ -2917,9 +2922,8 @@ class IntentDetector:
                 and not has_portable_elock
                 and not _is_devices_together
                 and not _is_device_trips
-                and not _is_gps_na
                 and not _is_active_device_count
-                and bool(re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower))
+                and bool(re.search(r'\b(single|only|sole|alone|exclusive|exclusively)\b', msg_lower))
             )
 
             # 3b. Fixed E-Lock Trip Query (regular count without "only" and without "device count")
@@ -5014,7 +5018,7 @@ class IntentDetector:
                 and not re.search(r'\bvehicles?\b', msg_lower)
                 and not re.search(r'\btransporters?\b', msg_lower)
                 and not fb_is_network_vs_local_query
-                and not re.search(r'\b(only|single|sole|alone|exclusive)\b', msg_lower)
+                and not re.search(r'\b(only|single|sole|alone|exclusive|exclusively)\b', msg_lower)
                 and not re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_lower)
             )
             fb_specific_transporter = extract_specific_transporter(message)
@@ -5472,10 +5476,10 @@ class IntentDetector:
             # 1. Fixed GPS Only / Single Device
             fb_is_fixed_gps_only = (
                 not fb_has_veh_mention and (
-                    bool(re.search(r'\bfixed[\s-]gps\b', msg_lower) and re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower))
+                    bool(re.search(r'\bfixed[\s-]gps\b', msg_lower) and re.search(r'\b(single|only|sole|alone|exclusive|exclusively)\b', msg_lower))
                     or bool(re.search(r'\bonly\s+fixed[\s-]gps\b', msg_lower))
                     or bool(re.search(r'\bfixed[\s-]gps\s+(as\s+)?(the\s+)?(single|only|sole)\b', msg_lower))
-                    or bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps)\s+(?:only|single|sole|alone|exclusive)\b', msg_lower))
+                    or bool(re.search(r'\b(?:(?:fixed[\s-]*)?gps)\s+(?:only|single|sole|alone|exclusive|exclusively)\b', msg_lower))
                     or bool(re.search(r'\bonly\s+(?:fixed[\s-]*)?gps\b', msg_lower))
                 )
             )
@@ -5497,9 +5501,8 @@ class IntentDetector:
                 and not fb_has_fixed_elock
                 and not fb_is_devices_together
                 and not fb_is_device_trips
-                and not fb_is_gps_na
                 and not fb_is_active_device_count
-                and bool(re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower))
+                and bool(re.search(r'\b(single|only|sole|alone|exclusive|exclusively)\b', msg_lower))
             )
 
             # 2b. Portable E-Lock Trip Query (regular count without "only")
@@ -5523,9 +5526,8 @@ class IntentDetector:
                 and not fb_has_portable_elock
                 and not fb_is_devices_together
                 and not fb_is_device_trips
-                and not fb_is_gps_na
                 and not fb_is_active_device_count
-                and bool(re.search(r'\b(single|only|sole|alone|exclusive)\b', msg_lower))
+                and bool(re.search(r'\b(single|only|sole|alone|exclusive|exclusively)\b', msg_lower))
             )
 
             # 3b. Fixed E-Lock Trip Query (regular count without "only" and without "device count")
@@ -6442,7 +6444,7 @@ class IntentDetector:
             fb_is_past_running = False
 
             fb_known_device_vendor = extract_device_vendor(msg_lower)
-            if fb_known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint"]:
+            if fb_known_device_vendor in ["Secutrak_TP", "Fleetx", "Axestrack", "Gtropy", "Eicher", "G-Trac", "Ashok", "Tata", "Kiasaint", "tatamotors", "ashokleyland", "wheelseye_bluedart"]:
                 fb_target_vendor = fb_known_device_vendor
                 fb_canonical_vendor = fb_known_device_vendor
                 fb_op = "contains"

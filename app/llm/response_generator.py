@@ -419,7 +419,11 @@ def build_natural_response(
     elif vendor in ("thirdparty", "3rdparty"):
         context_qualifiers.append("using 3rd-party devices")
     elif vendor:
-        context_qualifiers.append(f"for {filter_map.get('vendor') or filter_map.get('vendorgps') or filter_map.get('vendorfixedelock') or filter_map.get('vendorportableelock')} vendor")
+        v_raw = filter_map.get('vendor') or filter_map.get('vendorgps') or filter_map.get('vendorfixedelock') or filter_map.get('vendorportableelock')
+        if "tracked by" in msg_lower or "tracked" in msg_lower:
+            context_qualifiers.append(f"tracked by {v_raw}")
+        else:
+            context_qualifiers.append(f"for {v_raw} vendor")
 
     dev_str = (" " + " and ".join(device_qualifiers)) if device_qualifiers else ""
     ctx_str = (" " + " ".join(context_qualifiers)) if context_qualifiers else ""
