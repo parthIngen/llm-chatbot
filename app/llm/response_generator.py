@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from app.llm.client import LLMClient, LLMRateLimitError
 from app.llm.prompts import RESPONSE_GENERATION_SYSTEM_PROMPT, RESPONSE_GENERATION_USER_PROMPT_TEMPLATE
 from app.utils.logger import log_error
@@ -79,6 +79,11 @@ def build_natural_response(
         fixed_gps = str(filter_map.get("FixedGPS") or filter_map.get("fixedgps", "") or filter_map.get("fixed-gps-status", "")).lower().strip()
         fixed_elock = str(filter_map.get("FixedELock") or filter_map.get("fixedelock", "") or filter_map.get("fixed-elock-status", "")).lower().strip()
         portable_elock = str(filter_map.get("PortableELock") or filter_map.get("portableelock", "") or filter_map.get("portable-elock-status", "")).lower().strip()
+
+        if bool(re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_lower)):
+            date_str = f" {date_clause}" if date_clause else ""
+            trans_str = f" for transporter {transporter}" if transporter else ""
+            return f"Total {total_count} valid trips and unique vehicles operated{trans_str}{date_str}. It does not include cancelled trips."
 
         # Determine vehicle subject
         is_active = (
@@ -533,6 +538,122 @@ def _render_vehicle_list_html_card(vehicle_list: List[str], total_veh: int) -> s
     return html
 
 
+def _render_transporter_trips_vehicles_card(
+    transporter_name: Optional[str],
+    total_trips: int,
+    total_vehicles: int,
+    date_display: str,
+    vehicle_rows: Optional[List[Dict[str, Any]]] = None
+) -> str:
+    """
+    Renders an elegant, modern HTML card for transporter trips and unique vehicles summary.
+    """
+    avg_trips = f"{(total_trips / total_vehicles):.1f}" if total_vehicles > 0 else "0.0"
+
+    table_section = ""
+    valid_rows = [
+        r for r in (vehicle_rows or [])
+        if isinstance(r, dict) and (r.get("vehicleNo") or r.get("vehicle_no"))
+    ]
+    if valid_rows:
+        sorted_rows = sorted(
+            valid_rows,
+            key=lambda x: int(x.get("shipmentNo", 0) or x.get("TotalTrip", 0) or x.get("count", 0) or 0),
+            reverse=True
+        )
+        display_rows = sorted_rows[:10]
+        tbody_rows = []
+        for idx, row in enumerate(display_rows, 1):
+            v_no = str(row.get("vehicleNo") or row.get("vehicle_no", "")).strip().upper()
+            v_trips = int(row.get("shipmentNo", 0) or row.get("TotalTrip", 0) or row.get("count", 0) or 0)
+            pct = f"{(v_trips / total_trips * 100):.1f}%" if total_trips > 0 else "0.0%"
+            bg = "#ffffff" if idx % 2 != 0 else "#f8fafc"
+            tbody_rows.append(
+                f'<tr style="border-bottom: 1px solid #f1f5f9; background: {bg};">\n'
+                f'  <td style="padding: 10px 16px; color: #64748b; font-weight: 600; width: 44px; text-align: center; font-size: 12px;">{idx}</td>\n'
+                f'  <td style="padding: 10px 16px;">\n'
+                f'    <span style="display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; font-weight: 700; color: #0f172a; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; border: 1px solid #cbd5e1; letter-spacing: 0.5px;">\n'
+                f'      <span style="font-size: 10px; font-weight: 800; color: #2563eb; background: #dbeafe; padding: 1px 4px; border-radius: 3px;">IND</span> {v_no}\n'
+                f'    </span>\n'
+                f'  </td>\n'
+                f'  <td style="padding: 10px 16px; text-align: right;">\n'
+                f'    <span style="font-weight: 700; color: #1d4ed8; background: #eff6ff; padding: 3px 9px; border-radius: 6px; border: 1px solid #dbeafe; font-size: 13px;">{v_trips:,}</span>\n'
+                f'  </td>\n'
+                f'  <td style="padding: 10px 16px; text-align: right; color: #64748b; font-weight: 600; font-size: 12px;">{pct}</td>\n'
+                f'</tr>'
+            )
+        tbody_str = "\n".join(tbody_rows)
+        sub_badge = f"Top {min(len(valid_rows), 10)} of {total_vehicles:,}" if total_vehicles > 10 else f"{total_vehicles} vehicle{'s' if total_vehicles != 1 else ''}"
+        table_section = (
+            f'<div style="padding: 12px 16px; background: #ffffff; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between;">\n'
+            f'  <span style="font-size: 13px; font-weight: 700; color: #334155;">Fleet Breakdown</span>\n'
+            f'  <span style="background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{sub_badge}</span>\n'
+            f'</div>\n'
+            f'<table style="width: 100%; border-collapse: collapse; font-size: 13px;">\n'
+            f'  <thead>\n'
+            f'    <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0; text-align: left;">\n'
+            f'      <th style="padding: 8px 16px; color: #64748b; font-weight: 600; width: 44px; text-align: center; font-size: 12px;">#</th>\n'
+            f'      <th style="padding: 8px 16px; color: #64748b; font-weight: 600; font-size: 12px;">Vehicle Registration</th>\n'
+            f'      <th style="padding: 8px 16px; color: #64748b; font-weight: 600; text-align: right; font-size: 12px;">Trips</th>\n'
+            f'      <th style="padding: 8px 16px; color: #64748b; font-weight: 600; text-align: right; font-size: 12px;">Trip Share</th>\n'
+            f'    </tr>\n'
+            f'  </thead>\n'
+            f'  <tbody>\n'
+            f'{tbody_str}\n'
+            f'  </tbody>\n'
+            f'</table>\n'
+        )
+
+    if transporter_name and str(transporter_name).strip().lower() not in ("none", "null", "the transporter", ""):
+        banner_subtitle = "Transporter Overview"
+        banner_title = str(transporter_name).strip()
+    else:
+        banner_subtitle = "Fleet Overview"
+        banner_title = "Trips & Vehicles Summary"
+
+    html = (
+        f'<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; '
+        f'max-width: 650px; margin: 12px 0; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; '
+        f'box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden;">\n'
+        f'  <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 16px 20px; display: flex; align-items: center; justify-content: space-between;">\n'
+        f'    <div>\n'
+        f'      <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; font-weight: 700;">{banner_subtitle}</div>\n'
+        f'      <div style="font-size: 18px; font-weight: 800; color: #ffffff; margin-top: 2px;">{banner_title}</div>\n'
+        f'    </div>\n'
+        f'    <div>\n'
+        f'      <span style="display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 255, 255, 0.12); padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.15);">\n'
+        f'        📅 {date_display}\n'
+        f'      </span>\n'
+        f'    </div>\n'
+        f'  </div>\n'
+        f'  <div style="padding: 16px 20px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">\n'
+        f'    <div style="background: #ffffff; border: 1px solid #dbeafe; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">\n'
+        f'      <div style="display: flex; align-items: center; justify-content: space-between;">\n'
+        f'        <span style="font-size: 12px; font-weight: 700; color: #2563eb; text-transform: uppercase; letter-spacing: 0.5px;">Total Trips</span>\n'
+        f'        <span style="font-size: 18px;">📦</span>\n'
+        f'      </div>\n'
+        f'      <div style="font-size: 26px; font-weight: 800; color: #1e3a8a; margin: 4px 0 2px 0;">{total_trips:,}</div>\n'
+        f'      <div style="font-size: 11px; color: #64748b; font-weight: 500;">Valid trips operated</div>\n'
+        f'    </div>\n'
+        f'    <div style="background: #ffffff; border: 1px solid #bbf7d0; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">\n'
+        f'      <div style="display: flex; align-items: center; justify-content: space-between;">\n'
+        f'        <span style="font-size: 12px; font-weight: 700; color: #16a34a; text-transform: uppercase; letter-spacing: 0.5px;">Unique Vehicles</span>\n'
+        f'        <span style="font-size: 18px;">🚛</span>\n'
+        f'      </div>\n'
+        f'      <div style="font-size: 26px; font-weight: 800; color: #14532d; margin: 4px 0 2px 0;">{total_vehicles:,}</div>\n'
+        f'      <div style="font-size: 11px; color: #64748b; font-weight: 500;">Distinct vehicles deployed</div>\n'
+        f'    </div>\n'
+        f'  </div>\n'
+        f'{table_section}'
+        f'  <div style="background: #f8fafc; padding: 10px 16px; border-top: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #64748b;">\n'
+        f'    <span>* Based on valid trips. Cancelled trips are excluded.</span>\n'
+        f'    <span style="color: #2563eb; font-weight: 600; background: #eff6ff; padding: 2px 8px; border-radius: 4px; border: 1px solid #dbeafe;">Avg: {avg_trips} trips/vehicle</span>\n'
+        f'  </div>\n'
+        f'</div>'
+    )
+    return html
+
+
 class ResponseGenerator:
     def __init__(self, llm_client: LLMClient = None):
         from app.config import settings
@@ -561,6 +682,7 @@ class ResponseGenerator:
         if entities and "reply" in entities:
             return entities["reply"]
 
+        msg_l = (message or "").strip().lower()
         total_trips = 0
         api_data = None
         
@@ -1383,6 +1505,96 @@ class ResponseGenerator:
         # Fast-path: Instant 0ms response formatting for simple count queries and known analytics
         if _is_distinct_transporter_result:
             return natural_formatted_response
+
+        # Check if query asks for trips and unique vehicles together
+        is_trips_and_vehicles_query = bool(
+            re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_l)
+            or (entities and isinstance(entities.get("metrics"), list) and any(m.get("alias") == "uniqueVehicleCount" for m in entities["metrics"]) and any(m.get("alias") == "shipmentNo" for m in entities["metrics"]))
+        )
+        if is_trips_and_vehicles_query:
+            transporter_val = None
+            if entities and "filters" in entities:
+                for f in entities["filters"]:
+                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                        transporter_val = f.get("value")
+                        break
+
+            vehicle_rows = []
+            if isinstance(api_data, list):
+                for r in api_data:
+                    if isinstance(r, dict) and (r.get("vehicleNo") or r.get("vehicle_no")):
+                        vehicle_rows.append(r)
+                
+                # Calculate sum of shipmentNo
+                total_trip_cnt = sum(
+                    int(r.get("shipmentNo", 0) or r.get("TotalTrip", 0) or r.get("count", 0) or 0)
+                    for r in api_data if isinstance(r, dict)
+                )
+
+                # Calculate uniqueVehicleCount (distinct vehicles / sum of uniqueVehicleCount)
+                distinct_veh_set = {
+                    str(r.get("vehicleNo") or r.get("vehicle_no")).strip()
+                    for r in vehicle_rows
+                    if str(r.get("vehicleNo") or r.get("vehicle_no")).strip()
+                }
+                sum_unique_veh = sum(
+                    int(r.get("uniqueVehicleCount", 0) or 0)
+                    for r in api_data if isinstance(r, dict)
+                )
+                if sum_unique_veh > 0:
+                    total_veh = sum_unique_veh
+                elif distinct_veh_set:
+                    total_veh = len(distinct_veh_set)
+                else:
+                    total_veh = len(vehicle_rows)
+            elif isinstance(api_data, dict):
+                total_veh = int(api_data.get("uniqueVehicleCount", 0) or 0)
+                total_trip_cnt = int(api_data.get("shipmentNo", 0) or api_data.get("TotalTrip", 0) or api_data.get("count", 0) or 0)
+            else:
+                total_veh = total_trips if _is_distinct_vehicle_result else 0
+                total_trip_cnt = total_trips or 0
+
+            if total_trip_cnt == 0 and total_trips and not _is_distinct_vehicle_result:
+                total_trip_cnt = total_trips
+
+            s_str = str(start_date).split()[0] if start_date else ""
+            e_str = str(end_date).split()[0] if end_date else ""
+            if str(start_date).startswith("2026-08-01") and str(end_date).startswith("2026-08-31"):
+                date_display = "August 2026"
+                date_prep = "in"
+            elif s_str and e_str and s_str == e_str:
+                try:
+                    from datetime import datetime
+                    dt = datetime.strptime(s_str, "%Y-%m-%d")
+                    day = dt.strftime("%d").lstrip("0")
+                    month = dt.strftime("%B")
+                    year = dt.strftime("%Y")
+                    date_display = f"{month} {day}, {year}"
+                except Exception:
+                    date_display = s_str
+                date_prep = "on"
+            elif start_date and end_date:
+                date_display = f"{start_date} to {end_date}"
+                date_prep = "in date range from"
+            elif "august 2026" in msg_l or "aug 2026" in msg_l:
+                date_display = "August 2026"
+                date_prep = "in"
+            else:
+                date_display = "the selected period"
+                date_prep = "during"
+
+            card_html = _render_transporter_trips_vehicles_card(
+                transporter_name=transporter_val,
+                total_trips=total_trip_cnt,
+                total_vehicles=total_veh,
+                date_display=date_display,
+                vehicle_rows=vehicle_rows
+            )
+            if transporter_val:
+                header = f"Transporter {transporter_val} operated a total of {total_trip_cnt:,} valid trips using {total_veh:,} unique vehicles {date_prep} {date_display}. It does not include cancelled trips."
+            else:
+                header = f"A total of {total_trip_cnt:,} valid trips were operated using {total_veh:,} unique vehicles {date_prep} {date_display}. It does not include cancelled trips."
+            return f"{header}\n\n{card_html}"
 
         if _is_distinct_vehicle_result:
             vehicle_list = [

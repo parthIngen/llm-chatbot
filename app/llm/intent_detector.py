@@ -2382,11 +2382,16 @@ class IntentDetector:
                 re.search(r'\b(?:no|without(?:\s+any)?|had\s+no|lacking)\s+transporters?\b', msg_lower)
                 or re.search(r'\btransporters?\s+(?:is\s+)?(?:na|not\s+available)\b', msg_lower)
             )
+            _is_trips_and_vehicles_query = bool(
+                re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_lower)
+            )
             _is_transporter_unique_vehicles_query = bool(
-                specific_transporter and has_vehicle_mention and not _is_no_gps_vehicle_query and (
-                    has_count_unique_distinct
-                    or bool(re.search(r'\b(?:lis|list|how\s+many|which|show|all|what|get)\b', msg_lower))
-                    or bool(re.search(r'\b(?:on\s+trip|was\s+on|were\s+on)\b', msg_lower))
+                _is_trips_and_vehicles_query or (
+                    specific_transporter and has_vehicle_mention and not _is_no_gps_vehicle_query and (
+                        has_count_unique_distinct
+                        or bool(re.search(r'\b(?:lis|list|how\s+many|which|show|all|what|get)\b', msg_lower))
+                        or bool(re.search(r'\b(?:on\s+trip|was\s+on|were\s+on)\b', msg_lower))
+                    )
                 )
             )
             _is_distinct_transporter_query = bool(
@@ -2729,8 +2734,14 @@ class IntentDetector:
                     vendor_field = "vendorgps"
                     query_payload["analytics"] = [{"type": "gps"}]
 
-                has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
-                has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
+                has_gps_inactive = bool(
+                    re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower)
+                    or re.search(r'\b(?:no|without|lost|lacking|zero)\s+(?:(?:fixed[\s-]?)?gps\s+)?connectivity(?:\s+status)?\b', msg_lower)
+                )
+                has_gps_active = bool(
+                    re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower)
+                    or re.search(r'\b(?:had\s+(?:fixed[\s-]?)?gps\s+connectivity|with\s+(?:fixed[\s-]?)?gps\s+connectivity|(?:fixed[\s-]?)?gps\s+connectivity\s+on|(?:fixed[\s-]?)?gps\s+connectivity)\b', msg_lower)
+                ) and not has_gps_inactive
 
                 query_payload["filters"] = [
                     f for f in query_payload.get("filters", [])
@@ -2748,9 +2759,9 @@ class IntentDetector:
                 })
                 if vendor_field == "vendorgps":
                     if has_gps_inactive:
-                        query_payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+                        query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "inactive"})
                     elif has_gps_active:
-                        query_payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
+                        query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "active"})
             elif re.search(r'\b3rd[\s-]party\b|\bthird[\s-]party\b', msg_lower):
                 target_vendor = "ThirdParty"
             elif re.search(r'\b(secutrak|icici|ilgic)\b', msg_lower):
@@ -2807,8 +2818,9 @@ class IntentDetector:
                     not is_vendor_fixed_elock and not is_vendor_portable_elock and (target_vendor or dev_vendor_match) and (
                         re.search(r'\b(?:[A-Za-z0-9_-]+)\s+gps\s+devices?\b', msg_lower)
                         or re.search(r'\bgps\s+devices?\s+(?:of|for|from|using|with)\s+[A-Za-z0-9_-]+\b', msg_lower)
-                        or re.search(r'\b(?:ilgic|secutrak|icici|wheelseye)\s+gps\b', msg_lower)
-                        or (target_vendor and re.search(rf'\b{re.escape(target_vendor.lower())}\s+gps\b', msg_lower))
+                        or re.search(r'\b(?:ilgic|secutrak|icici|wheelseye)\s+(?:fixed\s+)?gps\b', msg_lower)
+                        or (target_vendor and re.search(rf'\b{re.escape(target_vendor.lower())}\s+(?:fixed\s+)?gps\b', msg_lower))
+                        or re.search(r'\b(?:fixed[\s-]*)?gps\b', msg_lower)
                     )
                 )
 
@@ -2831,18 +2843,24 @@ class IntentDetector:
                         ])
                     ]
                 elif is_vendor_gps:
-                    vendor_field = "vendorgps"
+                    vendor_field = "vendor" if canonical_vendor == "Wheelseye" else "vendorgps"
                     query_payload["analytics"] = [{"type": "gps"}]
-                    has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
-                    has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
+                    has_gps_inactive = bool(
+                        re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower)
+                        or re.search(r'\b(?:no|without|lost|lacking|zero)\s+(?:(?:fixed[\s-]?)?gps\s+)?connectivity(?:\s+status)?\b', msg_lower)
+                    )
+                    has_gps_active = bool(
+                        re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower)
+                        or re.search(r'\b(?:had\s+(?:fixed[\s-]?)?gps\s+connectivity|with\s+(?:fixed[\s-]?)?gps\s+connectivity|(?:fixed[\s-]?)?gps\s+connectivity\s+on|(?:fixed[\s-]?)?gps\s+connectivity)\b', msg_lower)
+                    ) and not has_gps_inactive
                     query_payload["filters"] = [
                         f for f in query_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") in ["GPS", "FixedGPS", "gps", "fixedgps"])
                     ]
                     if has_gps_inactive:
-                        query_payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+                        query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "inactive"})
                     elif has_gps_active:
-                        query_payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
+                        query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "active"})
                 else:
                     vendor_field = "vendor"
 
@@ -4217,10 +4235,17 @@ class IntentDetector:
                 query_payload.pop("select", None)
             elif _is_transporter_unique_vehicles_query:
                 # Query asks for unique vehicles used by a specific transporter
+                is_trips_and_vehicles = bool(re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_lower))
                 query_payload["groupBy"] = ["vehicleNo"]
-                query_payload["metrics"] = [
-                    {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
-                ]
+                if is_trips_and_vehicles:
+                    query_payload["metrics"] = [
+                        {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"},
+                        {"field": "shipmentNo", "function": "count", "alias": "shipmentNo"}
+                    ]
+                else:
+                    query_payload["metrics"] = [
+                        {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
+                    ]
                 query_payload["select"] = []
                 if _is_include_cancelled:
                     query_payload["filters"] = [
@@ -5147,11 +5172,16 @@ class IntentDetector:
             fb_has_vehicle_mention = bool(re.search(r'\bvehicles?\b', msg_lower))
             fb_has_transporter_mention = bool(re.search(r'\btransporters?\b', msg_lower))
             fb_has_count_unique_distinct = bool(re.search(r'\b(?:unique|distinct|total\s+number|count)\b', msg_lower))
+            fb_is_trips_and_vehicles_query = bool(
+                re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_lower)
+            )
             fb_is_transporter_unique_vehicles_query = bool(
-                fb_specific_transporter and fb_has_vehicle_mention and not fb_is_no_gps_vehicle_query and (
-                    fb_has_count_unique_distinct
-                    or bool(re.search(r'\b(?:lis|list|how\s+many|which|show|all|what|get)\b', msg_lower))
-                    or bool(re.search(r'\b(?:on\s+trip|was\s+on|were\s+on)\b', msg_lower))
+                fb_is_trips_and_vehicles_query or (
+                    fb_specific_transporter and fb_has_vehicle_mention and not fb_is_no_gps_vehicle_query and (
+                        fb_has_count_unique_distinct
+                        or bool(re.search(r'\b(?:lis|list|how\s+many|which|show|all|what|get)\b', msg_lower))
+                        or bool(re.search(r'\b(?:on\s+trip|was\s+on|were\s+on)\b', msg_lower))
+                    )
                 )
             )
             fb_has_no_transporter = bool(
@@ -6507,10 +6537,17 @@ class IntentDetector:
                 ]
                 fallback_payload.pop("select", None)
             elif fb_is_transporter_unique_vehicles_query:
+                fb_is_trips_and_vehicles = bool(re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_lower))
                 fallback_payload["groupBy"] = ["vehicleNo"]
-                fallback_payload["metrics"] = [
-                    {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
-                ]
+                if fb_is_trips_and_vehicles:
+                    fallback_payload["metrics"] = [
+                        {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"},
+                        {"field": "shipmentNo", "function": "count", "alias": "shipmentNo"}
+                    ]
+                else:
+                    fallback_payload["metrics"] = [
+                        {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"}
+                    ]
                 fallback_payload["select"] = []
                 if fb_is_include_cancelled:
                     fallback_payload["filters"] = [
@@ -6671,8 +6708,9 @@ class IntentDetector:
                     not fb_is_vendor_fixed_elock and not fb_is_vendor_portable_elock and (fb_target_vendor or fb_dev_vendor_match) and (
                         re.search(r'\b(?:[A-Za-z0-9_-]+)\s+gps\s+devices?\b', msg_lower)
                         or re.search(r'\bgps\s+devices?\s+(?:of|for|from|using|with)\s+[A-Za-z0-9_-]+\b', msg_lower)
-                        or re.search(r'\b(?:ilgic|secutrak|icici|wheelseye)\s+gps\b', msg_lower)
-                        or (fb_target_vendor and re.search(rf'\b{re.escape(fb_target_vendor.lower())}\s+gps\b', msg_lower))
+                        or re.search(r'\b(?:ilgic|secutrak|icici|wheelseye)\s+(?:fixed\s+)?gps\b', msg_lower)
+                        or (fb_target_vendor and re.search(rf'\b{re.escape(fb_target_vendor.lower())}\s+(?:fixed\s+)?gps\b', msg_lower))
+                        or re.search(r'\b(?:fixed[\s-]*)?gps\b', msg_lower)
                     )
                 )
 
@@ -6695,18 +6733,24 @@ class IntentDetector:
                         ])
                     ]
                 elif fb_is_vendor_gps:
-                    fb_vendor_field = "vendorgps"
+                    fb_vendor_field = "vendor" if fb_canonical_vendor == "Wheelseye" else "vendorgps"
                     fallback_payload["analytics"] = [{"type": "gps"}]
-                    has_gps_inactive = bool(re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower))
-                    has_gps_active = bool(re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower))
+                    has_gps_inactive = bool(
+                        re.search(r'\b(?:inactive\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?inactive)\b', msg_lower)
+                        or re.search(r'\b(?:no|without|lost|lacking|zero)\s+(?:(?:fixed[\s-]?)?gps\s+)?connectivity(?:\s+status)?\b', msg_lower)
+                    )
+                    has_gps_active = bool(
+                        re.search(r'\b(?:active\s+(?:fixed[\s-]?)?gps|(?:fixed[\s-]?)?gps\s+(?:is\s+)?active)\b', msg_lower)
+                        or re.search(r'\b(?:had\s+(?:fixed[\s-]?)?gps\s+connectivity|with\s+(?:fixed[\s-]?)?gps\s+connectivity|(?:fixed[\s-]?)?gps\s+connectivity\s+on|(?:fixed[\s-]?)?gps\s+connectivity)\b', msg_lower)
+                    ) and not has_gps_inactive
                     fallback_payload["filters"] = [
                         f for f in fallback_payload["filters"]
                         if not (isinstance(f, dict) and f.get("field") in ["GPS", "FixedGPS", "gps", "fixedgps"])
                     ]
                     if has_gps_inactive:
-                        fallback_payload["filters"].append({"field": "gps", "operator": "eq", "value": "inactive"})
+                        fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "inactive"})
                     elif has_gps_active:
-                        fallback_payload["filters"].append({"field": "gps", "operator": "eq", "value": "active"})
+                        fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "active"})
                 else:
                     fb_vendor_field = "vendor"
 
