@@ -5,13 +5,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # LLM Provider Routing Settings
-    LLM_PROVIDER: str = "ollama"  # groq, hybrid, ollama
-    INTENT_LLM_PROVIDER: str = "ollama"  # Used for intent detection & payload generation
-    RESPONSE_LLM_PROVIDER: str = "ollama"  # Primary: Ollama qwen/qwen3.8-27b; falls back to Groq on limit exceeded
+    LLM_PROVIDER: str = "groq"  # groq, hybrid, ollama
+    INTENT_LLM_PROVIDER: str = "groq"  # Used for intent detection & payload generation
+    RESPONSE_LLM_PROVIDER: str = "groq"  # Primary: Groq qwen/qwen3.8-27b; falls back to Local Ollama on limit exceeded
 
     # Local LLM Settings (Ollama / LM Studio)
     LOCAL_LLM_BASE_URL: str = "http://localhost:11434/v1"
-    LOCAL_LLM_MODEL: str = "qwen/qwen3.8-27b"
+    LOCAL_LLM_MODEL: str = "qwen2.5-coder:0.5b"
+    LOCAL_LLM_FALLBACK_MODEL: str = "qwen2.5-coder:0.5b"
     LOCAL_LLM_API_KEY: str = "ollama"
     LOCAL_LLM_MAX_TOKENS: int = 1500
     LOCAL_LLM_TEMPERATURE: float = 0.2
@@ -19,7 +20,7 @@ class Settings(BaseSettings):
 
     # Generic LLM Fallbacks
     LLM_BASE_URL: str = "http://localhost:11434/v1"
-    LLM_MODEL: str = "qwen/qwen3.8-27b"
+    LLM_MODEL: str = "qwen2.5-coder:0.5b"
     LLM_API_KEY: str = "ollama"
     LLM_MAX_TOKENS: int = 1500
     LLM_TEMPERATURE: float = 0.2
@@ -27,7 +28,7 @@ class Settings(BaseSettings):
 
     # Groq Settings (Remote Cloud API)
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.1-8b-instant"
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
     GROQ_MAX_TOKENS: int = 1500
     GROQ_TEMPERATURE: float = 0.2
 

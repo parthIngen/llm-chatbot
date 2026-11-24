@@ -47,14 +47,15 @@ class LLMClient:
         self.provider = selected_provider
 
         self.last_used_provider = self.provider
-        self.last_used_model = getattr(settings, "GROQ_MODEL", "llama-3.1-8b-instant") if selected_provider == "groq" else (settings.LOCAL_LLM_MODEL or "qwen/qwen3.8-27b")
+        self.fallback_model = getattr(settings, "LOCAL_LLM_FALLBACK_MODEL", None) or "qwen2.5-coder:0.5b"
+        self.last_used_model = getattr(settings, "GROQ_MODEL", "qwen/qwen3.8-27b") if selected_provider == "groq" else (settings.LOCAL_LLM_MODEL or self.fallback_model)
         self.last_fallback_to_local = False
 
         if selected_provider == "groq":
             base_url = "https://api.groq.com/openai/v1"
             self.url = f"{base_url}/chat/completions"
             self.api_key = settings.GROQ_API_KEY
-            self.model = settings.GROQ_MODEL or "llama-3.1-8b-instant"
+            self.model = settings.GROQ_MODEL or "qwen/qwen3.8-27b"
             self.max_tokens = settings.GROQ_MAX_TOKENS
             self.temperature = settings.GROQ_TEMPERATURE if settings.GROQ_TEMPERATURE is not None else 0.2
             self.timeout = settings.LLM_TIMEOUT
@@ -62,7 +63,7 @@ class LLMClient:
             base_url = (settings.LOCAL_LLM_BASE_URL or settings.LLM_BASE_URL).rstrip('/')
             self.url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
             self.api_key = settings.LOCAL_LLM_API_KEY or settings.LLM_API_KEY or "ollama"
-            self.model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "qwen/qwen3.8-27b"
+            self.model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or self.fallback_model
             self.max_tokens = settings.LOCAL_LLM_MAX_TOKENS or settings.LLM_MAX_TOKENS
             self.temperature = (
                 settings.LOCAL_LLM_TEMPERATURE
@@ -75,7 +76,7 @@ class LLMClient:
             base_url = settings.LLM_BASE_URL.rstrip('/')
             self.url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
             self.api_key = settings.LLM_API_KEY or "ollama"
-            self.model = settings.LLM_MODEL or "qwen/qwen3.8-27b"
+            self.model = settings.LLM_MODEL or self.fallback_model
             self.max_tokens = settings.LLM_MAX_TOKENS
             self.temperature = settings.LLM_TEMPERATURE if settings.LLM_TEMPERATURE is not None else 0.0
             self.timeout = settings.LLM_TIMEOUT
@@ -89,15 +90,16 @@ class LLMClient:
         prompt: str,
         system: Optional[str] = None,
         format_json: bool = False,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        model_override: Optional[str] = None
     ) -> str:
         """
-        Executes generation using the local LLM (Ollama / LM Studio) when primary LLM limit is exceeded.
+        Executes generation using the local LLM (Ollama / LM Studio) when primary LLM limit is exceeded or model not found.
         """
         local_base_url = (settings.LOCAL_LLM_BASE_URL or settings.LLM_BASE_URL).rstrip('/')
         url = local_base_url if local_base_url.endswith("/chat/completions") else f"{local_base_url}/chat/completions"
         api_key = settings.LOCAL_LLM_API_KEY or settings.LLM_API_KEY or "ollama"
-        model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "qwen/qwen3.8-27b"
+        model = model_override or getattr(settings, "LOCAL_LLM_FALLBACK_MODEL", None) or "qwen2.5-coder:0.5b"
         temperature = (
             settings.LOCAL_LLM_TEMPERATURE
             if settings.LOCAL_LLM_TEMPERATURE is not None
@@ -252,7 +254,45 @@ class LLMClient:
                         f"LLM Provider ({self.provider}) returned 429: {response.text}"
                     )
 
+                elif response.status_code == 404:
+                    log_error(
+                        "LLM", "LLM_MODEL_NOT_FOUND",
+                        f"Model '{self.model}' not found on {self.provider} (status 404). Falling back to local model '{self.fallback_model}'."
+                    )
+                    if self.model != self.fallback_model:
+                        try:
+                            return await self._generate_local(
+                                prompt=prompt,
+                                system=system,
+                                format_json=format_json,
+                                max_tokens=effective_max_tokens,
+                                model_override=self.fallback_model
+                            )
+                        except Exception as fallback_err:
+                            log_error("LLM", "LOCAL_LLM_FALLBACK_FAILED", str(fallback_err))
+                            raise LLMClientError(
+                                f"Model '{self.model}' not found (404) and local fallback ('{self.fallback_model}') failed: {str(fallback_err)}"
+                            ) from fallback_err
+                    raise LLMClientError(
+                        f"LLM Provider ({self.provider}) returned status code 404: {response.text}"
+                    )
+
                 elif response.status_code != 200:
+                    if self.model != self.fallback_model:
+                        logger.warning(
+                            "[LLM_ERROR_FALLBACK] Provider '%s' model '%s' failed with status %d. Falling back to local model '%s'...",
+                            self.provider, self.model, response.status_code, self.fallback_model
+                        )
+                        try:
+                            return await self._generate_local(
+                                prompt=prompt,
+                                system=system,
+                                format_json=format_json,
+                                max_tokens=effective_max_tokens,
+                                model_override=self.fallback_model
+                            )
+                        except Exception as fallback_err:
+                            log_error("LLM", "LOCAL_LLM_FALLBACK_FAILED", str(fallback_err))
                     raise LLMClientError(
                         f"LLM Provider ({self.provider}) returned status code {response.status_code}: {response.text}"
                     )
@@ -292,14 +332,15 @@ class LLMClient:
             except httpx.TimeoutException as te:
                 call_duration = time.perf_counter() - t_start
                 log_error("LLM", "LLM_TIMEOUT", f"Timeout after {call_duration:.2f}s contacting LLM server ({self.url}).")
-                if self.provider == "groq":
-                    logger.warning("[LLM_TIMEOUT_FALLBACK] Groq timed out. Switching to local LLM...")
+                if self.model != self.fallback_model:
+                    logger.warning("[LLM_TIMEOUT_FALLBACK] Model '%s' timed out. Switching to local fallback '%s'...", self.model, self.fallback_model)
                     try:
                         return await self._generate_local(
                             prompt=prompt,
                             system=system,
                             format_json=format_json,
-                            max_tokens=effective_max_tokens
+                            max_tokens=effective_max_tokens,
+                            model_override=self.fallback_model
                         )
                     except Exception as local_err:
                         log_error("LLM", "LOCAL_LLM_FALLBACK_FAILED", str(local_err))
@@ -310,6 +351,18 @@ class LLMClient:
                 raise
             except Exception as e:
                 log_error("LLM", "LLM_ERROR", str(e))
+                if self.model != self.fallback_model:
+                    logger.warning("[LLM_EXCEPTION_FALLBACK] Error contacting '%s' with model '%s': %s. Switching to local fallback '%s'...", self.provider, self.model, str(e), self.fallback_model)
+                    try:
+                        return await self._generate_local(
+                            prompt=prompt,
+                            system=system,
+                            format_json=format_json,
+                            max_tokens=effective_max_tokens,
+                            model_override=self.fallback_model
+                        )
+                    except Exception as local_err:
+                        log_error("LLM", "LOCAL_LLM_FALLBACK_FAILED", str(local_err))
                 raise LLMClientError(f"Failed to communicate with LLM ({self.provider}): {str(e)}") from e
 
         # All retries exhausted
