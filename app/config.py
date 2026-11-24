@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # LLM Provider Routing Settings
     LLM_PROVIDER: str = "groq"  # groq, hybrid, ollama
     INTENT_LLM_PROVIDER: str = "groq"  # Used for intent detection & payload generation
-    RESPONSE_LLM_PROVIDER: str = "groq"  # Primary: Groq llama-3.3-70b-versatile; falls back to Local Ollama on limit exceeded
+    RESPONSE_LLM_PROVIDER: str = "groq"  # Primary: Groq llama-3.1-8b-instant; falls back to Local Ollama on limit exceeded
 
     # Local LLM Settings (Ollama / LM Studio)
     LOCAL_LLM_BASE_URL: str = "http://localhost:11434/v1"
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # Groq Settings (Remote Cloud API)
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "llama-3.1-8b-instant"
     GROQ_MAX_TOKENS: int = 1500
     GROQ_TEMPERATURE: float = 0.2
 
