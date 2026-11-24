@@ -47,14 +47,14 @@ class LLMClient:
         self.provider = selected_provider
 
         self.last_used_provider = self.provider
-        self.last_used_model = getattr(settings, "GROQ_MODEL", "qwen/qwen3.8-27b") if selected_provider == "groq" else (settings.LOCAL_LLM_MODEL or "qwen2.5-coder:0.5b")
+        self.last_used_model = getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile") if selected_provider == "groq" else (settings.LOCAL_LLM_MODEL or "qwen2.5-coder:0.5b")
         self.last_fallback_to_local = False
 
         if selected_provider == "groq":
             base_url = "https://api.groq.com/openai/v1"
             self.url = f"{base_url}/chat/completions"
             self.api_key = settings.GROQ_API_KEY
-            self.model = settings.GROQ_MODEL or "qwen/qwen3.8-27b"
+            self.model = settings.GROQ_MODEL or "llama-3.3-70b-versatile"
             self.max_tokens = settings.GROQ_MAX_TOKENS
             self.temperature = settings.GROQ_TEMPERATURE if settings.GROQ_TEMPERATURE is not None else 0.2
             self.timeout = settings.LLM_TIMEOUT
