@@ -52,7 +52,7 @@ _COMPARISON_PATTERN = re.compile(
 )
 
 _TRIP_PATTERN = re.compile(
-    r'\b(?:trips?|running|active|closed|completed|cancelled|cancel|valid|intercity|intracity|network|local|feeder|empty|surface|sfc|speed|air|delivery|pickup|pick\s+up|source|destination|from|to|route|north|south|east|west|geofence|forcefull?|forcefully)\b',
+    r'\b(?:trips?|running|active|closed|completed|cancelled|cancel|valid|intercity|intracity|network|local|feeder|empty|surface|sfc|speed|air|delivery|pickup|pick\s+up|source|destination|from|to|route|north|south|east|west|geofence|forcefull?|forcefully|branch|branches|area|areas)\b',
     re.IGNORECASE
 )
 

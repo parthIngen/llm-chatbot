@@ -2,7 +2,7 @@ import json
 import datetime
 import calendar
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from app.llm.client import LLMClient, LLMRateLimitError
 from app.llm.prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_PROMPT_TEMPLATE, route_prompt
 from app.llm.fast_path import build_fast_path_payload
@@ -315,6 +315,9 @@ extract_date_range_from_message = extract_date_range
 def extract_device_vendor(text: str) -> Optional[str]:
     """Detect and normalize known tracking device vendors."""
     text_l = text.lower()
+    # If query mentions transporters or operated by, and does not mention GPS / vendor / tracking / device, don't match Tata/Eicher as vendor
+    if bool(re.search(r'\b(?:transporters?|operated\s+by|handled\s+by|fleet)\b', text_l)) and not bool(re.search(r'\b(?:gps|devices?|vendors?|tracking|fitted|installed)\b', text_l)):
+        return None
     if re.search(r'\bsecutrak_tp\b', text_l):
         return "Secutrak_TP"
     elif re.search(r'\bwheelseye_bluedart\b', text_l):
@@ -627,6 +630,53 @@ def extract_specific_transporter(text: str) -> str | list[str] | None:
     if is_top_transporters_query(text):
         return None
     msg_l = text.lower()
+
+    # 0. Parenthesized list of transporters, e.g. "top 3 Transporters combined (LOCALCASH, DINESH TEMPO SERVICE, TATA)"
+    m_trans_paren = re.search(
+        r'\b(?:(?:top\s*\d*\s*)?transporters?|operated\s+by|handled\s+by|run\s+by)(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)',
+        text,
+        re.IGNORECASE
+    )
+    if not m_trans_paren:
+        m_trans_paren = re.search(
+            r'\(([^)]+)\)\s*(?:combined|together)?\s*(?:across\s+)?(?:the\s+)?(?:top\s*\d*\s*)?transporters?\b',
+            text,
+            re.IGNORECASE
+        )
+    if m_trans_paren:
+        raw_list = m_trans_paren.group(1)
+        items = [
+            x.strip().strip('"\'')
+            for x in re.split(r'[,/]|(?:\s+and\s+)', raw_list)
+        ]
+        items = [x for x in items if x and x.lower() not in _TRANSPORTER_STOP_WORDS and len(x) > 1]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
+
+    # 0b. 3+ comma-separated transporters: e.g. "operated by LOCALCASH, DINESH TEMPO SERVICE, and TATA combined"
+    m_multi = re.search(
+        r'\b(?:operated\s+by|handled\s+by|run\s+by|across\s+(?:the\s+)?(?:top\s*\d*\s*)?transporters?)\s+(?:transporters?\s+)?'
+        r'([A-Za-z0-9&._\-()]+(?:\s*,\s*[A-Za-z0-9&._\-()]+)+(?:\s*,?\s*and\s+[A-Za-z0-9&._\-()]+)?)(?:\s+(?:combined|together))?',
+        text,
+        re.IGNORECASE
+    )
+    if m_multi:
+        raw_list = m_multi.group(1)
+        items = [
+            re.sub(r'\s+(?:combined|together)\b', '', x, flags=re.IGNORECASE).strip(' ?.,')
+            for x in re.split(r'[,]|(?:\s+and\s+)', raw_list)
+        ]
+        items = [
+            re.sub(r'\s+(?:in|for|from|during|between|with|on)\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|\d{4}).*', '', x, flags=re.IGNORECASE).strip(' ?.,')
+            for x in items
+        ]
+        items = [x for x in items if x and x.lower() not in _TRANSPORTER_STOP_WORDS and len(x) > 1]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
 
     # 1. Combined multiple transporters: 'operated by X and Y [combined/together]'
     combined_pat = (
@@ -1245,14 +1295,30 @@ _STOP_LOCATION_WORDS = {
     "mizoram", "nagaland", "chandigarh", "ladakh", "jammu", "kashmir", "puducherry", "pondicherry"
 }
 
-def extract_source_location(text: str) -> Optional[str]:
+def extract_source_location(text: str) -> Optional[Union[str, List[str]]]:
     """
     Extracts the source/origin location name from user query.
     Handles phrases like 'originated from location BOB', 'from location BOB',
-    'origin BOB', 'starting from BOB', etc.
+    'origin BOB', 'starting from BOB', 'across Sources combined (HUB, PNQ, BLR)', etc.
     """
     if not text:
         return None
+
+    # Check parenthesized list: e.g. "Sources combined (HUB, PNQ, BLR)"
+    m_paren = re.search(
+        r'\b(?:(?:top\s*\d*\s*)?sources?|(?:top\s*\d*\s*)?origins?|originat(?:ed|ing|es?)|start(?:ing|ed|s)?)(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)',
+        text,
+        re.IGNORECASE
+    )
+    if m_paren:
+        raw_list = m_paren.group(1)
+        items = [re.sub(r'[^a-zA-Z0-9_-]', '', x).upper() for x in re.split(r'[,/]|(?:\s+and\s+)', raw_list)]
+        items = [x for x in items if x and x not in _AREA_BRANCH_STOP_WORDS and len(x) > 1]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
+
     # Mask out non-location date ranges like 'from 2026-08-01'
     clean_text = re.sub(r'\bfrom\s+\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b', lambda m: ' ' * len(m.group(0)), text, flags=re.IGNORECASE)
     pat = re.compile(
@@ -1272,13 +1338,30 @@ def extract_source_location(text: str) -> Optional[str]:
             return val
     return None
 
-def extract_destination_location(text: str) -> Optional[str]:
+def extract_destination_location(text: str) -> Optional[Union[str, List[str]]]:
     """
     Extracts the destination location name from user query.
-    Handles phrases like 'destination BOB', 'reaching BOB', 'ends at location BOB', 'to location BOB', etc.
+    Handles phrases like 'destination BOB', 'reaching BOB', 'ends at location BOB', 'to location BOB',
+    'across Destinations combined (HUB, PNQ, BLR)', etc.
     """
     if not text:
         return None
+
+    # Check parenthesized list: e.g. "Destinations combined (HUB, PNQ, BLR)"
+    m_paren = re.search(
+        r'\b(?:(?:top\s*\d*\s*)?destinations?|destinat(?:ed|ing|es?)|reaching|ends?|arrival)(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)',
+        text,
+        re.IGNORECASE
+    )
+    if m_paren:
+        raw_list = m_paren.group(1)
+        items = [re.sub(r'[^a-zA-Z0-9_-]', '', x).upper() for x in re.split(r'[,/]|(?:\s+and\s+)', raw_list)]
+        items = [x for x in items if x and x not in _AREA_BRANCH_STOP_WORDS and len(x) > 1]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
+
     # Mask out non-destination phrases like 'belonged to', 'related to', etc.
     clean_text = re.sub(
         r'\b(?:belong(?:ed|ing|s)?|relat(?:ed|ing|es?)|pertain(?:ed|ing|s)?|prior|due|according|thanks|similar|close|next|equal)\s+to\b',
@@ -1445,22 +1528,74 @@ _AREA_BRANCH_STOP_WORDS = {
     "RECORDED", "UTILIZED", "FOUND", "OPERATED", "USED", "ACTIVE",
     "ON", "IN", "DURING", "WITH", "WITHOUT", "UNDER", "FOR", "OF",
     "ACROSS", "THERE", "WERE", "ARE", "HAD", "HAVE", "HAS", "TRIPS",
-    "TRIP", "COUNT", "TOTAL", "UNIQUE", "DISTINCT"
+    "TRIP", "COUNT", "TOTAL", "UNIQUE", "DISTINCT", "COMBINED",
+    "TOGETHER", "TOP", "BETWEEN", "BOTH", "EITHER", "ALL", "AND",
+    "OR", "BRANCH", "BRANCHES", "AREA", "AREAS"
 }
 
-def extract_area(message: str) -> Optional[str]:
+def extract_area(message: str) -> Optional[Union[str, List[str]]]:
     """
-    Extracts area code from message.
+    Extracts area code(s) from message.
     e.g. 'under top Area DEL' -> 'DEL'
          'under Area BLR' -> 'BLR'
-         'Area BOM' -> 'BOM'
-         'Area PNQ' -> 'PNQ'
-         'Area CCU' -> 'CCU'
+         'across the top 5 Areas combined (DEL, BOM, BLR, MAA, CCU)' -> ['DEL', 'BOM', 'BLR', 'MAA', 'CCU']
+         'Areas (DEL, BOM, BLR)' -> ['DEL', 'BOM', 'BLR']
+         'Areas DEL, BOM, and CCU combined' -> ['DEL', 'BOM', 'CCU']
     """
     if not message:
         return None
     if re.search(r'\b(?:unique|distinct)\s+areas?\b', message, re.IGNORECASE):
         return None
+
+    # 1. Parenthesized list of areas, e.g. "Areas combined (DEL, BOM, BLR)" or "(DEL, BOM, BLR) combined"
+    m_paren = re.search(
+        r'\b(?:(?:top\s*\d*\s*)?areas?)(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)',
+        message,
+        re.IGNORECASE
+    )
+    if not m_paren:
+        m_paren = re.search(
+            r'\(([^)]+)\)\s*(?:combined|together)?\s*(?:across\s+)?(?:the\s+)?(?:top\s*\d*\s*)?areas?\b',
+            message,
+            re.IGNORECASE
+        )
+    if m_paren:
+        raw_list = m_paren.group(1)
+        items = [
+            re.sub(r'[^a-zA-Z0-9_-]', '', x).upper()
+            for x in re.split(r'[,/]|(?:\s+and\s+)', raw_list)
+        ]
+        items = [x for x in items if x and x not in _AREA_BRANCH_STOP_WORDS and len(x) >= 2]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
+
+    # 2. Comma/and-separated list with combined or colon
+    m_list = re.search(
+        r'\b(?:top\s*\d*\s*)?areas?\s*(?:combined\s*[:=-]?\s*|[:=-]\s*)([a-zA-Z0-9_,\s\-\/&]+?)(?:\s+(?:combined|together)|\s+(?:in|for|from|during|between|dated?)\b|\s*\?|$)',
+        message,
+        re.IGNORECASE
+    )
+    if not m_list:
+        m_list = re.search(
+            r'\b(?:across|for|under|in)\s+(?:the\s+)?(?:top\s*\d*\s*)?areas?\s+([a-zA-Z0-9_,\s\-\/&]+?)\s+(?:combined|together)\b',
+            message,
+            re.IGNORECASE
+        )
+    if m_list:
+        raw_list = m_list.group(1)
+        items = [
+            re.sub(r'[^a-zA-Z0-9_-]', '', x).upper()
+            for x in re.split(r'[,/]|(?:\s+and\s+)', raw_list)
+        ]
+        items = [x for x in items if x and x not in _AREA_BRANCH_STOP_WORDS and len(x) >= 2]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
+
+    # 3. Single area code
     m = re.search(r'\b(?:top\s+)?areas?\s*(?:[:=-]\s*|\s+)([a-zA-Z]{2,10})\b', message, re.IGNORECASE)
     if m:
         val = m.group(1).upper()
@@ -1468,24 +1603,174 @@ def extract_area(message: str) -> Optional[str]:
             return val
     return None
 
-def extract_branch(message: str) -> Optional[str]:
+def extract_branch(message: str) -> Optional[Union[str, List[str]]]:
     """
-    Extracts branch code from message.
+    Extracts branch code(s) from message.
     e.g. 'under Branch PNQ' -> 'PNQ'
          'under top Branch HUB' -> 'HUB'
-         'under Branch BLR' -> 'BLR'
-         'under Branch HYD' -> 'HYD'
-         'under Branch NBM' -> 'NBM'
+         'across the top 5 Branches combined (HUB, PNQ, BLR, HYD, NBM)' -> ['HUB', 'PNQ', 'BLR', 'HYD', 'NBM']
+         'Branches (HUB, PNQ, BLR)' -> ['HUB', 'PNQ', 'BLR']
+         'Branches HUB, PNQ, and BLR combined' -> ['HUB', 'PNQ', 'BLR']
     """
     if not message:
         return None
     if re.search(r'\b(?:unique|distinct)\s+branch(?:es)?\b', message, re.IGNORECASE):
         return None
+
+    # 1. Parenthesized list of branches, e.g. "Branches combined (HUB, PNQ, BLR, HYD, NBM)" or "(HUB, PNQ, BLR) combined"
+    m_paren = re.search(
+        r'\b(?:(?:top\s*\d*\s*)?branch(?:es)?)(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)',
+        message,
+        re.IGNORECASE
+    )
+    if not m_paren:
+        m_paren = re.search(
+            r'\(([^)]+)\)\s*(?:combined|together)?\s*(?:across\s+)?(?:the\s+)?(?:top\s*\d*\s*)?branch(?:es)?\b',
+            message,
+            re.IGNORECASE
+        )
+    if m_paren:
+        raw_list = m_paren.group(1)
+        items = [
+            re.sub(r'[^a-zA-Z0-9_-]', '', x).upper()
+            for x in re.split(r'[,/]|(?:\s+and\s+)', raw_list)
+        ]
+        items = [x for x in items if x and x not in _AREA_BRANCH_STOP_WORDS and len(x) >= 2]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
+
+    # 2. Comma/and-separated list with combined or colon
+    m_list = re.search(
+        r'\b(?:top\s*\d*\s*)?branch(?:es)?\s*(?:combined\s*[:=-]?\s*|[:=-]\s*)([a-zA-Z0-9_,\s\-\/&]+?)(?:\s+(?:combined|together)|\s+(?:in|for|from|during|between|dated?)\b|\s*\?|$)',
+        message,
+        re.IGNORECASE
+    )
+    if not m_list:
+        m_list = re.search(
+            r'\b(?:across|for|under|in)\s+(?:the\s+)?(?:top\s*\d*\s*)?branch(?:es)?\s+([a-zA-Z0-9_,\s\-\/&]+?)\s+(?:combined|together)\b',
+            message,
+            re.IGNORECASE
+        )
+    if m_list:
+        raw_list = m_list.group(1)
+        items = [
+            re.sub(r'[^a-zA-Z0-9_-]', '', x).upper()
+            for x in re.split(r'[,/]|(?:\s+and\s+)', raw_list)
+        ]
+        items = [x for x in items if x and x not in _AREA_BRANCH_STOP_WORDS and len(x) >= 2]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
+
+    # 3. Single branch
     m = re.search(r'\b(?:top\s+)?branch(?:es)?\s*(?:[:=-]\s*|\s+)([a-zA-Z0-9_-]{2,10})\b', message, re.IGNORECASE)
     if m:
         val = m.group(1).upper()
         if val not in _AREA_BRANCH_STOP_WORDS:
             return val
+    return None
+
+def extract_route(message: str) -> Optional[Union[str, List[str]]]:
+    """
+    Extracts route name(s) from user query.
+    e.g. 'Route R1' -> 'R1'
+         'across the top 3 Routes combined (R1, R2, R3)' -> ['R1', 'R2', 'R3']
+    """
+    if not message:
+        return None
+    if re.search(r'\b(?:unique|distinct)\s+routes?\b', message, re.IGNORECASE):
+        return None
+    m_paren = re.search(
+        r'\b(?:(?:top\s*\d*\s*)?routes?)(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)',
+        message,
+        re.IGNORECASE
+    )
+    if m_paren:
+        raw_list = m_paren.group(1)
+        items = [x.strip() for x in re.split(r'[,/]|(?:\s+and\s+)', raw_list)]
+        items = [x for x in items if x and len(x) > 1]
+        if len(items) > 1:
+            return items
+        elif len(items) == 1:
+            return items[0]
+    m = re.search(r'\broutes?\s+([A-Za-z0-9_\-\/]+)\b', message, re.IGNORECASE)
+    if m:
+        val = m.group(1).strip()
+        if val.lower() not in ("types", "type", "category", "categories", "master", "inside", "outside", "combined", "together"):
+            return val
+    return None
+
+def extract_vehicle_list(message: str) -> Optional[List[str]]:
+    """
+    Extracts multiple vehicle numbers from message.
+    e.g. 'Vehicles combined (UP32AB1234, DL01CD5678)' -> ['UP32AB1234', 'DL01CD5678']
+    """
+    if not message:
+        return None
+    m_paren = re.search(r'\bvehicles?(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)', message, re.IGNORECASE)
+    if m_paren:
+        raw_list = m_paren.group(1)
+        vehs = re.findall(r'\b[A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4}\b', raw_list)
+        if vehs:
+            return [re.sub(r'\s+', '', v).upper() for v in vehs]
+    all_vehs = re.findall(r'\b[A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4}\b', message)
+    if len(all_vehs) > 1:
+        return [re.sub(r'\s+', '', v).upper() for v in all_vehs]
+    return None
+
+def extract_region(message: str) -> Optional[Union[str, List[str]]]:
+    """
+    Extracts region(s) from message.
+    e.g. 'North and South regions combined' -> ['North', 'South']
+         'Regions (North, South)' -> ['North', 'South']
+    """
+    if not message:
+        return None
+    m_paren = re.search(r'\bregions?(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)', message, re.IGNORECASE)
+    if m_paren:
+        raw = m_paren.group(1).lower()
+        regs = []
+        for r in ["north east", "north west", "south east", "south west", "north", "south", "east", "west", "central"]:
+            if r in raw and r.title() not in regs:
+                regs.append(r.title())
+        if len(regs) > 1:
+            return regs
+        elif len(regs) == 1:
+            return regs[0]
+    regs = []
+    msg_l = message.lower()
+    for r in ["north east", "north west", "south east", "south west", "north", "south", "east", "west", "central"]:
+        if re.search(rf'\b{r}\b', msg_l) and ("region" in msg_l or "regions" in msg_l):
+            if r.title() not in regs:
+                regs.append(r.title())
+    if len(regs) > 1:
+        return regs
+    elif len(regs) == 1:
+        return regs[0]
+    return None
+
+def extract_shipment_methods(message: str) -> Optional[Union[str, List[str]]]:
+    """
+    Extracts shipment methods from parenthesized or combined queries.
+    e.g. 'Shipment Methods combined (speed, empty)' -> ['speed', 'empty']
+    """
+    if not message:
+        return None
+    m_paren = re.search(r'\b(?:shipment\s+methods?|feeder\s+types?|route\s+types?)(?:\s+(?:combined|together))?\s*[:=-]?\s*\(([^)]+)\)', message, re.IGNORECASE)
+    if m_paren:
+        raw = m_paren.group(1).lower()
+        sm_map = {"air": "air", "sfc": "sfc", "speed": "speed", "feeder": "feeder", "empty": "empty", "delivery": "delivery", "pickup": "Pick Up"}
+        sms = []
+        for k, v in sm_map.items():
+            if k in raw and v not in sms:
+                sms.append(v)
+        if len(sms) > 1:
+            return sms
+        elif len(sms) == 1:
+            return sms[0]
     return None
 
 def detect_unique_or_list_field(message: str) -> Optional[str]:

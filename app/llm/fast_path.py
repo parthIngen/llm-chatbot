@@ -129,10 +129,20 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b', msg_l)):
         return True
-    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master, extract_single_shipment_lookup, detect_top_device_vendors, detect_date_grouping, extract_area, extract_branch, detect_unique_or_list_field
+    from app.llm.intent_detector import (
+        detect_vehicle_master, detect_route_master, detect_fleet_master,
+        extract_single_shipment_lookup, detect_top_device_vendors,
+        detect_date_grouping, extract_area, extract_branch,
+        detect_unique_or_list_field, extract_route, extract_vehicle_list,
+        extract_region, extract_shipment_methods
+    )
     if detect_unique_or_list_field(message) is not None:
         return True
     if extract_area(message) is not None or extract_branch(message) is not None:
+        return True
+    if extract_route(message) is not None or extract_vehicle_list(message) is not None:
+        return True
+    if extract_region(message) is not None or extract_shipment_methods(message) is not None:
         return True
     if detect_vehicle_master(message) is not None:
         return True
@@ -672,10 +682,18 @@ def build_fast_path_payload(
     from app.llm.intent_detector import extract_source_location, extract_destination_location
     src_loc = extract_source_location(message)
     if src_loc:
-        payload["filters"].append({"field": "source", "operator": "eq", "value": src_loc})
+        payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "source")]
+        if isinstance(src_loc, list):
+            payload["filters"].append({"field": "source", "operator": "in", "value": src_loc})
+        else:
+            payload["filters"].append({"field": "source", "operator": "eq", "value": src_loc})
     dest_loc = extract_destination_location(message)
     if dest_loc:
-        payload["filters"].append({"field": "destination", "operator": "eq", "value": dest_loc})
+        payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "destination")]
+        if isinstance(dest_loc, list):
+            payload["filters"].append({"field": "destination", "operator": "in", "value": dest_loc})
+        else:
+            payload["filters"].append({"field": "destination", "operator": "eq", "value": dest_loc})
 
     from app.llm.intent_detector import detect_indian_states
     detected_states = detect_indian_states(message)
@@ -745,13 +763,50 @@ def build_fast_path_payload(
         if not trans_exists:
             payload["filters"].append({"field": "transporter", "operator": trans_op, "value": spec_transporter})
 
-    # 6. Specific vehicle number filter
-    veh_match = re.search(r'\b([A-Z]{2}\s*\d{1,2}\s*[A-Z]{1,3}\s*\d{4})\b', message)
-    if veh_match:
-        veh_no = re.sub(r'\s+', '', veh_match.group(1)).upper()
-        payload["filters"].append({"field": "vehicleNo", "operator": "eq", "value": "UP32AB1234" if "UP32AB1234" in veh_no else veh_no})
+    # 6. Specific vehicle number / list filter
+    from app.llm.intent_detector import extract_vehicle_list
+    v_list = extract_vehicle_list(message)
+    if v_list and len(v_list) > 1:
+        payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no"))]
+        payload["filters"].append({"field": "vehicleNo", "operator": "in", "value": v_list})
+    else:
+        veh_match = re.search(r'\b([A-Z]{2}\s*\d{1,2}\s*[A-Z]{1,3}\s*\d{4})\b', message)
+        if veh_match:
+            veh_no = re.sub(r'\s+', '', veh_match.group(1)).upper()
+            payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no"))]
+            payload["filters"].append({"field": "vehicleNo", "operator": "eq", "value": "UP32AB1234" if "UP32AB1234" in veh_no else veh_no})
 
-    # 6b. Vehicle Master, Route Master & Fleet Master
+    # 6a. Route filter
+    from app.llm.intent_detector import extract_route
+    route_val = extract_route(message)
+    if route_val:
+        payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") in ("Route", "route"))]
+        if isinstance(route_val, list):
+            payload["filters"].append({"field": "Route", "operator": "in", "value": route_val})
+        else:
+            payload["filters"].append({"field": "Route", "operator": "eq", "value": route_val})
+
+    # 6b. Region filter
+    from app.llm.intent_detector import extract_region
+    reg_val = extract_region(message)
+    if reg_val:
+        payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "region")]
+        if isinstance(reg_val, list):
+            payload["filters"].append({"field": "region", "operator": "in", "value": reg_val})
+        else:
+            payload["filters"].append({"field": "region", "operator": "eq", "value": reg_val})
+
+    # 6c. Shipment method filter
+    from app.llm.intent_detector import extract_shipment_methods
+    sm_val = extract_shipment_methods(message)
+    if sm_val:
+        payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "shipmentMethod")]
+        if isinstance(sm_val, list):
+            payload["filters"].append({"field": "shipmentMethod", "operator": "in", "value": sm_val})
+        else:
+            payload["filters"].append({"field": "shipmentMethod", "operator": "eq", "value": sm_val})
+
+    # 6d. Vehicle Master, Route Master & Fleet Master
     from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master
     vm = detect_vehicle_master(message)
     if vm:
@@ -847,12 +902,21 @@ def build_fast_path_payload(
             payload["filters"].append({"field": "runDate", "operator": "lte", "value": f"{yr}-11-31 23:59:59"})
         if area_val:
             payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "area")]
-            payload["filters"].append({"field": "area", "operator": "eq", "value": area_val})
+            if isinstance(area_val, list):
+                payload["filters"].append({"field": "area", "operator": "in", "value": area_val})
+            else:
+                payload["filters"].append({"field": "area", "operator": "eq", "value": area_val})
         if branch_val:
             payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "branch")]
-            payload["filters"].append({"field": "branch", "operator": "eq", "value": branch_val})
-        payload.pop("select", None)
+            if isinstance(branch_val, list):
+                payload["filters"].append({"field": "branch", "operator": "in", "value": branch_val})
+            else:
+                payload["filters"].append({"field": "branch", "operator": "eq", "value": branch_val})
         payload.pop("analytics", None)
+        if "combined" in msg_l:
+            payload.pop("groupBy", None)
+            payload.pop("metrics", None)
+        payload["select"] = []
 
     from app.llm.intent_detector import detect_unique_or_list_field
     unique_field = detect_unique_or_list_field(message)

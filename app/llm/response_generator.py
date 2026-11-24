@@ -438,21 +438,43 @@ def build_natural_response(
     # Contextual qualifiers (Locations, route, vehicle, transporter, region, vendor)
     context_qualifiers = []
     if from_loc and to_loc:
-        context_qualifiers.append(f"from {from_loc} to {to_loc}")
+        fl_str = ", ".join(from_loc) if isinstance(from_loc, list) else from_loc
+        tl_str = ", ".join(to_loc) if isinstance(to_loc, list) else to_loc
+        context_qualifiers.append(f"from {fl_str} to {tl_str}")
     elif from_loc:
-        context_qualifiers.append(f"from {from_loc}")
+        if isinstance(from_loc, list):
+            fl_str = ", ".join(from_loc)
+            context_qualifiers.append(f"originated across Sources combined ({fl_str})" if "combined" in msg_lower else f"originated across Sources ({fl_str})")
+        else:
+            context_qualifiers.append(f"from {from_loc}")
     elif to_loc:
-        context_qualifiers.append(f"to {to_loc}")
+        if isinstance(to_loc, list):
+            tl_str = ", ".join(to_loc)
+            context_qualifiers.append(f"reaching across Destinations combined ({tl_str})" if "combined" in msg_lower else f"reaching across Destinations ({tl_str})")
+        else:
+            context_qualifiers.append(f"to {to_loc}")
 
     if route:
-        context_qualifiers.append(f"on route {route}")
+        if isinstance(route, list):
+            r_str = ", ".join(route)
+            context_qualifiers.append(f"recorded across Routes combined ({r_str})" if "combined" in msg_lower else f"recorded across Routes ({r_str})")
+        else:
+            context_qualifiers.append(f"on route {route}")
 
     if vehicle_no:
-        context_qualifiers.append(f"for vehicle {vehicle_no}")
+        if isinstance(vehicle_no, list):
+            v_str = ", ".join(vehicle_no)
+            context_qualifiers.append(f"for vehicles combined ({v_str})" if "combined" in msg_lower else f"for vehicles ({v_str})")
+        else:
+            context_qualifiers.append(f"for vehicle {vehicle_no}")
 
     if transporter:
         if isinstance(transporter, list):
-            context_qualifiers.append(f"operated by {' and '.join(transporter)}")
+            t_str = " and ".join(transporter) if len(transporter) <= 2 else (", ".join(transporter[:-1]) + f", and {transporter[-1]}")
+            if "combined" in msg_lower:
+                context_qualifiers.append(f"operated by {t_str} combined")
+            else:
+                context_qualifiers.append(f"operated by {t_str}")
         elif str(transporter).lower() == "na":
             context_qualifiers.append("with no transporter")
         else:
@@ -460,18 +482,49 @@ def build_natural_response(
 
     if region:
         reg_str = ", ".join(region) if isinstance(region, list) else region
-        context_qualifiers.append(f"in the {reg_str} region")
+        if isinstance(region, list) and "combined" in msg_lower:
+            context_qualifiers.append(f"in the {reg_str} regions combined")
+        else:
+            context_qualifiers.append(f"in the {reg_str} region")
 
     area = filter_map.get("area")
     if area:
-        if "top area" in msg_lower:
+        if isinstance(area, list):
+            a_str = ", ".join(area)
+            if "top" in msg_lower and "combined" in msg_lower:
+                m_top = re.search(r'\btop\s+(\d+)\b', msg_lower)
+                num_str = f" {m_top.group(1)}" if m_top else f" {len(area)}"
+                context_qualifiers.append(f"recorded across the top{num_str} Areas combined ({a_str})")
+            elif "combined" in msg_lower:
+                context_qualifiers.append(f"recorded across Areas combined ({a_str})")
+            elif "top" in msg_lower:
+                m_top = re.search(r'\btop\s+(\d+)\b', msg_lower)
+                num_str = f" {m_top.group(1)}" if m_top else f" {len(area)}"
+                context_qualifiers.append(f"recorded across the top{num_str} Areas ({a_str})")
+            else:
+                context_qualifiers.append(f"recorded across Areas ({a_str})")
+        elif "top area" in msg_lower:
             context_qualifiers.append(f"recorded under top Area {area}")
         else:
             context_qualifiers.append(f"recorded under Area {area}")
 
     branch = filter_map.get("branch")
     if branch:
-        if "top branch" in msg_lower:
+        if isinstance(branch, list):
+            b_str = ", ".join(branch)
+            if "top" in msg_lower and "combined" in msg_lower:
+                m_top = re.search(r'\btop\s+(\d+)\b', msg_lower)
+                num_str = f" {m_top.group(1)}" if m_top else f" {len(branch)}"
+                context_qualifiers.append(f"recorded across the top{num_str} Branches combined ({b_str})")
+            elif "combined" in msg_lower:
+                context_qualifiers.append(f"recorded across Branches combined ({b_str})")
+            elif "top" in msg_lower:
+                m_top = re.search(r'\btop\s+(\d+)\b', msg_lower)
+                num_str = f" {m_top.group(1)}" if m_top else f" {len(branch)}"
+                context_qualifiers.append(f"recorded across the top{num_str} Branches ({b_str})")
+            else:
+                context_qualifiers.append(f"recorded across Branches ({b_str})")
+        elif "top branch" in msg_lower:
             context_qualifiers.append(f"recorded under top Branch {branch}")
         else:
             context_qualifiers.append(f"recorded under Branch {branch}")

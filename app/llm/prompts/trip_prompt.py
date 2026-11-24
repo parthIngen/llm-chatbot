@@ -51,7 +51,23 @@ TRIP DOMAIN RULES:
    - Monthwise: groupBy: ["runDate"], groupByFormat: {"runDate": "month"}, metrics: [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], sort: [{"field": "runDate", "order": "asc"}]
    - Unique Dimensions: "unique routes" -> groupBy: ["route"] | "unique destinations" -> groupBy: ["destination"] | "unique areas" -> groupBy: ["area"] | "unique branches" -> groupBy: ["branch"]
 
+10. COMBINED MULTIPLE ITEMS (Branches, Areas, Routes, Transporters, Sources, Destinations, Vehicles):
+   - When a query asks for trips across multiple named items or top N items combined (e.g. in parentheses or comma/and-separated list):
+     * Filter field operator must be "in" with list of values:
+       - "across the top 5 Branches combined (HUB, PNQ, BLR, HYD, NBM)" -> branch in ["HUB", "PNQ", "BLR", "HYD", "NBM"]
+       - "across top 3 Areas combined (DEL, BOM, BLR)" -> area in ["DEL", "BOM", "BLR"]
+       - "across Routes combined (R1, R2, R3)" -> Route in ["R1", "R2", "R3"]
+       - "across Sources combined (HUB, PNQ, BLR)" -> source in ["HUB", "PNQ", "BLR"]
+       - "across Destinations combined (HUB, PNQ, BLR)" -> destination in ["HUB", "PNQ", "BLR"]
+       - "across Vehicles combined (UP32AB1234, DL01CD5678)" -> vehicleNo in ["UP32AB1234", "DL01CD5678"]
+     * Do NOT include groupBy when asking for combined count across items (combined means union/total count).
+     * "select": []
+
 TRIP EXAMPLES:
+- "How many trips in August 2026 were recorded across the top 5 Branches combined (HUB, PNQ, BLR, HYD, NBM)?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "branch", "operator": "in", "value": ["HUB", "PNQ", "BLR", "HYD", "NBM"]}], "select": []}
+- "How many trips in August 2026 were recorded across top 3 Areas combined (DEL, BOM, BLR)?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "area", "operator": "in", "value": ["DEL", "BOM", "BLR"]}], "select": []}
 - "Show all running trips" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "running"}], "select": []}
 - "Show closed trips in September 2026" ->
