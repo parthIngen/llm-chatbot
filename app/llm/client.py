@@ -47,7 +47,7 @@ class LLMClient:
         self.provider = selected_provider
 
         self.last_used_provider = self.provider
-        self.last_used_model = getattr(settings, "GROQ_MODEL", "llama-3.1-8b-instant") if selected_provider == "groq" else (settings.LOCAL_LLM_MODEL or "qwen2.5-coder:0.5b")
+        self.last_used_model = getattr(settings, "GROQ_MODEL", "llama-3.1-8b-instant") if selected_provider == "groq" else (settings.LOCAL_LLM_MODEL or "qwen/qwen3.8-27b")
         self.last_fallback_to_local = False
 
         if selected_provider == "groq":
@@ -62,7 +62,7 @@ class LLMClient:
             base_url = (settings.LOCAL_LLM_BASE_URL or settings.LLM_BASE_URL).rstrip('/')
             self.url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
             self.api_key = settings.LOCAL_LLM_API_KEY or settings.LLM_API_KEY or "ollama"
-            self.model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "qwen2.5-coder:0.5b"
+            self.model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "qwen/qwen3.8-27b"
             self.max_tokens = settings.LOCAL_LLM_MAX_TOKENS or settings.LLM_MAX_TOKENS
             self.temperature = (
                 settings.LOCAL_LLM_TEMPERATURE
@@ -75,7 +75,7 @@ class LLMClient:
             base_url = settings.LLM_BASE_URL.rstrip('/')
             self.url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
             self.api_key = settings.LLM_API_KEY or "ollama"
-            self.model = settings.LLM_MODEL or "qwen2.5-coder:0.5b"
+            self.model = settings.LLM_MODEL or "qwen/qwen3.8-27b"
             self.max_tokens = settings.LLM_MAX_TOKENS
             self.temperature = settings.LLM_TEMPERATURE if settings.LLM_TEMPERATURE is not None else 0.0
             self.timeout = settings.LLM_TIMEOUT
@@ -97,7 +97,7 @@ class LLMClient:
         local_base_url = (settings.LOCAL_LLM_BASE_URL or settings.LLM_BASE_URL).rstrip('/')
         url = local_base_url if local_base_url.endswith("/chat/completions") else f"{local_base_url}/chat/completions"
         api_key = settings.LOCAL_LLM_API_KEY or settings.LLM_API_KEY or "ollama"
-        model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "qwen2.5-coder:0.5b"
+        model = settings.LOCAL_LLM_MODEL or settings.LLM_MODEL or "qwen/qwen3.8-27b"
         temperature = (
             settings.LOCAL_LLM_TEMPERATURE
             if settings.LOCAL_LLM_TEMPERATURE is not None
