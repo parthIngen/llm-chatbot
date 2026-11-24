@@ -125,9 +125,15 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
     if bool(re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_l)):
         return True
+    if bool(re.search(r'\b(?:fixed[\s-]*)?gps\s+distance\b|\bdistance\b', msg_l)):
+        return True
     if bool(re.search(r'\b(?:lis|list)\s+of\s+(?:the\s+)?vehicles?\b', msg_l)):
         return True
-    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master, extract_single_shipment_lookup, detect_top_device_vendors, detect_date_grouping
+    from app.llm.intent_detector import detect_vehicle_master, detect_route_master, detect_fleet_master, extract_single_shipment_lookup, detect_top_device_vendors, detect_date_grouping, extract_area, extract_branch, detect_unique_or_list_field
+    if detect_unique_or_list_field(message) is not None:
+        return True
+    if extract_area(message) is not None or extract_branch(message) is not None:
+        return True
     if detect_vehicle_master(message) is not None:
         return True
     if detect_route_master(message) is not None:
@@ -421,6 +427,29 @@ def build_fast_path_payload(
         payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "inactive"})
     elif bool(re.search(r'\btrips\s+with\s+fixed\s+e[\s-]?lock\b', msg_l)):
         payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
+
+    # Distance filters (e.g. Fixed GPS distance, Fixed E-Lock distance, Portable E-Lock distance, trip distance)
+    from app.llm.intent_detector import extract_distance_filters
+    dist_flts = extract_distance_filters(message)
+    if dist_flts:
+        field_name = dist_flts[0]["field"]
+        if field_name == "fixedGpsDistanceKm":
+            payload["analytics"] = [{"type": "gps"}]
+        elif field_name == "fixedLockDistanceKm":
+            payload["analytics"] = [{"type": "fixedlock"}]
+        elif field_name == "portableLockDistanceKm":
+            payload["analytics"] = [{"type": "portablelock"}]
+        elif field_name == "tripDistance":
+            payload.pop("analytics", None)
+
+        payload["filters"] = [
+            f for f in payload["filters"]
+            if not (isinstance(f, dict) and f.get("field") in [
+                "fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance",
+                "FixedELock", "PortableELock", "GPS"
+            ])
+        ]
+        payload["filters"].extend(dist_flts)
 
     # 4. Vendors
     from app.llm.intent_detector import extract_device_vendor
@@ -806,6 +835,42 @@ def build_fast_path_payload(
             payload["filters"].append({"field": "runDate", "operator": "gte", "value": s_d})
             payload["filters"].append({"field": "runDate", "operator": "lte", "value": e_d})
 
+    from app.llm.intent_detector import extract_area, extract_branch
+    area_val = extract_area(message)
+    branch_val = extract_branch(message)
+    if area_val or branch_val:
+        if bool(re.search(r'\bthis\s*month(?:20\d{2})?\b', msg_l)) or "this month" in msg_l:
+            yr_match = re.search(r'(?:20\d{2})', msg_l)
+            yr = yr_match.group(0) if yr_match else "2026"
+            payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "runDate")]
+            payload["filters"].append({"field": "runDate", "operator": "gte", "value": f"{yr}-11-01 00:00:00"})
+            payload["filters"].append({"field": "runDate", "operator": "lte", "value": f"{yr}-11-31 23:59:59"})
+        if area_val:
+            payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "area")]
+            payload["filters"].append({"field": "area", "operator": "eq", "value": area_val})
+        if branch_val:
+            payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") == "branch")]
+            payload["filters"].append({"field": "branch", "operator": "eq", "value": branch_val})
+        payload.pop("select", None)
+        payload.pop("analytics", None)
+
+    from app.llm.intent_detector import detect_unique_or_list_field
+    unique_field = detect_unique_or_list_field(message)
+    if unique_field:
+        payload["groupBy"] = [unique_field]
+        payload["select"] = []
+        payload.pop("metrics", None)
+        payload.pop("analytics", None)
+        payload.pop("groupByFormat", None)
+        payload.pop("sort", None)
+        payload["filters"] = [
+            f for f in payload["filters"]
+            if not (isinstance(f, dict) and f.get("field") in [
+                unique_field, "Route", "route", "RouteName", "routeName",
+                "destination", "source", "area", "branch"
+            ])
+        ]
+
     is_together_in_query = bool(re.search(r'\btogether\b', msg_l))
 
     def _fast_path_filter_sort_key(flt):
@@ -827,6 +892,14 @@ def build_fast_path_payload(
             return 4
         elif field == "runDate" and op == "lte":
             return 5
+        elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and op == "gte":
+            return 5.01
+        elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and op == "lte":
+            return 5.02
+        elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance"):
+            return 5.03
+        elif field in ("area", "branch"):
+            return 5.05
         elif not is_together_in_query and field in ("FixedELock", "fixed-elock-status", "fixedelock"):
             return 5.1
         elif not is_together_in_query and field in ("PortableELock", "portable-elock-status", "portableelock"):

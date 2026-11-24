@@ -333,7 +333,8 @@ async def chat_endpoint(
 
         if records and len(records) > 0:
             try:
-                excel_filename = generate_trips_excel(records)
+                norm_records = [{"Item": r} if not isinstance(r, dict) else r for r in records]
+                excel_filename = generate_trips_excel(norm_records)
                 base_url = str(http_request.base_url).rstrip("/")
                 download_url = f"{base_url}/api/v1/download/{excel_filename}"
             except Exception as exp_err:
@@ -371,7 +372,7 @@ async def chat_endpoint(
             if "{DOWNLOAD_URL}" in reply:
                 card_html = render_download_card_html(download_url, len(records))
                 reply = reply.replace("{DOWNLOAD_URL}", f"{download_url}\n{card_html}")
-            elif is_download_request or (is_list_query and len(records) > 10):
+            elif is_download_request or is_list_query:
                 if download_url not in reply:
                     card_html = render_download_card_html(download_url, len(records))
                     reply = reply.strip() + f"\n\nDownload Excel report: {download_url}\n{card_html}"

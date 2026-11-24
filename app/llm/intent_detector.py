@@ -1380,6 +1380,160 @@ _ATD_ATA_VALUE_MAP = {
     "na": "notcaptured",
 }
 
+def extract_distance_filters(message: str) -> List[Dict[str, str]]:
+    """
+    Extracts distance filters from message based on device context:
+    - Fixed GPS or GPS -> fixedGpsDistanceKm
+    - Fixed E-Lock -> fixedLockDistanceKm
+    - Portable E-Lock -> portableLockDistanceKm
+    - Distance only (no device) -> tripDistance
+
+    Supports:
+    - between X [km] and Y [km] -> gte: X, lte: Y
+    - exceeding / greater than / more than / above / over X [km] -> gte: X
+    - less than / under / below / up to X [km] -> lte: X
+    """
+    if not message:
+        return []
+    msg_l = message.lower()
+    if not re.search(r'\bdistance\b|\bkm\b|\bkms\b|\bkilometers?\b', msg_l):
+        return []
+
+    is_portable_elock = bool(re.search(r'\b(?:portab?le[\s-]*(?:e[\s-]?)?locks?|portablelock|portableelock)\b', msg_l))
+    is_fixed_elock = bool(re.search(r'\b(?:fixed[\s-]*(?:e[\s-]?)?locks?|fixedlock|fixedelock)\b', msg_l))
+    is_gps = bool(re.search(r'\b(?:fixed[\s-]*)?gps\b', msg_l))
+
+    if is_portable_elock:
+        field_name = "portableLockDistanceKm"
+    elif is_fixed_elock:
+        field_name = "fixedLockDistanceKm"
+    elif is_gps:
+        field_name = "fixedGpsDistanceKm"
+    else:
+        field_name = "tripDistance"
+
+    dist_filters = []
+    # 1. Between X and Y km
+    m_between = re.search(r'\b(?:between|from)\s+(\d+(?:\.\d+)?)\s*(?:km|kms|kilometers?)?\s*(?:to|and|-)\s*(\d+(?:\.\d+)?)\s*(?:km|kms|kilometers?)\b', msg_l)
+    if not m_between and re.search(r'\bdistance\b', msg_l):
+        m_between = re.search(r'\bdistance\s+(?:of\s+)?(?:between|from)\s+(\d+(?:\.\d+)?)\s*(?:km|kms|kilometers?)?\s*(?:to|and|-)\s*(\d+(?:\.\d+)?)\b', msg_l)
+    if m_between:
+        dist_filters.append({"field": field_name, "operator": "gte", "value": m_between.group(1)})
+        dist_filters.append({"field": field_name, "operator": "lte", "value": m_between.group(2)})
+        return dist_filters
+
+    # 2. Exceeding / Greater than / More than / Above / Over X km
+    m_gte = re.search(r'\b(?:exceeding|greater\s+than|more\s+than|above|over|>|>=)\s*(\d+(?:\.\d+)?)\s*(?:km|kms|kilometers?)\b', msg_l)
+    if not m_gte and re.search(r'\bdistance\b', msg_l):
+        m_gte = re.search(r'\bdistance\s*(?:exceeding|greater\s+than|more\s+than|above|over|>|>=)\s*(\d+(?:\.\d+)?)\b', msg_l)
+    if m_gte:
+        dist_filters.append({"field": field_name, "operator": "gte", "value": m_gte.group(1)})
+        return dist_filters
+
+    # 3. Less than / Under / Below / Up to X km
+    m_lte = re.search(r'\b(?:less\s+than|under|below|up\s+to|<=|<)\s*(\d+(?:\.\d+)?)\s*(?:km|kms|kilometers?)\b', msg_l)
+    if not m_lte and re.search(r'\bdistance\b', msg_l):
+        m_lte = re.search(r'\bdistance\s*(?:less\s+than|under|below|up\s+to|<=|<)\s*(\d+(?:\.\d+)?)\b', msg_l)
+    if m_lte:
+        dist_filters.append({"field": field_name, "operator": "lte", "value": m_lte.group(1)})
+        return dist_filters
+
+    return dist_filters
+
+_AREA_BRANCH_STOP_WORDS = {
+    "CODE", "WISE", "BREAKDOWN", "LIST", "NAME", "NAMES", "REPORT",
+    "RECORDED", "UTILIZED", "FOUND", "OPERATED", "USED", "ACTIVE",
+    "ON", "IN", "DURING", "WITH", "WITHOUT", "UNDER", "FOR", "OF",
+    "ACROSS", "THERE", "WERE", "ARE", "HAD", "HAVE", "HAS", "TRIPS",
+    "TRIP", "COUNT", "TOTAL", "UNIQUE", "DISTINCT"
+}
+
+def extract_area(message: str) -> Optional[str]:
+    """
+    Extracts area code from message.
+    e.g. 'under top Area DEL' -> 'DEL'
+         'under Area BLR' -> 'BLR'
+         'Area BOM' -> 'BOM'
+         'Area PNQ' -> 'PNQ'
+         'Area CCU' -> 'CCU'
+    """
+    if not message:
+        return None
+    if re.search(r'\b(?:unique|distinct)\s+areas?\b', message, re.IGNORECASE):
+        return None
+    m = re.search(r'\b(?:top\s+)?areas?\s*(?:[:=-]\s*|\s+)([a-zA-Z]{2,10})\b', message, re.IGNORECASE)
+    if m:
+        val = m.group(1).upper()
+        if val not in _AREA_BRANCH_STOP_WORDS:
+            return val
+    return None
+
+def extract_branch(message: str) -> Optional[str]:
+    """
+    Extracts branch code from message.
+    e.g. 'under Branch PNQ' -> 'PNQ'
+         'under top Branch HUB' -> 'HUB'
+         'under Branch BLR' -> 'BLR'
+         'under Branch HYD' -> 'HYD'
+         'under Branch NBM' -> 'NBM'
+    """
+    if not message:
+        return None
+    if re.search(r'\b(?:unique|distinct)\s+branch(?:es)?\b', message, re.IGNORECASE):
+        return None
+    m = re.search(r'\b(?:top\s+)?branch(?:es)?\s*(?:[:=-]\s*|\s+)([a-zA-Z0-9_-]{2,10})\b', message, re.IGNORECASE)
+    if m:
+        val = m.group(1).upper()
+        if val not in _AREA_BRANCH_STOP_WORDS:
+            return val
+    return None
+
+def detect_unique_or_list_field(message: str) -> Optional[str]:
+    """
+    Detects if the query is asking for unique count or a list of a specific field:
+    - route: unique routes, routes utilized, list of routes
+    - destination: unique destination locations, unique destinations, list of destinations
+    - source: unique source locations, unique origins, list of sources
+    - area: unique areas, list of areas
+    - branch: unique branches, list of branches
+    - transporter: unique transporters, list of transporters
+    """
+    if not message:
+        return None
+    msg_l = message.lower()
+
+    has_unique = bool(re.search(r'\b(?:unique|distinct|different|how\s+many\s+unique|how\s+many\s+distinct)\b', msg_l))
+    has_list = bool(re.search(r'\b(?:lis|list|show\s+all|get\s+all|which)\b', msg_l)) and not bool(re.search(r'\b(?:how\s+many|total\s+count)\b', msg_l))
+
+    if not (has_unique or has_list):
+        return None
+
+    # 1. Routes
+    if re.search(r'\b(?:routes?|route\s+names?)\b', msg_l) and not re.search(r'\broute\s+(?:master|type|category)\b', msg_l):
+        return "route"
+
+    # 2. Destination
+    if re.search(r'\b(?:destination\s+locations?|destinations?|dest\s+locations?|destination\s+points?|destination\s+sites?)\b', msg_l):
+        return "destination"
+
+    # 3. Source / Origin
+    if re.search(r'\b(?:source\s+locations?|sources?|origin\s+locations?|origins?|start\s+locations?)\b', msg_l):
+        return "source"
+
+    # 4. Area
+    if re.search(r'\b(?:areas?)\b', msg_l):
+        return "area"
+
+    # 5. Branch
+    if re.search(r'\b(?:branch(?:es)?)\b', msg_l):
+        return "branch"
+
+    # 6. Transporter
+    if re.search(r'\b(?:transporters?)\b', msg_l) and not re.search(r'\b(?:vehicles?|veh)\b', msg_l):
+        return "transporter"
+
+    return None
+
 class IntentDetector:
     def __init__(self, llm_client: LLMClient = None):
         provider = getattr(settings, "INTENT_LLM_PROVIDER", "groq")
@@ -1983,6 +2137,14 @@ class IntentDetector:
                     return 3
                 if fld == "runDate" and flt.get("operator") == "lte":
                     return 4
+                if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and flt.get("operator") == "gte":
+                    return 5
+                if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and flt.get("operator") == "lte":
+                    return 6
+                if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance"):
+                    return 7
+                if fld in ("area", "branch"):
+                    return 8
                 return 10
                 
             if "filters" not in query_payload or not isinstance(query_payload["filters"], list):
@@ -3342,6 +3504,14 @@ class IntentDetector:
                             return 4 if flt.get("operator") == "gte" else 5
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
                             return 6
+                    if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and flt.get("operator") == "gte":
+                        return 5.1
+                    if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and flt.get("operator") == "lte":
+                        return 5.2
+                    if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance"):
+                        return 5.3
+                    if fld in ("area", "branch"):
+                        return 5.4
                     if fld == "shipmentMethod":
                         return 7
                     if str(fld).lower() in ("atd", "ata"):
@@ -4831,6 +5001,14 @@ class IntentDetector:
                     return 3
                 elif field == "runDate" and op == "lte":
                     return 4
+                elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and op == "gte":
+                    return 4.1
+                elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and op == "lte":
+                    return 4.2
+                elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance"):
+                    return 4.3
+                elif field in ("area", "branch"):
+                    return 4.4
                 elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
                     return 4.5
                 elif field in ("source", "destination", "From", "To"):
@@ -5990,6 +6168,14 @@ class IntentDetector:
                             return 4 if flt.get("operator") == "gte" else 5
                         if fld in ("fixed-gps-status", "fixed-elock-status", "portable-elock-status", "GPS", "FixedELock", "PortableELock"):
                             return 6
+                    if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and flt.get("operator") == "gte":
+                        return 5.1
+                    if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and flt.get("operator") == "lte":
+                        return 5.2
+                    if fld in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance"):
+                        return 5.3
+                    if fld in ("area", "branch"):
+                        return 5.4
                     if fld == "shipmentMethod":
                         return 7
                     if str(fld).lower() in ("atd", "ata"):
@@ -7554,6 +7740,14 @@ class IntentDetector:
                     return 3
                 elif field == "runDate" and op == "lte":
                     return 4
+                elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and op == "gte":
+                    return 4.1
+                elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance") and op == "lte":
+                    return 4.2
+                elif field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance"):
+                    return 4.3
+                elif field in ("area", "branch"):
+                    return 4.4
                 elif field in ("vehicleMaster", "vehicle_master", "routeMaster", "route_master", "fleetMaster", "fleet_master"):
                     return 4.5
                 elif field in ("source", "destination", "From", "To"):

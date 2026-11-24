@@ -25,12 +25,21 @@ def build_natural_response(
     # Extract filter fields
     filter_map: Dict[str, Any] = {}
     filter_ops: Dict[str, str] = {}
-    for f in filters:
+    dist_field = None
+    dist_gte = None
+    dist_lte = None
+    for f in (filters or []):
         if not isinstance(f, dict):
             continue
         field = f.get("field")
         val = f.get("value")
         op = f.get("operator", "eq")
+        if field in ("fixedGpsDistanceKm", "fixedLockDistanceKm", "portableLockDistanceKm", "tripDistance"):
+            dist_field = field
+            if op in ("gte", "gt"):
+                dist_gte = str(val)
+            elif op in ("lte", "lt"):
+                dist_lte = str(val)
         if field == "runDate":
             if op == "gte" and not start_date:
                 start_date = val
@@ -359,23 +368,51 @@ def build_natural_response(
             device_qualifiers.append("using Portable E-Lock only")
     elif filter_map.get("portablelockna"):
         device_qualifiers.append("where Portable E-Lock is not available")
-    elif filter_map.get("fixedlock"):
-        if fixed_elock not in ("active", "inactive"):
+    dist_label = None
+    if dist_field == "fixedGpsDistanceKm":
+        dist_label = "Fixed GPS distance"
+    elif dist_field == "fixedLockDistanceKm":
+        dist_label = "Fixed E-Lock distance"
+    elif dist_field == "portableLockDistanceKm":
+        dist_label = "Portable E-Lock distance"
+    elif dist_field == "tripDistance":
+        dist_label = "trip distance"
+
+    dist_qual = None
+    if dist_label:
+        if dist_gte and dist_lte:
+            dist_qual = f"recording {dist_label} between {dist_gte} km and {dist_lte} km"
+        elif dist_gte:
+            dist_qual = f"recording {dist_label} exceeding {dist_gte} km"
+        elif dist_lte:
+            dist_qual = f"recording {dist_label} up to {dist_lte} km"
+
+    if filter_map.get("fixedlock"):
+        if dist_field == "fixedLockDistanceKm" and dist_qual:
+            device_qualifiers.append(dist_qual)
+        elif fixed_elock not in ("active", "inactive"):
             v_lock = filter_map.get("vendorfixedelock")
             if v_lock:
                 device_qualifiers.append(f"equipped with {v_lock} Fixed E-Lock")
             else:
                 device_qualifiers.append("equipped with Fixed E-Lock")
     elif filter_map.get("portablelock"):
-        if portable_elock not in ("active", "inactive"):
+        if dist_field == "portableLockDistanceKm" and dist_qual:
+            device_qualifiers.append(dist_qual)
+        elif portable_elock not in ("active", "inactive"):
             v_lock = filter_map.get("vendorportableelock")
             if v_lock:
                 device_qualifiers.append(f"equipped with {v_lock} Portable E-Lock")
             else:
                 device_qualifiers.append("equipped with Portable E-Lock")
     elif filter_map.get("gps"):
-        if gps not in ("active", "inactive"):
+        if dist_field == "fixedGpsDistanceKm" and dist_qual:
+            device_qualifiers.append(dist_qual)
+        elif gps not in ("active", "inactive"):
             device_qualifiers.append("with Fixed GPS")
+
+    if dist_qual and not any(dist_qual in q for q in device_qualifiers):
+        device_qualifiers.append(dist_qual)
 
     # Vehicle Master qualifier
     vm_val = str(filter_map.get("vehicleMaster") or filter_map.get("vehicle_master", "")).lower().strip()
@@ -425,6 +462,20 @@ def build_natural_response(
         reg_str = ", ".join(region) if isinstance(region, list) else region
         context_qualifiers.append(f"in the {reg_str} region")
 
+    area = filter_map.get("area")
+    if area:
+        if "top area" in msg_lower:
+            context_qualifiers.append(f"recorded under top Area {area}")
+        else:
+            context_qualifiers.append(f"recorded under Area {area}")
+
+    branch = filter_map.get("branch")
+    if branch:
+        if "top branch" in msg_lower:
+            context_qualifiers.append(f"recorded under top Branch {branch}")
+        else:
+            context_qualifiers.append(f"recorded under Branch {branch}")
+
     if state_val:
         st_str = " and ".join(state_val) if isinstance(state_val, list) else state_val
         if "generated" in msg_lower:
@@ -455,6 +506,23 @@ def build_natural_response(
         date_str = f" {date_clause}" if date_clause else ""
         return f"Total {total_count} valid trips recorded by top transporters{date_str}. It does not include cancelled trips."
 
+    from app.llm.intent_detector import detect_unique_or_list_field
+    unique_field = detect_unique_or_list_field(message) if message else None
+    if unique_field:
+        date_str = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+        if unique_field == "route":
+            return f"Total {total_count} unique routes were utilized across valid trips{date_str}. It does not include cancelled trips."
+        elif unique_field == "destination":
+            return f"Total {total_count} unique destination locations were there across valid trips{date_str}. It does not include cancelled trips."
+        elif unique_field == "source":
+            return f"Total {total_count} unique source locations recorded valid trips{date_str}. It does not include cancelled trips."
+        elif unique_field == "area":
+            return f"Total {total_count} unique Areas recorded valid trips{date_str}. It does not include cancelled trips."
+        elif unique_field == "branch":
+            return f"Total {total_count} unique Branches recorded valid trips{date_str}. It does not include cancelled trips."
+        elif unique_field == "transporter":
+            return f"Total {total_count} unique transporters operated valid trips{date_str}. It does not include cancelled trips."
+
     sentence_parts = [f"Total {total_count} {prefix_str}{trip_noun}{dev_str} found{ctx_str}".strip()]
     if date_clause:
         if not ctx_str and not dev_str and not prefix_str and date_clause.startswith("in date range"):
@@ -466,6 +534,78 @@ def build_natural_response(
     if trip_status == "valid":
         resp += " It does not include cancelled trips."
     return resp
+
+
+
+def _render_items_list_html_card(
+    items: List[str],
+    total_items: int,
+    title: str,
+    column_label: str,
+    icon: str = "📋"
+) -> str:
+    """
+    Renders an elegant, modern HTML card displaying items (routes, destinations, sources, areas, branches, transporters) in a sleek table.
+    """
+    display_items = items[:10]
+    plural_suffix = "es" if column_label.lower().endswith(("sh", "ch", "x", "s", "z")) else "s"
+    badge_text = f"Showing 10 of {total_items:,}" if total_items > 10 else f"{total_items} {column_label.lower()}{plural_suffix if total_items != 1 else ''}"
+
+    rows_html = []
+    for idx, item in enumerate(display_items, 1):
+        bg = "#ffffff" if idx % 2 != 0 else "#f8fafc"
+        clean_item = str(item).strip()
+        row = (
+            f'<tr style="border-bottom: 1px solid #f1f5f9; background: {bg};">\n'
+            f'  <td style="padding: 10px 16px; color: #64748b; font-weight: 600; width: 44px; text-align: center; font-size: 12px;">{idx}</td>\n'
+            f'  <td style="padding: 10px 16px;">\n'
+            f'    <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; font-weight: 700; color: #0f172a; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; border: 1px solid #cbd5e1; letter-spacing: 0.5px;">\n'
+            f'      {clean_item}\n'
+            f'    </span>\n'
+            f'  </td>\n'
+            f'</tr>'
+        )
+        rows_html.append(row)
+
+    tbody_content = "\n".join(rows_html)
+
+    footer_note = ""
+    if total_items > 10:
+        footer_note = (
+            f'<div style="background: #f8fafc; padding: 8px 16px; border-top: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #64748b;">\n'
+            f'  <span>Showing first 10 of {total_items:,} {column_label.lower()}{plural_suffix}</span>\n'
+            f'  <span style="font-weight: 500; color: #3b82f6;">Complete list available in Excel export</span>\n'
+            f'</div>\n'
+        )
+
+    html = (
+        f'<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; '
+        f'max-width: 650px; margin: 12px 0; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; '
+        f'box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden;">\n'
+        f'  <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); padding: 12px 16px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between;">\n'
+        f'    <div style="display: flex; align-items: center; gap: 8px;">\n'
+        f'      <span style="font-size: 16px;">{icon}</span>\n'
+        f'      <span style="font-weight: 600; font-size: 14px; color: #1e293b;">{title}</span>\n'
+        f'    </div>\n'
+        f'    <span style="background: #e0e7ff; color: #3730a3; font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 9999px;">\n'
+        f'      {badge_text}\n'
+        f'    </span>\n'
+        f'  </div>\n'
+        f'  <table style="width: 100%; border-collapse: collapse; font-size: 13px;">\n'
+        f'    <thead>\n'
+        f'      <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">\n'
+        f'        <th style="padding: 8px 16px; color: #64748b; font-weight: 600; width: 44px; text-align: center;">#</th>\n'
+        f'        <th style="padding: 8px 16px; color: #64748b; font-weight: 600;">{column_label}</th>\n'
+        f'      </tr>\n'
+        f'    </thead>\n'
+        f'    <tbody>\n'
+        f'{tbody_content}\n'
+        f'    </tbody>\n'
+        f'  </table>\n'
+        f'{footer_note}'
+        f'</div>'
+    )
+    return html
 
 
 def _render_vehicle_list_html_card(vehicle_list: List[str], total_veh: int) -> str:
@@ -1628,6 +1768,65 @@ class ResponseGenerator:
                     return f"{header}\n\n{card_html}\n\n{footer}"
 
             return natural_formatted_response
+
+        # Check if query or entities is asking for unique field grouping (route, destination, source, area, branch, transporter)
+        from app.llm.intent_detector import detect_unique_or_list_field
+        unique_group_field = None
+        if entities and isinstance(entities.get("groupBy"), list) and len(entities["groupBy"]) == 1:
+            if entities["groupBy"][0] in ("route", "destination", "source", "area", "branch", "transporter"):
+                unique_group_field = entities["groupBy"][0]
+        if not unique_group_field and message:
+            unique_group_field = detect_unique_or_list_field(message)
+
+        if unique_group_field:
+            is_list_query = bool(
+                re.search(r'\b(?:lis|list|which|show\s+all|get\s+all)\b', msg_l)
+                and not re.search(r'\b(?:how\s+many|count\s+of|total\s+count)\b', msg_l)
+            )
+            items = []
+            if isinstance(api_data, list):
+                for r in api_data:
+                    if isinstance(r, dict):
+                        val = r.get(unique_group_field) or r.get(unique_group_field.lower()) or next((v for v in r.values() if isinstance(v, str)), None)
+                        if val:
+                            items.append(str(val))
+                    elif isinstance(r, str):
+                        items.append(r)
+
+            field_labels = {
+                "route": ("Routes Utilized", "Route", "🛣️"),
+                "destination": ("Destination Locations", "Destination Location", "📍"),
+                "source": ("Source Locations", "Source Location", "📍"),
+                "area": ("Areas Recorded", "Area", "🏢"),
+                "branch": ("Branches Recorded", "Branch", "🏬"),
+                "transporter": ("Transporters", "Transporter", "🚚"),
+            }
+            title, col_label, icon = field_labels.get(unique_group_field, (f"{unique_group_field.title()} List", unique_group_field.title(), "📋"))
+            total_items = len(items) if items else total_trips
+            col_plural = col_label.lower() + ("es" if col_label.lower().endswith(("sh", "ch", "x", "s", "z")) else "s")
+
+            if is_list_query and items:
+                date_clause = f" in date range from {start_date} to {end_date}" if start_date and end_date else ""
+                card_html = _render_items_list_html_card(items, len(items), title, col_label, icon)
+                if len(items) <= 10:
+                    header = f"Total {len(items)} unique {col_plural} were found{date_clause}:"
+                    footer = f"Download complete Excel list: {{DOWNLOAD_URL}}"
+                    return f"{header}\n\n{card_html}\n\n{footer}"
+                else:
+                    header = f"Total {len(items)} unique {col_plural} were found{date_clause}. Here is the list of first 10 {col_plural}:"
+                    footer = f"Showing first 10 of {len(items)} {col_plural}. Download complete Excel list: {{DOWNLOAD_URL}}"
+                    return f"{header}\n\n{card_html}\n\n{footer}"
+
+            return build_natural_response(
+                total_count=total_items,
+                filters=entities.get("filters") if entities else None,
+                analytics=entities.get("analytics") if entities else None,
+                is_distinct_vehicle=False,
+                is_distinct_transporter=False,
+                message=message,
+                start_date=start_date,
+                end_date=end_date,
+            )
 
         if not _is_detailed_trip_list:
             if start_date and end_date:
