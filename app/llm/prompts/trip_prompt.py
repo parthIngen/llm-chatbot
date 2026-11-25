@@ -63,7 +63,25 @@ TRIP DOMAIN RULES:
      * Do NOT include groupBy when asking for combined count across items (combined means union/total count).
      * "select": []
 
+11. TOP N RANKED ENTITIES BY TRIP VOLUME / COUNT (e.g. Which top 5 Branches / Areas / states / transporter / vehicle generated highest trip volumes?):
+   - When a query asks for top N entities ranked by highest trip volume/count (without specifying named items in parentheses):
+     * Do NOT filter by that entity (do not add an eq/in filter on the field).
+     * groupBy: ["<dimension>"] (e.g. "branch", "area", "state", "transporter", "vehicleNo", "Route", "shipmentMethod", "region", "source", "destination").
+     * metrics: [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
+     * sort: [{"field": "TotalTrip", "order": "desc"}]
+     * "select": []
+
 TRIP EXAMPLES:
+- "Which top 5 Branches generated the highest trip counts in August 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["branch"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "TotalTrip", "order": "desc"}]}
+- "Which top 5 Areas generated the highest trip counts in August 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["area"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "TotalTrip", "order": "desc"}]}
+- "Which top 5 states generated the highest trip volumes in August 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["state"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "TotalTrip", "order": "desc"}]}
+- "Which top 5 transporter generated the highest trip volumes in August 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["transporter"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "TotalTrip", "order": "desc"}]}
+- "Which top 5 vehicle generated the highest trip volumes in August 2026?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["vehicleNo"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "TotalTrip", "order": "desc"}]}
 - "How many trips in August 2026 were recorded across the top 5 Branches combined (HUB, PNQ, BLR, HYD, NBM)?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "branch", "operator": "in", "value": ["HUB", "PNQ", "BLR", "HYD", "NBM"]}], "select": []}
 - "How many trips in August 2026 were recorded across top 3 Areas combined (DEL, BOM, BLR)?" ->

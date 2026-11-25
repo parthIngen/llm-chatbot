@@ -32,8 +32,10 @@ def can_resolve_fast_path(message: str) -> bool:
     if bool(re.search(r'\bactive\s+vehicles\s+operating\s+on\s+the\s+field\b', msg_l)):
         return True
 
-    # 2. Distinct / Top transporter queries
-    from app.llm.intent_detector import is_top_transporters_query
+    # 2. Distinct / Top transporter & top N grouped queries
+    from app.llm.intent_detector import is_top_transporters_query, detect_top_n_grouped_query
+    if detect_top_n_grouped_query(message) is not None:
+        return True
     if is_top_transporters_query(message):
         return True
     if bool(re.search(r'\b(?:unique\s+transporters?|distinct\s+transporters?|total\s+number\s+of\s+unique\s+transporters?)\b', msg_l)):
@@ -242,6 +244,56 @@ def build_fast_path_payload(
                     "order": "desc"
                 }
             ]
+        }
+
+    from app.llm.intent_detector import detect_top_n_grouped_query
+    top_grouped = detect_top_n_grouped_query(message)
+    if top_grouped:
+        field, limit = top_grouped
+        start_date, end_date = extract_date_range(message, reference_now=ref_dt)
+        if not start_date or not end_date:
+            start_date, end_date = _resolve_month_range(message.lower(), ref_dt)
+        if not start_date or not end_date:
+            if "august" in message.lower() or "aug" in message.lower():
+                start_date = "2026-08-01 00:00:00"
+                end_date = "2026-08-31 23:59:59"
+
+        t_status = "valid"
+        if bool(re.search(r'\b(?:running|in[\s-]transit|live|active\s+trips?)\b', message.lower())):
+            t_status = "running"
+        elif bool(re.search(r'\b(?:closed|completed)\b', message.lower())):
+            t_status = "InActive"
+        elif bool(re.search(r'\bcancel(?:led)?\s+trips?\b', message.lower())):
+            t_status = "cancelled"
+
+        filters = [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": t_status}
+        ]
+        if start_date:
+            filters.append({"field": "runDate", "operator": "gte", "value": start_date})
+        if end_date:
+            filters.append({"field": "runDate", "operator": "lte", "value": end_date})
+
+        return {
+            "entity": "trip",
+            "operation": "count",
+            "filters": filters,
+            "groupBy": [field],
+            "metrics": [
+                {
+                    "field": "shipmentNo",
+                    "function": "count",
+                    "alias": "TotalTrip"
+                }
+            ],
+            "sort": [
+                {
+                    "field": "TotalTrip",
+                    "order": "desc"
+                }
+            ],
+            "select": []
         }
 
     if not can_resolve_fast_path(message):

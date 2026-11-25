@@ -2,7 +2,7 @@ import json
 import datetime
 import calendar
 import re
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 from app.llm.client import LLMClient, LLMRateLimitError
 from app.llm.prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_PROMPT_TEMPLATE, route_prompt
 from app.llm.fast_path import build_fast_path_payload
@@ -612,8 +612,79 @@ _TRANSPORTER_STOP_WORDS = {
     "highest", "volume", "volumes", "leading", "top", "most", "maximum"
 }
 
+def detect_top_n_grouped_query(text: str) -> Optional[Tuple[str, int]]:
+    """
+    Detects queries asking for top N ranked entities by trip volume or trip count.
+    Returns (field_name, limit) or None.
+    Examples:
+    - 'Which top 5 Branches generated the highest trip counts in August 2026?' -> ('branch', 5)
+    - 'Which top 5 Areas generated the highest trip counts in August 2026?' -> ('area', 5)
+    - 'Which top 5 states generated the highest trip volumes in August 2026?' -> ('state', 5)
+    - 'Which top 5 transporter generated the highest trip volumes in August 2026?' -> ('transporter', 5)
+    - 'Which top 5 vehicle generated the highest trip volumes in August 2026?' -> ('vehicleNo', 5)
+    - 'Which top 10 routes had the highest trip volumes in August 2026?' -> ('Route', 10)
+    - 'Top 3 shipment methods by trip count in August 2026' -> ('shipmentMethod', 3)
+    - 'Top 4 regions by trip volumes in August 2026' -> ('region', 4)
+    """
+    if not text:
+        return None
+    text_l = text.lower()
+
+    # If query has combined with explicit parenthesized list of codes, it is a multi-item filter query, not top-N ranking
+    if re.search(r'\bcombined\b', text_l) and re.search(r'\([^)]+\)', text):
+        return None
+
+    # Check for top/highest volume/count intent
+    has_top = bool(re.search(r'\b(?:top\s*\d*|highest|maximum|most|leading|max)\b', text_l))
+    has_trip_metric = bool(re.search(r'\b(?:trip\s+(?:volumes?|counts?)|trips?|volumes?|counts?)\b', text_l))
+    has_pattern = bool(
+        re.search(r'\b(?:top\s*\d*|highest|maximum|most|leading|max)\b.*\b(?:trip\s+(?:volumes?|counts?)|trips?|volumes?|counts?)\b', text_l)
+        or re.search(r'\b(?:trip\s+(?:volumes?|counts?)|trips?|volumes?|counts?)\b.*\b(?:top\s*\d*|highest|maximum|most|leading|max)\b', text_l)
+        or re.search(r'\bby\s+(?:trip\s+(?:volumes?|counts?)|trips?|highest\s+trips?)\b', text_l)
+        or re.search(r'\bgenerated\s+(?:the\s+)?(?:highest|most|maximum|top)\b', text_l)
+    )
+    if not (has_top and has_trip_metric and has_pattern):
+        return None
+
+    # Extract limit n
+    m_n = re.search(r'\btop\s*(\d+)\b', text_l)
+    if not m_n:
+        m_n = re.search(r'\b(\d+)\s+(?:highest|top|leading)\b', text_l)
+    if not m_n:
+        m_n = re.search(r'\b(?:which|show|list)\s+(\d+)\b', text_l)
+    limit = int(m_n.group(1)) if m_n else 5
+
+    # Identify dimension field
+    if re.search(r'\b(?:shipment\s+methods?|feeder\s+types?|route\s+types?|shipment\s+types?)\b', text_l):
+        field = "shipmentMethod"
+    elif re.search(r'\b(?:transporters?|contractors?|fleet)\b', text_l):
+        field = "transporter"
+    elif re.search(r'\b(?:vehicles?|trucks?|veh)\b', text_l):
+        field = "vehicleNo"
+    elif re.search(r'\b(?:branch(?:es)?)\b', text_l):
+        field = "branch"
+    elif re.search(r'\b(?:areas?)\b', text_l):
+        field = "area"
+    elif re.search(r'\b(?:states?)\b', text_l):
+        field = "state"
+    elif re.search(r'\b(?:routes?)\b', text_l):
+        field = "Route"
+    elif re.search(r'\b(?:regions?)\b', text_l):
+        field = "region"
+    elif re.search(r'\b(?:sources?|origins?)\b', text_l):
+        field = "source"
+    elif re.search(r'\b(?:destinations?)\b', text_l):
+        field = "destination"
+    else:
+        return None
+
+    return (field, limit)
+
 def is_top_transporters_query(text: str) -> bool:
     """Detects whether query asks for top transporters by trip volume/count."""
+    res = detect_top_n_grouped_query(text)
+    if res is not None and res[0] == "transporter":
+        return True
     text_l = text.lower()
     if not bool(re.search(r'\btransporters?\b', text_l)):
         return False
@@ -1784,6 +1855,8 @@ def detect_unique_or_list_field(message: str) -> Optional[str]:
     - transporter: unique transporters, list of transporters
     """
     if not message:
+        return None
+    if detect_top_n_grouped_query(message) is not None:
         return None
     msg_l = message.lower()
 
