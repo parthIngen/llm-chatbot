@@ -878,11 +878,13 @@ def build_fast_path_payload(
         payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no"))]
         payload["filters"].append({"field": "vehicleNo", "operator": "in", "value": v_list})
     else:
+        from app.llm.intent_detector import is_valid_indian_vehicle_no
         veh_match = re.search(r'\b([A-Z]{2}\s*\d{1,2}\s*[A-Z]{1,3}\s*\d{4})\b', message)
         if veh_match:
             veh_no = re.sub(r'\s+', '', veh_match.group(1)).upper()
-            payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no"))]
-            payload["filters"].append({"field": "vehicleNo", "operator": "eq", "value": "UP32AB1234" if "UP32AB1234" in veh_no else veh_no})
+            if is_valid_indian_vehicle_no(veh_no):
+                payload["filters"] = [f for f in payload["filters"] if not (isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no"))]
+                payload["filters"].append({"field": "vehicleNo", "operator": "eq", "value": "UP32AB1234" if "UP32AB1234" in veh_no else veh_no})
 
     # 6a. Route filter
     from app.llm.intent_detector import extract_route

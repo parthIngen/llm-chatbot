@@ -471,7 +471,7 @@ def detect_top_device_vendors(text: str) -> Optional[Dict[str, str]]:
         }
     elif bool(re.search(r'\bfixed[\s-]*(?:e[\s-]?locks?|locks?|elocks?)\b', text_l)):
         return {
-            "analytics_type": "fixedelock",
+            "analytics_type": "fixedlock",
             "vendor_field": "vendorfixedelock",
             "label": "Fixed E-Lock"
         }
@@ -1856,6 +1856,35 @@ def extract_route(message: str) -> Optional[Union[str, List[str]]]:
             return val
     return None
 
+VALID_INDIAN_STATE_CODES = {
+    "AN", "AP", "AR", "AS", "BR", "CG", "CH", "DD", "DL", "DN", "GA", "GJ",
+    "HP", "HR", "JH", "JK", "KA", "KL", "LA", "LD", "MH", "ML", "MN", "MP",
+    "MZ", "NL", "OD", "OR", "PB", "PY", "RJ", "SK", "TN", "TR", "TS", "UK",
+    "UP", "US", "WB", "BH"
+}
+_VEHICLE_MONTH_ABBRS = {
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
+}
+
+def is_valid_indian_vehicle_no(cand: str) -> bool:
+    """Validates whether a string is a genuine Indian vehicle registration number (e.g. UP32AB1234, DL01CD5678).
+    Prevents date ranges like 'to 24 nov 2026' from falsely matching as vehicle plates.
+    """
+    if not cand:
+        return False
+    clean = re.sub(r'\s+', '', str(cand)).upper()
+    # Match standard Indian registration number format: 2-letter state code + 1-2 digit RTO code + 1-3 letter series + 4 digit number
+    m = re.match(r'^([A-Z]{2})(\d{1,2})([A-Z]{1,3})(\d{4})$', clean)
+    if not m:
+        return False
+    state_code, rto_code, series, num = m.groups()
+    if state_code not in VALID_INDIAN_STATE_CODES:
+        return False
+    # If the series is a 3-letter month and num is a valid year (e.g. 'NOV 2026'), it's a date range, not a plate!
+    if series in _VEHICLE_MONTH_ABBRS and 2000 <= int(num) <= 2099:
+        return False
+    return True
+
 def extract_vehicle_list(message: str) -> Optional[List[str]]:
     """
     Extracts multiple vehicle numbers from message.
@@ -1868,12 +1897,15 @@ def extract_vehicle_list(message: str) -> Optional[List[str]]:
         raw_list = m_paren.group(1)
         vehs = re.findall(r'\b[A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4}\b', raw_list)
         if vehs:
-            return [re.sub(r'\s+', '', v).upper() for v in vehs]
+            valid = [re.sub(r'\s+', '', v).upper() for v in vehs if is_valid_indian_vehicle_no(v)]
+            if valid:
+                return valid
     if detect_top_n_grouped_query(message) is not None:
         return None
     all_vehs = re.findall(r'\b[A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4}\b', message)
-    if len(all_vehs) > 1:
-        return [re.sub(r'\s+', '', v).upper() for v in all_vehs]
+    valid = [re.sub(r'\s+', '', v).upper() for v in all_vehs if is_valid_indian_vehicle_no(v)]
+    if len(valid) > 1:
+        return valid
     return None
 
 def extract_region(message: str) -> Optional[Union[str, List[str]]]:
@@ -4786,13 +4818,14 @@ class IntentDetector:
 
             # --- Vehicle Number Post-Processing ---
             has_vehicle_filter = any(isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no") for f in query_payload.get("filters", []))
-            if not has_vehicle_filter and not _is_distinct_vehicle_query and not _is_active_vehicle_query and not _is_no_gps_vehicle_query:
+            is_top_n = detect_top_n_grouped_query(message) is not None
+            if not has_vehicle_filter and not _is_distinct_vehicle_query and not _is_active_vehicle_query and not _is_no_gps_vehicle_query and not is_top_n:
                 veh_match = re.search(r'\b(?:vehicle(?:\s*(?:no|number|num))?\s*[:=]?\s*|trips\s+of\s+)?([A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4})\b', message, re.IGNORECASE)
                 if not veh_match:
                     veh_match = re.search(r'\bvehicle\s+(?:no|number|num|#)\s*[:=]?\s*([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
                 if veh_match:
                     v_val = re.sub(r'\s+', '', veh_match.group(1)).strip().upper()
-                    if v_val.lower() not in _STOP_LOCATION_WORDS and not v_val.isdigit() and len(v_val) > 2 and any(c.isdigit() for c in v_val):
+                    if is_valid_indian_vehicle_no(v_val):
                         query_payload["filters"].append({
                             "field": "vehicleNo",
                             "operator": "eq",
@@ -8169,13 +8202,14 @@ class IntentDetector:
 
             # --- Vehicle Number Fallback Post-Processing ---
             fb_has_vehicle = any(isinstance(f, dict) and f.get("field") in ("vehicleNo", "vehicle_no") for f in fallback_payload.get("filters", []))
-            if not fb_has_vehicle and not fb_is_distinct_vehicle_query and not fb_is_active_vehicle_query and not fb_is_no_gps_vehicle_query:
+            fb_is_top_n = detect_top_n_grouped_query(message) is not None
+            if not fb_has_vehicle and not fb_is_distinct_vehicle_query and not fb_is_active_vehicle_query and not fb_is_no_gps_vehicle_query and not fb_is_top_n:
                 veh_match = re.search(r'\b(?:vehicle(?:\s*(?:no|number|num))?\s*[:=]?\s*|trips\s+of\s+)?([A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4})\b', message, re.IGNORECASE)
                 if not veh_match:
                     veh_match = re.search(r'\bvehicle\s+(?:no|number|num|#)\s*[:=]?\s*([A-Za-z0-9_-]+)\b', message, re.IGNORECASE)
                 if veh_match:
                     v_val = re.sub(r'\s+', '', veh_match.group(1)).strip().upper()
-                    if v_val.lower() not in _STOP_LOCATION_WORDS and not v_val.isdigit() and len(v_val) > 2 and any(c.isdigit() for c in v_val):
+                    if is_valid_indian_vehicle_no(v_val):
                         fallback_payload["filters"].append({
                             "field": "vehicleNo",
                             "operator": "eq",
