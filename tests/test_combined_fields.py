@@ -243,4 +243,223 @@ def test_top_5_transporters_html_response_formatting():
     assert "3,200 trips" in response
 
 
+def test_highest_trip_in_which_region_payload_and_multi_turn_response():
+    from app.llm.response_generator import ResponseGenerator
+    query = "highest trip in which region"
+    assert can_resolve_fast_path(query) is True
+    payload = build_fast_path_payload(query)
+    assert payload is not None
+    assert payload["groupBy"] == ["region"]
+    assert payload["metrics"] == [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
+    assert payload["sort"] == [{"field": "TotalTrip", "order": "desc"}]
+
+    # In turn 2, user sends "in aug", entities is populated with date range and preserved groupBy/sort
+    rg = ResponseGenerator()
+    message = "in aug"
+    entities = {
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ],
+        "select": [],
+        "groupBy": ["region"],
+        "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}],
+        "sort": [{"field": "TotalTrip", "order": "desc"}]
+    }
+    api_data = [
+        {"TotalTrip": 60337, "region": "NORTH"},
+        {"TotalTrip": 54135, "region": "WEST"},
+        {"TotalTrip": 43699, "region": "SOUTH"},
+        {"TotalTrip": 14786, "region": "EAST"},
+        {"TotalTrip": 580, "region": ""},
+        {"TotalTrip": 2, "region": None}
+    ]
+
+    response = _run_sync(rg.generate_response(message, api_data, "test_session", entities))
+
+    # Must state the winning region directly
+    assert "highest trip volume in August 2026 was recorded in the **NORTH** region with **60,337 valid trips**" in response
+    # Must NOT say "Total 6 valid trips found"
+    assert "Total 6 valid trips found" not in response
+    # Must render styled table
+    assert "<table" in response
+    assert "NORTH" in response
+    assert "WEST" in response
+    assert "SOUTH" in response
+    assert "EAST" in response
+    # Empty string and None regions must be filtered out
+    assert response.count("<tr style=\"border-bottom: 1px solid #f1f5f9;") == 4
+    assert "60,337 trips" in response
+    assert "54,135 trips" in response
+
+
+# ==============================================================================
+# TESTS FOR CLOSE BY DEVICE QUERIES (Primary, Secondary, Tertiary, Comparison)
+# ==============================================================================
+
+@pytest.mark.parametrize("query,expected_device", [
+    ("How many trips in August 2026 were closed by Primary Close By Device?", "Primary"),
+    ("How many  trips in August 2026 were closed by Primary Close By Device?", "Primary"),
+    ("How many trips in August 2026 were closed by Secondary Close By Device?", "Secondary"),
+    ("How many  trips in August 2026 were closed by Secondary Close By Device?", "Secondary"),
+    ("How many trips in August 2026 were closed by Tertiary Close By Device?", "Tertiary"),
+    ("How many  trips in August 2026 were closed by Tertiary Close By Device?", "Tertiary"),
+])
+def test_close_by_device_single_payload(query, expected_device):
+    assert can_resolve_fast_path(query) is True
+    payload = build_fast_path_payload(query)
+    assert payload is not None
+    assert payload["entity"] == "trip"
+    assert payload["operation"] == "count"
+    assert payload["select"] == []
+    assert "groupBy" not in payload
+
+    expected_filters = [
+        {"field": "groupId", "operator": "eq", "value": "0041"},
+        {"field": "tripStatus", "operator": "eq", "value": "valid"},
+        {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+        {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+        {"field": "closeByDevice", "operator": "eq", "value": expected_device}
+    ]
+    assert payload["filters"] == expected_filters
+
+    # Test natural language response
+    reply = build_natural_response(total_count=100, filters=payload["filters"], message=query)
+    assert f"closed by {expected_device} Close By Device" in reply
+    assert "Total 100 valid trips" in reply
+    assert "It does not include cancelled trips." in reply
+
+
+def test_close_by_device_comparison_payload():
+    queries = [
+        "How many trips in August 2026 were closed by Primary, Secondary, vs. Tertiary Close By Device?",
+        "How many trips in August 2026 were closed by Primary vs Secondary vs Tertiary Close By Device?",
+        "How many  trips in August 2026 were closed by Primary, Secondary, vs. Tertiary Close By Device?",
+    ]
+    for q in queries:
+        assert can_resolve_fast_path(q) is True
+        payload = build_fast_path_payload(q)
+        assert payload is not None
+        assert payload["entity"] == "trip"
+        assert payload["operation"] == "count"
+        assert payload["select"] == []
+        assert payload["groupBy"] == ["closeByDevice"]
+        assert payload["metrics"] == [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
+
+        expected_filters = [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}
+        ]
+        assert payload["filters"] == expected_filters
+        assert not any(f.get("field") == "closeByDevice" for f in payload["filters"])
+
+
+def test_close_by_device_comparison_response_rendering():
+    from app.llm.response_generator import ResponseGenerator
+    query = "How many trips in August 2026 were closed by Primary, Secondary, vs. Tertiary Close By Device?"
+    rg = ResponseGenerator()
+
+    mock_api_data = [
+        {"closeByDevice": "Primary", "TotalTrip": 60337},
+        {"closeByDevice": "Secondary", "TotalTrip": 54135},
+        {"closeByDevice": "Tertiary", "TotalTrip": 14786},
+    ]
+
+    response = _run_sync(rg.generate_response(query, mock_api_data, "test_session"))
+
+    assert "Here is the breakdown of trips closed by Close By Device in August 2026:" in response
+    assert "<table" in response
+    assert "Primary" in response
+    assert "Secondary" in response
+    assert "Tertiary" in response
+    assert "60,337 trips" in response
+    assert "54,135 trips" in response
+    assert "14,786 trips" in response
+    assert response.count("<tr style=\"border-bottom: 1px solid #f1f5f9;") == 3
+
+
+def test_top_n_combined_no_spurious_filters():
+    from app.llm.intent_detector import IntentDetector
+    detector = IntentDetector()
+
+    test_cases = [
+        ("How many  trips in August 2026 were generated by the top 5  route combined ?", "Route"),
+        ("How many  trips in August 2026 were generated by the top 5 states combined ?", "state"),
+        ("How many trips in August 2026 were generated by the top 5 branches combined ?", "branch"),
+        ("How many trips in August 2026 were generated by the top 5 transporters combined ?", "transporter"),
+        ("How many trips in August 2026 were generated by the top 5 vehicles combined ?", "vehicleNo"),
+    ]
+
+    for q, expected_field in test_cases:
+        res = _run_sync(detector.detect(q, [], "test_session"))
+        entities = res.get("entities", {})
+
+        # Verify groupBy
+        assert entities.get("groupBy") == [expected_field], f"Failed for {q}"
+
+        # Verify metrics & sort
+        assert entities.get("metrics") is not None
+        assert entities.get("sort") is not None
+
+        # Verify filters DO NOT contain spurious Route: "combined" or any other invalid dimension filters
+        filters = entities.get("filters", [])
+        for f in filters:
+            assert f.get("value") != "combined", f"Found 'combined' in filter {f} for {q}"
+            if f.get("field") in (expected_field, "Route", "route"):
+                assert f.get("operator") != "eq" or f.get("field") not in (expected_field, "Route")
+
+        # Filters should only contain groupId, tripStatus, runDate gte, runDate lte
+        fields = [f.get("field") for f in filters]
+        assert set(fields) == {"groupId", "tripStatus", "runDate"}
+
+
+def test_top_n_route_combined_response_rendering():
+    from app.llm.response_generator import ResponseGenerator
+    query = "How many  trips in August 2026 were generated by the top 5  route combined ?"
+    rg = ResponseGenerator()
+
+    mock_data = [
+        {"TotalTrip": 12000, "Route": "DEL-BOM"},
+        {"TotalTrip": 9500, "Route": "BLR-HYD"},
+        {"TotalTrip": 8000, "Route": "MAA-CCU"},
+        {"TotalTrip": 6000, "Route": "PNQ-NBM"},
+        {"TotalTrip": 4000, "Route": "HUB-IXC"},
+        {"TotalTrip": 1500, "Route": "OTHER"},
+    ]
+    entities = {
+        "entity": "trip",
+        "operation": "count",
+        "filters": [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": "valid"},
+            {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
+            {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
+        ],
+        "groupBy": ["Route"],
+        "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}],
+        "sort": [{"field": "TotalTrip", "order": "desc"}],
+        "select": []
+    }
+
+    response = _run_sync(rg.generate_response(query, {"data": mock_data, "total_count": 39500}, "test_session", entities=entities))
+
+    assert "The top 5 Routes generated a total of **39,500 valid trips combined** in August 2026." in response
+    assert "<table" in response
+    assert "DEL-BOM" in response
+    assert "BLR-HYD" in response
+    assert "12,000 trips" in response
+    assert "OTHER" not in response  # limited to top 5
+    assert response.count("<tr style=\"border-bottom: 1px solid #f1f5f9;") == 5
+    assert "Total: 39,500 trips" in response
+
+
+
+
+
 

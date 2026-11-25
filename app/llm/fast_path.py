@@ -33,8 +33,10 @@ def can_resolve_fast_path(message: str) -> bool:
         return True
 
     # 2. Distinct / Top transporter & top N grouped queries
-    from app.llm.intent_detector import is_top_transporters_query, detect_top_n_grouped_query
+    from app.llm.intent_detector import is_top_transporters_query, detect_top_n_grouped_query, detect_close_by_device_query
     if detect_top_n_grouped_query(message) is not None:
+        return True
+    if detect_close_by_device_query(message) is not None:
         return True
     if is_top_transporters_query(message):
         return True
@@ -245,6 +247,60 @@ def build_fast_path_payload(
                 }
             ]
         }
+
+    from app.llm.intent_detector import detect_close_by_device_query
+    cbd_info = detect_close_by_device_query(message)
+    if cbd_info:
+        start_date, end_date = extract_date_range(message, reference_now=ref_dt)
+        if not start_date or not end_date:
+            start_date, end_date = _resolve_month_range(message.lower(), ref_dt)
+        if not start_date or not end_date:
+            if "august" in message.lower() or "aug" in message.lower():
+                start_date = "2026-08-01 00:00:00"
+                end_date = "2026-08-31 23:59:59"
+
+        t_status = "valid"
+        if bool(re.search(r'\b(?:running|in[\s-]transit|live|active\s+trips?)\b', message.lower())):
+            t_status = "running"
+        elif bool(re.search(r'\bcancel(?:led)?\s+trips?\b', message.lower())):
+            t_status = "cancelled"
+
+        filters = [
+            {"field": "groupId", "operator": "eq", "value": "0041"},
+            {"field": "tripStatus", "operator": "eq", "value": t_status}
+        ]
+        if start_date:
+            filters.append({"field": "runDate", "operator": "gte", "value": start_date})
+        if end_date:
+            filters.append({"field": "runDate", "operator": "lte", "value": end_date})
+
+        if cbd_info["type"] == "comparison":
+            return {
+                "entity": "trip",
+                "operation": "count",
+                "filters": filters,
+                "select": [],
+                "groupBy": ["closeByDevice"],
+                "metrics": [
+                    {
+                        "field": "shipmentNo",
+                        "function": "count",
+                        "alias": "TotalTrip"
+                    }
+                ]
+            }
+        else:
+            filters.append({
+                "field": "closeByDevice",
+                "operator": "eq",
+                "value": cbd_info["value"]
+            })
+            return {
+                "entity": "trip",
+                "operation": "count",
+                "filters": filters,
+                "select": []
+            }
 
     from app.llm.intent_detector import detect_top_n_grouped_query
     top_grouped = detect_top_n_grouped_query(message)

@@ -71,7 +71,26 @@ TRIP DOMAIN RULES:
      * sort: [{"field": "TotalTrip", "order": "desc"}]
      * "select": []
 
+12. CLOSE BY DEVICE (field: "closeByDevice"):
+   - When a query asks about trips closed by a specific tier of Close By Device (Primary, Secondary, Tertiary):
+     * filter: {"field": "closeByDevice", "operator": "eq", "value": "Primary"} (or "Secondary", "Tertiary").
+     * tripStatus eq "valid" (default unless specific status requested).
+     * "select": []
+   - When a query asks for comparison across Close By Device (e.g. "closed by Primary, Secondary, vs. Tertiary Close By Device"):
+     * groupBy: ["closeByDevice"]
+     * metrics: [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
+     * "select": []
+     * (Do not add a closeByDevice filter when grouping across devices)
+
 TRIP EXAMPLES:
+- "How many trips in August 2026 were closed by Primary Close By Device?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "closeByDevice", "operator": "eq", "value": "Primary"}], "select": []}
+- "How many trips in August 2026 were closed by Secondary Close By Device?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "closeByDevice", "operator": "eq", "value": "Secondary"}], "select": []}
+- "How many trips in August 2026 were closed by Tertiary Close By Device?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}, {"field": "closeByDevice", "operator": "eq", "value": "Tertiary"}], "select": []}
+- "How many trips in August 2026 were closed by Primary, Secondary, vs. Tertiary Close By Device?" ->
+  {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["closeByDevice"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]}
 - "Which top 5 Branches generated the highest trip counts in August 2026?" ->
   {"entity": "trip", "operation": "count", "filters": [{"field": "groupId", "operator": "eq", "value": "0041"}, {"field": "tripStatus", "operator": "eq", "value": "valid"}, {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"}, {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"}], "select": [], "groupBy": ["branch"], "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}], "sort": [{"field": "TotalTrip", "order": "desc"}]}
 - "Which top 5 Areas generated the highest trip counts in August 2026?" ->

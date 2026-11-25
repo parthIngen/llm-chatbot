@@ -202,6 +202,7 @@ def build_natural_response(
     from_loc = filter_map.get("source") or filter_map.get("From") or filter_map.get("origin")
     to_loc = filter_map.get("destination") or filter_map.get("To") or filter_map.get("dest")
     close_remarks = str(filter_map.get("closeremark") or filter_map.get("closeRemarks", "")).lower().strip()
+    close_by_device = filter_map.get("closeByDevice") or filter_map.get("closebydevice")
     atd = str(filter_map.get("atd") or filter_map.get("ATD", "")).lower().strip()
     ata = str(filter_map.get("ata") or filter_map.get("ATA", "")).lower().strip()
     gps = str(filter_map.get("GPS") or filter_map.get("gps", "") or filter_map.get("fixed-gps-status", "")).lower().strip()
@@ -250,6 +251,10 @@ def build_natural_response(
         device_qualifiers.append("closed via web")
     elif close_remarks:
         device_qualifiers.append(f"closed with {close_remarks} remark")
+
+    # Close by device
+    if close_by_device:
+        device_qualifiers.append(f"closed by {close_by_device} Close By Device")
 
     # Priority
     if priority:
@@ -572,6 +577,8 @@ def build_natural_response(
         }
         col_lbl = FIELD_MAP.get(f_name, f_name.capitalize())
         date_str = f" {date_clause}" if date_clause else ""
+        if "combined" in msg_lower:
+            return f"Total {total_count} valid trips recorded across top {limit} {col_lbl}s combined{date_str}. It does not include cancelled trips."
         return f"Total {total_count} valid trips recorded across top {limit} {col_lbl}s{date_str}. It does not include cancelled trips."
 
     from app.llm.intent_detector import is_top_transporters_query
@@ -1281,6 +1288,25 @@ class ResponseGenerator:
         # Detect top N grouped query result (e.g. Which top 5 Branches/Areas/States/Transporters/Vehicles generated highest trip counts/volumes?)
         from app.llm.intent_detector import detect_top_n_grouped_query
         top_n_info = detect_top_n_grouped_query(message)
+        if not top_n_info and entities and isinstance(entities.get("groupBy"), list) and len(entities["groupBy"]) == 1:
+            grp_field = entities["groupBy"][0]
+            has_metric = bool(entities.get("metrics") and any(m.get("alias") in ("TotalTrip", "totaltrip", "trip_count", "count") or m.get("function") == "count" for m in entities["metrics"]))
+            has_sort_desc = bool(entities.get("sort") and any(s.get("order") == "desc" for s in entities["sort"]))
+            if (has_metric or has_sort_desc) and grp_field in ("region", "branch", "area", "state", "transporter", "vehicleNo", "Route", "shipmentMethod", "source", "destination", "closeByDevice"):
+                top_n_match = re.search(r'\btop\s*(\d+)\b', message, re.IGNORECASE) if message else None
+                limit = int(top_n_match.group(1)) if top_n_match else 5
+                top_n_info = (grp_field, limit)
+        elif not top_n_info and isinstance(api_data, list) and len(api_data) > 0 and all(isinstance(r, dict) for r in api_data):
+            sample = api_data[0]
+            has_totaltrip = any(k in ("TotalTrip", "totaltrip", "count", "trip_count") for k in sample)
+            if has_totaltrip:
+                for dim_candidate in ("region", "branch", "area", "state", "transporter", "vehicleNo", "Route", "shipmentMethod", "source", "destination", "closeByDevice"):
+                    if any(k.lower() == dim_candidate.lower() for k in sample):
+                        top_n_match = re.search(r'\btop\s*(\d+)\b', message, re.IGNORECASE) if message else None
+                        limit = int(top_n_match.group(1)) if top_n_match else 5
+                        top_n_info = (dim_candidate, limit)
+                        break
+
         if top_n_info and isinstance(api_data, list) and len(api_data) > 0:
             target_field, limit = top_n_info
             FIELD_META = {
@@ -1294,6 +1320,7 @@ class ResponseGenerator:
                 "region": ("Region", "🌐"),
                 "source": ("Source", "🛫"),
                 "destination": ("Destination", "🏁"),
+                "closeByDevice": ("Close By Device", "📱"),
             }
             col_label, icon = FIELD_META.get(target_field, (target_field.capitalize(), "📊"))
 
@@ -1318,7 +1345,7 @@ class ResponseGenerator:
                             if k.lower() not in ("totaltrip", "totaltrips", "count", "trip_count", "shipments", "shipmentno", "_id", "id"):
                                 name_val = v
                                 break
-                if not name_val:
+                if not name_val or str(name_val).strip().lower() in ("", "none", "null", "n/a", "na", "undefined"):
                     continue
 
                 cnt_val = r.get("TotalTrip") or r.get("totaltrip") or r.get("count") or r.get("trip_count") or r.get("TotalTrips") or r.get("shipments") or 0
@@ -1333,11 +1360,19 @@ class ResponseGenerator:
 
             date_str = ""
             if start_date and end_date:
-                if str(start_date).startswith("2026-08-01") and str(end_date).startswith("2026-08-31"):
-                    date_str = "August 2026"
+                s_str = str(start_date).split()[0]
+                e_str = str(end_date).split()[0]
+                MONTH_NAMES = {
+                    "01": "January", "02": "February", "03": "March", "04": "April",
+                    "05": "May", "06": "June", "07": "July", "08": "August",
+                    "09": "September", "10": "October", "11": "November", "12": "December"
+                }
+                if s_str[:7] == e_str[:7] and s_str.endswith("-01"):
+                    yr, mo = s_str[:4], s_str[5:7]
+                    date_str = f"{MONTH_NAMES.get(mo, mo)} {yr}"
                 else:
-                    date_str = f"{str(start_date)[:10]} to {str(end_date)[:10]}"
-            elif message and "august 2026" in message.lower():
+                    date_str = f"{s_str} to {e_str}"
+            elif message and "aug" in message.lower():
                 date_str = "August 2026"
 
             if not rows:
@@ -1346,7 +1381,42 @@ class ResponseGenerator:
 
             plural_col_label = col_label + "es" if col_label.lower().endswith(("ch", "sh", "s", "x", "z")) else col_label + "s"
             html_card = _render_top_n_grouped_html_card(rows, limit, col_label, date_display=date_str, icon=icon)
-            intro_msg = f"Here are the top {len(rows)} {plural_col_label} by trip volume" + (f" in {date_str}:" if date_str else ":")
+
+            # Check if this query specifically asks for comparison or highest / single top entity
+            has_explicit_multi_limit = bool(message and re.search(r'\btop\s*([2-9]|\d{2,})\b', message, re.IGNORECASE))
+            is_comparison = bool(
+                target_field == "closeByDevice"
+                or re.search(r'\b(?:vs\.?|versus|compare|comparison|breakdown|across)\b', message.lower() if message else "")
+                or (re.search(r'\bprimary\b', message.lower() if message else "") and re.search(r'\bsecondary\b', message.lower() if message else ""))
+            )
+            is_highest_query = (
+                bool(message and re.search(r'\b(?:highest|maximum|most|leading|max)\b', message.lower()))
+                or (not has_explicit_multi_limit and len(rows) > 0)
+            )
+
+            display_rows = rows[:limit]
+            total_trips_sum = sum(cnt for _, cnt in display_rows)
+            is_combined = bool(re.search(r'\b(?:combined|together)\b', message.lower() if message else ""))
+
+            if is_comparison:
+                date_part = f" in {date_str}" if date_str else ""
+                intro_msg = f"Here is the breakdown of trips closed by {col_label}{date_part}:"
+            elif is_combined:
+                date_part = f" in {date_str}" if date_str else ""
+                intro_msg = (
+                    f"The top {len(display_rows)} {plural_col_label} generated a total of **{total_trips_sum:,} valid trips combined**{date_part}.\n\n"
+                    f"Here is the breakdown by trip volume:"
+                )
+            elif is_highest_query and not has_explicit_multi_limit and rows:
+                top_name, top_cnt = rows[0]
+                date_part = f" in {date_str}" if date_str else ""
+                intro_msg = (
+                    f"The highest trip volume{date_part} was recorded in the **{top_name}** {col_label.lower()} with **{top_cnt:,} valid trips**.\n\n"
+                    f"Here is the breakdown of top {plural_col_label} by trip volume:"
+                )
+            else:
+                intro_msg = f"Here are the top {len(rows)} {plural_col_label} by trip volume" + (f" in {date_str}:" if date_str else ":")
+
             return f"{intro_msg}\n\n{html_card}"
 
         # Detect top transporters result fallback

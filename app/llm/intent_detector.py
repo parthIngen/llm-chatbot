@@ -680,6 +680,65 @@ def detect_top_n_grouped_query(text: str) -> Optional[Tuple[str, int]]:
 
     return (field, limit)
 
+def detect_close_by_device_query(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Detects queries asking about Close By Device tiers (Primary, Secondary, Tertiary)
+    either as a single filter or as a comparison/breakdown across devices.
+    Examples:
+    - 'How many trips in August 2026 were closed by Primary Close By Device?' ->
+      {'type': 'single', 'field': 'closeByDevice', 'value': 'Primary'}
+    - 'How many trips in August 2026 were closed by Secondary Close By Device?' ->
+      {'type': 'single', 'field': 'closeByDevice', 'value': 'Secondary'}
+    - 'How many trips in August 2026 were closed by Tertiary Close By Device?' ->
+      {'type': 'single', 'field': 'closeByDevice', 'value': 'Tertiary'}
+    - 'How many trips in August 2026 were closed by Primary, Secondary, vs. Tertiary Close By Device?' ->
+      {'type': 'comparison', 'groupBy': ['closeByDevice'], 'metrics': [{'field': 'shipmentNo', 'function': 'count', 'alias': 'TotalTrip'}]}
+    """
+    if not text:
+        return None
+    text_l = text.lower()
+
+    has_close_by_device = bool(
+        re.search(r'\bclose\s*by\s*device\b', text_l)
+        or re.search(r'\bclosed\s+by\s+(?:primary|secondary|tertiary)\b', text_l)
+        or re.search(r'\b(?:primary|secondary|tertiary)\s+(?:close\s*by\s*device|device)\b', text_l)
+    )
+    if not has_close_by_device:
+        return None
+
+    # Check for comparison / breakdown
+    has_primary = bool(re.search(r'\bprimary\b', text_l))
+    has_secondary = bool(re.search(r'\bsecondary\b', text_l))
+    has_tertiary = bool(re.search(r'\btertiary\b', text_l))
+
+    device_count = sum([has_primary, has_secondary, has_tertiary])
+    is_vs = bool(re.search(r'\b(?:vs\.?|versus|compare|comparison|breakdown|each|all|across)\b', text_l))
+
+    if device_count > 1 or is_vs or (device_count == 0 and bool(re.search(r'\bclose\s*by\s*device\b', text_l))):
+        return {
+            "type": "comparison",
+            "groupBy": ["closeByDevice"],
+            "metrics": [{"field": "shipmentNo", "function": "count", "alias": "TotalTrip"}]
+        }
+
+    # Single device
+    target_val = None
+    if has_primary:
+        target_val = "Primary"
+    elif has_secondary:
+        target_val = "Secondary"
+    elif has_tertiary:
+        target_val = "Tertiary"
+
+    if target_val:
+        return {
+            "type": "single",
+            "field": "closeByDevice",
+            "value": target_val
+        }
+
+    return None
+
 def is_top_transporters_query(text: str) -> bool:
     """Detects whether query asks for top transporters by trip volume/count."""
     res = detect_top_n_grouped_query(text)
@@ -868,7 +927,11 @@ def extract_route_code(text: str) -> str | None:
     """Extract specific route code or name from query (e.g. 'route ABL', 'route: ABL').
     Excludes non-route words like 'intercity', 'intracity', 'feeder', 'trips', etc.
     """
+    if not text:
+        return None
     if detect_route_master(text) is not None:
+        return None
+    if detect_top_n_grouped_query(text) is not None:
         return None
     _NON_ROUTE_WORDS = {
         "intercity", "intracity", "network", "local", "feeder", "empty",
@@ -877,7 +940,12 @@ def extract_route_code(text: str) -> str | None:
         "breakdown", "schedule", "trip", "trips", "count", "counts",
         "report", "reports", "details", "data", "for", "in", "of", "to", "from",
         "the", "all", "valid", "closed", "running", "active", "cancelled", "canceled", "cancel",
-        "outside", "inside", "master", "na", "not", "module"
+        "outside", "inside", "master", "na", "not", "module",
+        "combined", "together", "total", "overall", "highest", "lowest", "top", "bottom",
+        "average", "avg", "max", "min", "wise", "level", "summary", "volume", "volumes",
+        "by", "across", "generated", "recorded", "operated", "found", "were", "was", "are", "is",
+        "code", "name", "names", "number", "numbers", "no", "nos", "had", "have", "has",
+        "between", "both", "either", "and", "or", "list", "show", "which", "under"
     }
     m = re.search(r'\broute\s*(?:code|name)?[:\s]+([A-Za-z0-9_-]+)\b', text, re.IGNORECASE)
     if m:
@@ -1390,6 +1458,9 @@ def extract_source_location(text: str) -> Optional[Union[str, List[str]]]:
         elif len(items) == 1:
             return items[0]
 
+    if detect_top_n_grouped_query(text) is not None:
+        return None
+
     # Mask out non-location date ranges like 'from 2026-08-01'
     clean_text = re.sub(r'\bfrom\s+\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b', lambda m: ' ' * len(m.group(0)), text, flags=re.IGNORECASE)
     pat = re.compile(
@@ -1432,6 +1503,9 @@ def extract_destination_location(text: str) -> Optional[Union[str, List[str]]]:
             return items
         elif len(items) == 1:
             return items[0]
+
+    if detect_top_n_grouped_query(text) is not None:
+        return None
 
     # Mask out non-destination phrases like 'belonged to', 'related to', etc.
     clean_text = re.sub(
@@ -1642,6 +1716,9 @@ def extract_area(message: str) -> Optional[Union[str, List[str]]]:
         elif len(items) == 1:
             return items[0]
 
+    if detect_top_n_grouped_query(message) is not None:
+        return None
+
     # 2. Comma/and-separated list with combined or colon
     m_list = re.search(
         r'\b(?:top\s*\d*\s*)?areas?\s*(?:combined\s*[:=-]?\s*|[:=-]\s*)([a-zA-Z0-9_,\s\-\/&]+?)(?:\s+(?:combined|together)|\s+(?:in|for|from|during|between|dated?)\b|\s*\?|$)',
@@ -1712,6 +1789,9 @@ def extract_branch(message: str) -> Optional[Union[str, List[str]]]:
         elif len(items) == 1:
             return items[0]
 
+    if detect_top_n_grouped_query(message) is not None:
+        return None
+
     # 2. Comma/and-separated list with combined or colon
     m_list = re.search(
         r'\b(?:top\s*\d*\s*)?branch(?:es)?\s*(?:combined\s*[:=-]?\s*|[:=-]\s*)([a-zA-Z0-9_,\s\-\/&]+?)(?:\s+(?:combined|together)|\s+(?:in|for|from|during|between|dated?)\b|\s*\?|$)',
@@ -1767,10 +1847,12 @@ def extract_route(message: str) -> Optional[Union[str, List[str]]]:
             return items
         elif len(items) == 1:
             return items[0]
+    if detect_top_n_grouped_query(message) is not None:
+        return None
     m = re.search(r'\broutes?\s+([A-Za-z0-9_\-\/]+)\b', message, re.IGNORECASE)
     if m:
         val = m.group(1).strip()
-        if val.lower() not in ("types", "type", "category", "categories", "master", "inside", "outside", "combined", "together"):
+        if val.lower() not in ("types", "type", "category", "categories", "master", "inside", "outside", "combined", "together", "total", "overall", "wise", "highest", "lowest", "top", "summary"):
             return val
     return None
 
@@ -1787,6 +1869,8 @@ def extract_vehicle_list(message: str) -> Optional[List[str]]:
         vehs = re.findall(r'\b[A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4}\b', raw_list)
         if vehs:
             return [re.sub(r'\s+', '', v).upper() for v in vehs]
+    if detect_top_n_grouped_query(message) is not None:
+        return None
     all_vehs = re.findall(r'\b[A-Za-z]{2}\s*\d{1,2}\s*[A-Za-z]{1,3}\s*\d{4}\b', message)
     if len(all_vehs) > 1:
         return [re.sub(r'\s+', '', v).upper() for v in all_vehs]
@@ -1811,6 +1895,8 @@ def extract_region(message: str) -> Optional[Union[str, List[str]]]:
             return regs
         elif len(regs) == 1:
             return regs[0]
+    if detect_top_n_grouped_query(message) is not None:
+        return None
     regs = []
     msg_l = message.lower()
     for r in ["north east", "north west", "south east", "south west", "north", "south", "east", "west", "central"]:
@@ -1857,6 +1943,8 @@ def detect_unique_or_list_field(message: str) -> Optional[str]:
     if not message:
         return None
     if detect_top_n_grouped_query(message) is not None:
+        return None
+    if detect_close_by_device_query(message) is not None:
         return None
     msg_l = message.lower()
 
@@ -2042,6 +2130,8 @@ class IntentDetector:
                         return 13
                     elif field in ("atd", "ata", "ATD", "ATA"):
                         return 14
+                    elif field in ("closeByDevice", "closebydevice"):
+                        return 14.5
                     return 20
 
                 prev_payload["filters"].sort(key=_running_followup_sort_key)
@@ -2786,8 +2876,10 @@ class IntentDetector:
                 })
 
             # Ensure route filter is present if route code detected in message or prev_filters
-            detected_route = extract_route_code(message)
-            if not detected_route and is_follow_up and prev_filters:
+            is_top_n_query = detect_top_n_grouped_query(message) is not None
+            is_route_grouped = any(str(g).lower() in ("route", "routename") for g in query_payload.get("groupBy", []))
+            detected_route = extract_route_code(message) if not (is_top_n_query or is_route_grouped) else None
+            if not detected_route and is_follow_up and prev_filters and not (is_top_n_query or is_route_grouped):
                 for pf in prev_filters:
                     if isinstance(pf, dict) and pf.get("field") in ("Route", "route", "RouteName", "routeName"):
                         detected_route = pf.get("value")
@@ -2808,6 +2900,19 @@ class IntentDetector:
                         "operator": "eq",
                         "value": detected_route
                     })
+
+            # Universal safeguard: if query is grouped by any field, prevent spurious filters on that field
+            if query_payload.get("groupBy"):
+                grp_fields = {str(g).lower() for g in query_payload["groupBy"]}
+                _INVALID_FILTER_VALS = {"combined", "together", "total", "overall", "all", "top", "max", "highest", "summary", "wise"}
+                query_payload["filters"] = [
+                    f for f in query_payload.get("filters", [])
+                    if not (
+                        isinstance(f, dict)
+                        and str(f.get("field", "")).lower() in grp_fields
+                        and (str(f.get("value", "")).lower() in _INVALID_FILTER_VALS or (is_top_n_query and f.get("operator") == "eq"))
+                    )
+                ]
                 
             # Determine if a status was requested based on keywords in user message
             msg_lower = message.lower()
@@ -4431,6 +4536,35 @@ class IntentDetector:
                         "value": detected_remark_val
                     })
 
+            # --- closeByDevice Post-Processing ---
+            cbd_match = detect_close_by_device_query(message)
+            if cbd_match:
+                if cbd_match["type"] == "comparison":
+                    query_payload["filters"] = [
+                        f for f in query_payload.get("filters", [])
+                        if not (isinstance(f, dict) and f.get("field") in ("closeByDevice", "closebydevice"))
+                    ]
+                    query_payload["groupBy"] = ["closeByDevice"]
+                    query_payload["metrics"] = [
+                        {
+                            "field": "shipmentNo",
+                            "function": "count",
+                            "alias": "TotalTrip"
+                        }
+                    ]
+                    query_payload["select"] = []
+                elif cbd_match["type"] == "single":
+                    query_payload["filters"] = [
+                        f for f in query_payload.get("filters", [])
+                        if not (isinstance(f, dict) and f.get("field") in ("closeByDevice", "closebydevice"))
+                    ]
+                    query_payload["filters"].append({
+                        "field": "closeByDevice",
+                        "operator": "eq",
+                        "value": cbd_match["value"]
+                    })
+                    query_payload["select"] = []
+
             # --- Priority Post-Processing ---
             if _is_priority_vs_query:
                 query_payload["filters"] = [
@@ -5300,6 +5434,8 @@ class IntentDetector:
                         return 13
                     elif field in ("atd", "ata", "ATD", "ATA"):
                         return 14
+                    elif field in ("closeByDevice", "closebydevice"):
+                        return 14.5
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
@@ -5339,6 +5475,8 @@ class IntentDetector:
                         return 13
                     elif field in ("atd", "ata", "ATD", "ATA"):
                         return 14
+                    elif field in ("closeByDevice", "closebydevice"):
+                        return 14.5
                     return 20
 
                 if not (_is_fixed_portable_elock_combo or _is_transporter_unique_vehicles_query or is_vendor_running_query):
@@ -5823,8 +5961,10 @@ class IntentDetector:
                     })
 
             # --- Route Fallback Extraction ---
-            fb_detected_route = extract_route_code(message)
-            if not fb_detected_route and prev_filters:
+            fb_is_top_n_query = detect_top_n_grouped_query(message) is not None
+            fb_is_route_grouped = any(str(g).lower() in ("route", "routename") for g in fallback_payload.get("groupBy", []))
+            fb_detected_route = extract_route_code(message) if not (fb_is_top_n_query or fb_is_route_grouped) else None
+            if not fb_detected_route and prev_filters and not (fb_is_top_n_query or fb_is_route_grouped):
                 for pf in prev_filters:
                     if isinstance(pf, dict) and pf.get("field") in ("Route", "route", "RouteName", "routeName"):
                         fb_detected_route = pf.get("value")
@@ -5846,6 +5986,18 @@ class IntentDetector:
                     "operator": "eq",
                     "value": fb_detected_route
                 })
+
+            if fallback_payload.get("groupBy"):
+                fb_grp_fields = {str(g).lower() for g in fallback_payload["groupBy"]}
+                _INVALID_FILTER_VALS = {"combined", "together", "total", "overall", "all", "top", "max", "highest", "summary", "wise"}
+                fallback_payload["filters"] = [
+                    f for f in fallback_payload.get("filters", [])
+                    if not (
+                        isinstance(f, dict)
+                        and str(f.get("field", "")).lower() in fb_grp_fields
+                        and (str(f.get("value", "")).lower() in _INVALID_FILTER_VALS or (fb_is_top_n_query and f.get("operator") == "eq"))
+                    )
+                ]
 
             if has_status_keyword and status_override:
                 fallback_payload["filters"].append({
@@ -7748,6 +7900,8 @@ class IntentDetector:
                         return 13
                     elif field in ("atd", "ata", "ATD", "ATA"):
                         return 14
+                    elif field in ("closeByDevice", "closebydevice"):
+                        return 14.5
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
@@ -7787,6 +7941,8 @@ class IntentDetector:
                         return 13
                     elif field in ("atd", "ata", "ATD", "ATA"):
                         return 14
+                    elif field in ("closeByDevice", "closebydevice"):
+                        return 14.5
                     return 20
 
                 if not (fb_is_fixed_portable_elock_combo or fb_is_transporter_unique_vehicles_query or fb_is_vendor_running_query):
@@ -7849,6 +8005,35 @@ class IntentDetector:
                         "operator": "eq",
                         "value": fb_detected_remark
                     })
+
+            # --- closeByDevice Fallback Post-Processing ---
+            fb_cbd_match = detect_close_by_device_query(message)
+            if fb_cbd_match:
+                if fb_cbd_match["type"] == "comparison":
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload.get("filters", [])
+                        if not (isinstance(f, dict) and f.get("field") in ("closeByDevice", "closebydevice"))
+                    ]
+                    fallback_payload["groupBy"] = ["closeByDevice"]
+                    fallback_payload["metrics"] = [
+                        {
+                            "field": "shipmentNo",
+                            "function": "count",
+                            "alias": "TotalTrip"
+                        }
+                    ]
+                    fallback_payload["select"] = []
+                elif fb_cbd_match["type"] == "single":
+                    fallback_payload["filters"] = [
+                        f for f in fallback_payload.get("filters", [])
+                        if not (isinstance(f, dict) and f.get("field") in ("closeByDevice", "closebydevice"))
+                    ]
+                    fallback_payload["filters"].append({
+                        "field": "closeByDevice",
+                        "operator": "eq",
+                        "value": fb_cbd_match["value"]
+                    })
+                    fallback_payload["select"] = []
 
             # --- ATD / ATA Fallback Post-Processing ---
             if fb_is_atd_ata_query or any(isinstance(f, dict) and str(f.get("field", "")).lower() in ("atd", "ata") for f in fallback_payload.get("filters", [])):
