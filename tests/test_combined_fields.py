@@ -577,6 +577,48 @@ def test_intracity_trips_both_fixed_and_portable_elock_payload():
     assert entities == expected_payload
 
 
+def test_trips_and_unique_vehicles_single_day_zero_and_nonzero_responses():
+    from app.llm.response_generator import ResponseGenerator
+
+    query = "How many trips and unique vehicles operated on August 2, 2026 ?"
+    assert can_resolve_fast_path(query) is True
+    payload = build_fast_path_payload(query)
+
+    assert payload["groupBy"] == ["vehicleNo"]
+    assert payload["metrics"] == [
+        {"field": "vehicleNo", "function": "countDistinct", "alias": "uniqueVehicleCount"},
+        {"field": "shipmentNo", "function": "count", "alias": "shipmentNo"}
+    ]
+
+    rg = ResponseGenerator()
+
+    # Case 1: 0 trips / empty / zero counts returned from API
+    api_data_zero = [
+        {"vehicleNo": "WB11K0884", "uniqueVehicleCount": 0, "shipmentNo": 0},
+        {"vehicleNo": "GJ01KT5317", "uniqueVehicleCount": 0, "shipmentNo": 0},
+        {"vehicleNo": "HR55AV0801", "uniqueVehicleCount": 0, "shipmentNo": 0},
+        {"vehicleNo": "DL01LAB6130", "uniqueVehicleCount": 0, "shipmentNo": 0},
+        {"vehicleNo": "DL01LAA6850", "uniqueVehicleCount": 0, "shipmentNo": 0}
+    ]
+    resp_zero = _run_sync(rg.generate_response(query, api_data_zero, "test_session", payload))
+    assert "A total of 0 valid trips were operated using 0 unique vehicles on August 2, 2026. It does not include cancelled trips." in resp_zero
+    assert "The highest trip volume" not in resp_zero
+    assert "Top 5 Vehicles by Trip Volume" not in resp_zero
+    assert "Trips & Vehicles Summary" in resp_zero
+
+    # Case 2: Positive trips and unique vehicles
+    api_data_nonzero = [
+        {"vehicleNo": "WB11K0884", "uniqueVehicleCount": 1, "shipmentNo": 35},
+        {"vehicleNo": "GJ01KT5317", "uniqueVehicleCount": 1, "shipmentNo": 15}
+    ]
+    resp_nonzero = _run_sync(rg.generate_response(query, api_data_nonzero, "test_session", payload))
+    assert "A total of 50 valid trips were operated using 2 unique vehicles on August 2, 2026. It does not include cancelled trips." in resp_nonzero
+    assert "The highest trip volume" not in resp_nonzero
+    assert "Trips & Vehicles Summary" in resp_nonzero
+    assert "WB11K0884" in resp_nonzero
+
+
+
 
 
 

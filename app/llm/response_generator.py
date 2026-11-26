@@ -774,6 +774,7 @@ def _render_transporter_trips_vehicles_card(
     valid_rows = [
         r for r in (vehicle_rows or [])
         if isinstance(r, dict) and (r.get("vehicleNo") or r.get("vehicle_no"))
+        and int(r.get("shipmentNo", 0) or r.get("TotalTrip", 0) or r.get("count", 0) or 0) > 0
     ]
     if valid_rows:
         sorted_rows = sorted(
@@ -1285,10 +1286,106 @@ class ResponseGenerator:
             intro_msg = f"Here is the list of top {device_label} vendors by trip count{date_clause}:"
             return f"{intro_msg}\n\n{html_card}"
 
+        # Check if query asks for trips and unique vehicles together
+        is_trips_and_vehicles_query = bool(
+            re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_l)
+            or (entities and isinstance(entities.get("metrics"), list) and any(m.get("alias") == "uniqueVehicleCount" for m in entities["metrics"]) and any(m.get("alias") == "shipmentNo" for m in entities["metrics"]))
+        )
+        if is_trips_and_vehicles_query:
+            transporter_val = None
+            if entities and "filters" in entities:
+                for f in entities["filters"]:
+                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
+                        transporter_val = f.get("value")
+                        break
+
+            vehicle_rows = []
+            if isinstance(api_data, list):
+                for r in api_data:
+                    if isinstance(r, dict) and (r.get("vehicleNo") or r.get("vehicle_no")):
+                        vehicle_rows.append(r)
+
+                # Calculate sum of shipmentNo
+                total_trip_cnt = sum(
+                    int(r.get("shipmentNo", 0) or r.get("TotalTrip", 0) or r.get("count", 0) or 0)
+                    for r in api_data if isinstance(r, dict)
+                )
+
+                # Calculate uniqueVehicleCount (distinct vehicles / sum of uniqueVehicleCount)
+                distinct_veh_set = {
+                    str(r.get("vehicleNo") or r.get("vehicle_no")).strip()
+                    for r in vehicle_rows
+                    if str(r.get("vehicleNo") or r.get("vehicle_no")).strip()
+                    and int(r.get("shipmentNo", 0) or r.get("TotalTrip", 0) or r.get("count", 0) or 0) > 0
+                }
+                sum_unique_veh = sum(
+                    int(r.get("uniqueVehicleCount", 0) or 0)
+                    for r in api_data if isinstance(r, dict)
+                    and int(r.get("shipmentNo", 0) or r.get("TotalTrip", 0) or r.get("count", 0) or 0) > 0
+                )
+                if total_trip_cnt == 0:
+                    total_veh = 0
+                elif sum_unique_veh > 0:
+                    total_veh = sum_unique_veh
+                elif distinct_veh_set:
+                    total_veh = len(distinct_veh_set)
+                else:
+                    total_veh = len([r for r in vehicle_rows if int(r.get("shipmentNo", 0) or r.get("TotalTrip", 0) or r.get("count", 0) or 0) > 0])
+            elif isinstance(api_data, dict):
+                total_trip_cnt = int(api_data.get("shipmentNo", 0) or api_data.get("TotalTrip", 0) or api_data.get("count", 0) or 0)
+                if total_trip_cnt == 0:
+                    total_veh = 0
+                else:
+                    total_veh = int(api_data.get("uniqueVehicleCount", 0) or 0)
+            else:
+                total_trip_cnt = total_trips or 0
+                total_veh = total_trips or 0
+                if total_trip_cnt == 0:
+                    total_veh = 0
+
+            s_str = str(start_date).split()[0] if start_date else ""
+            e_str = str(end_date).split()[0] if end_date else ""
+            if str(start_date).startswith("2026-08-01") and str(end_date).startswith("2026-08-31"):
+                date_display = "August 2026"
+                date_prep = "in"
+            elif s_str and e_str and s_str == e_str:
+                try:
+                    from datetime import datetime
+                    dt = datetime.strptime(s_str, "%Y-%m-%d")
+                    day = dt.strftime("%d").lstrip("0")
+                    month = dt.strftime("%B")
+                    year = dt.strftime("%Y")
+                    date_display = f"{month} {day}, {year}"
+                except Exception:
+                    date_display = s_str
+                date_prep = "on"
+            elif start_date and end_date:
+                date_display = f"{start_date} to {end_date}"
+                date_prep = "in date range from"
+            elif "august 2026" in msg_l or "aug 2026" in msg_l:
+                date_display = "August 2026"
+                date_prep = "in"
+            else:
+                date_display = "the selected period"
+                date_prep = "during"
+
+            card_html = _render_transporter_trips_vehicles_card(
+                transporter_name=transporter_val,
+                total_trips=total_trip_cnt,
+                total_vehicles=total_veh,
+                date_display=date_display,
+                vehicle_rows=vehicle_rows
+            )
+            if transporter_val:
+                header = f"Transporter {transporter_val} operated a total of {total_trip_cnt:,} valid trips using {total_veh:,} unique vehicles {date_prep} {date_display}. It does not include cancelled trips."
+            else:
+                header = f"A total of {total_trip_cnt:,} valid trips were operated using {total_veh:,} unique vehicles {date_prep} {date_display}. It does not include cancelled trips."
+            return f"{header}\n\n{card_html}"
+
         # Detect top N grouped query result (e.g. Which top 5 Branches/Areas/States/Transporters/Vehicles generated highest trip counts/volumes?)
         from app.llm.intent_detector import detect_top_n_grouped_query
         top_n_info = detect_top_n_grouped_query(message)
-        if not top_n_info and entities and isinstance(entities.get("groupBy"), list) and len(entities["groupBy"]) == 1:
+        if not top_n_info and not is_trips_and_vehicles_query and entities and isinstance(entities.get("groupBy"), list) and len(entities["groupBy"]) == 1:
             grp_field = entities["groupBy"][0]
             has_metric = bool(entities.get("metrics") and any(m.get("alias") in ("TotalTrip", "totaltrip", "trip_count", "count") or m.get("function") == "count" for m in entities["metrics"]))
             has_sort_desc = bool(entities.get("sort") and any(s.get("order") == "desc" for s in entities["sort"]))
@@ -1296,7 +1393,7 @@ class ResponseGenerator:
                 top_n_match = re.search(r'\btop\s*(\d+)\b', message, re.IGNORECASE) if message else None
                 limit = int(top_n_match.group(1)) if top_n_match else 5
                 top_n_info = (grp_field, limit)
-        elif not top_n_info and isinstance(api_data, list) and len(api_data) > 0 and all(isinstance(r, dict) for r in api_data):
+        elif not top_n_info and not is_trips_and_vehicles_query and isinstance(api_data, list) and len(api_data) > 0 and all(isinstance(r, dict) for r in api_data):
             sample = api_data[0]
             has_totaltrip = any(k in ("TotalTrip", "totaltrip", "count", "trip_count") for k in sample)
             if has_totaltrip:
@@ -1391,7 +1488,7 @@ class ResponseGenerator:
             )
             is_highest_query = (
                 bool(message and re.search(r'\b(?:highest|maximum|most|leading|max)\b', message.lower()))
-                or (not has_explicit_multi_limit and len(rows) > 0)
+                or (bool(entities and entities.get("sort") and any(s.get("order") == "desc" for s in entities["sort"])) and not has_explicit_multi_limit and len(rows) > 0)
             )
 
             display_rows = rows[:limit]
@@ -1958,96 +2055,6 @@ class ResponseGenerator:
         # Fast-path: Instant 0ms response formatting for simple count queries and known analytics
         if _is_distinct_transporter_result:
             return natural_formatted_response
-
-        # Check if query asks for trips and unique vehicles together
-        is_trips_and_vehicles_query = bool(
-            re.search(r'\b(?:trips?\s+and\s+(?:unique\s+|distinct\s+)?vehicles?|(?:unique\s+|distinct\s+)?vehicles?\s+and\s+trips?)\b', msg_l)
-            or (entities and isinstance(entities.get("metrics"), list) and any(m.get("alias") == "uniqueVehicleCount" for m in entities["metrics"]) and any(m.get("alias") == "shipmentNo" for m in entities["metrics"]))
-        )
-        if is_trips_and_vehicles_query:
-            transporter_val = None
-            if entities and "filters" in entities:
-                for f in entities["filters"]:
-                    if isinstance(f, dict) and f.get("field") in ["transporter", "Transporter"]:
-                        transporter_val = f.get("value")
-                        break
-
-            vehicle_rows = []
-            if isinstance(api_data, list):
-                for r in api_data:
-                    if isinstance(r, dict) and (r.get("vehicleNo") or r.get("vehicle_no")):
-                        vehicle_rows.append(r)
-                
-                # Calculate sum of shipmentNo
-                total_trip_cnt = sum(
-                    int(r.get("shipmentNo", 0) or r.get("TotalTrip", 0) or r.get("count", 0) or 0)
-                    for r in api_data if isinstance(r, dict)
-                )
-
-                # Calculate uniqueVehicleCount (distinct vehicles / sum of uniqueVehicleCount)
-                distinct_veh_set = {
-                    str(r.get("vehicleNo") or r.get("vehicle_no")).strip()
-                    for r in vehicle_rows
-                    if str(r.get("vehicleNo") or r.get("vehicle_no")).strip()
-                }
-                sum_unique_veh = sum(
-                    int(r.get("uniqueVehicleCount", 0) or 0)
-                    for r in api_data if isinstance(r, dict)
-                )
-                if sum_unique_veh > 0:
-                    total_veh = sum_unique_veh
-                elif distinct_veh_set:
-                    total_veh = len(distinct_veh_set)
-                else:
-                    total_veh = len(vehicle_rows)
-            elif isinstance(api_data, dict):
-                total_veh = int(api_data.get("uniqueVehicleCount", 0) or 0)
-                total_trip_cnt = int(api_data.get("shipmentNo", 0) or api_data.get("TotalTrip", 0) or api_data.get("count", 0) or 0)
-            else:
-                total_veh = total_trips if _is_distinct_vehicle_result else 0
-                total_trip_cnt = total_trips or 0
-
-            if total_trip_cnt == 0 and total_trips and not _is_distinct_vehicle_result:
-                total_trip_cnt = total_trips
-
-            s_str = str(start_date).split()[0] if start_date else ""
-            e_str = str(end_date).split()[0] if end_date else ""
-            if str(start_date).startswith("2026-08-01") and str(end_date).startswith("2026-08-31"):
-                date_display = "August 2026"
-                date_prep = "in"
-            elif s_str and e_str and s_str == e_str:
-                try:
-                    from datetime import datetime
-                    dt = datetime.strptime(s_str, "%Y-%m-%d")
-                    day = dt.strftime("%d").lstrip("0")
-                    month = dt.strftime("%B")
-                    year = dt.strftime("%Y")
-                    date_display = f"{month} {day}, {year}"
-                except Exception:
-                    date_display = s_str
-                date_prep = "on"
-            elif start_date and end_date:
-                date_display = f"{start_date} to {end_date}"
-                date_prep = "in date range from"
-            elif "august 2026" in msg_l or "aug 2026" in msg_l:
-                date_display = "August 2026"
-                date_prep = "in"
-            else:
-                date_display = "the selected period"
-                date_prep = "during"
-
-            card_html = _render_transporter_trips_vehicles_card(
-                transporter_name=transporter_val,
-                total_trips=total_trip_cnt,
-                total_vehicles=total_veh,
-                date_display=date_display,
-                vehicle_rows=vehicle_rows
-            )
-            if transporter_val:
-                header = f"Transporter {transporter_val} operated a total of {total_trip_cnt:,} valid trips using {total_veh:,} unique vehicles {date_prep} {date_display}. It does not include cancelled trips."
-            else:
-                header = f"A total of {total_trip_cnt:,} valid trips were operated using {total_veh:,} unique vehicles {date_prep} {date_display}. It does not include cancelled trips."
-            return f"{header}\n\n{card_html}"
 
         if _is_distinct_vehicle_result:
             vehicle_list = [
