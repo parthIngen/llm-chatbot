@@ -6686,9 +6686,9 @@ async def test_device_analytics_combo_without_fixed_elock_flow():
                 {"field": "groupId", "operator": "eq", "value": "0041"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
                 {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-                {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
-                {"field": "fixed-elock-status", "operator": "eq", "value": "na"},
-                {"field": "portable-elock-status", "operator": "eq", "value": "existing"}
+                {"field": "GPS", "operator": "eq", "value": "existing"},
+                {"field": "PortableELock", "operator": "eq", "value": "existing"},
+                {"field": "FixedELock", "operator": "eq", "value": "na"}
             ],
             "select": []
         }
@@ -6698,7 +6698,7 @@ async def test_device_analytics_combo_without_fixed_elock_flow():
         assert entities["analytics"] == expected_entities["analytics"]
         assert entities["select"] == expected_entities["select"]
         assert entities["filters"][:3] == expected_entities["filters"][:3]
-        assert set(f["field"] for f in entities["filters"][3:]) == {"fixed-gps-status", "portable-elock-status", "fixed-elock-status"}
+        assert set(f["field"] for f in entities["filters"][3:]) == {"GPS", "PortableELock", "FixedELock"}
 
 
 @pytest.mark.asyncio
@@ -7401,8 +7401,8 @@ async def test_intracity_trips_vehicles_using_both_fixed_elock_portable_elock_au
             {"field": "tripStatus", "operator": "eq", "value": "valid"},
             {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
             {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-            {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-            {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+            {"field": "PortableELock", "operator": "eq", "value": "existing"},
+            {"field": "FixedELock", "operator": "eq", "value": "existing"},
             {"field": "routeCategory", "operator": "eq", "value": "intracity"}
         ]
     })
@@ -7436,8 +7436,8 @@ async def test_intracity_trips_vehicles_using_both_fixed_elock_portable_elock_au
                 {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
                 {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-                {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-                {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+                {"field": "PortableELock", "operator": "eq", "value": "existing"},
+                {"field": "FixedELock", "operator": "eq", "value": "existing"},
                 {"field": "routeCategory", "operator": "eq", "value": "intracity"}
             ]
         }
@@ -7477,8 +7477,8 @@ async def test_intracity_trips_vehicles_using_both_fixed_elock_portable_elock_au
                 {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
                 {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-                {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-                {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+                {"field": "PortableELock", "operator": "eq", "value": "existing"},
+                {"field": "FixedELock", "operator": "eq", "value": "existing"},
                 {"field": "routeCategory", "operator": "eq", "value": "intracity"}
             ]
         }
@@ -7497,8 +7497,8 @@ async def test_intracity_trips_fixed_elock_plus_portable_elock_combo_aug_2026_fl
             {"field": "tripStatus", "operator": "eq", "value": "valid"},
             {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
             {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-            {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-            {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+            {"field": "PortableELock", "operator": "eq", "value": "existing"},
+            {"field": "FixedELock", "operator": "eq", "value": "existing"},
             {"field": "routeCategory", "operator": "eq", "value": "intracity"}
         ]
     })
@@ -7532,8 +7532,8 @@ async def test_intracity_trips_fixed_elock_plus_portable_elock_combo_aug_2026_fl
                 {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
                 {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-                {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-                {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+                {"field": "PortableELock", "operator": "eq", "value": "existing"},
+                {"field": "FixedELock", "operator": "eq", "value": "existing"},
                 {"field": "routeCategory", "operator": "eq", "value": "intracity"}
             ]
         }
@@ -7573,8 +7573,8 @@ async def test_intracity_trips_fixed_elock_plus_portable_elock_combo_aug_2026_fa
                 {"field": "tripStatus", "operator": "eq", "value": "valid"},
                 {"field": "runDate", "operator": "gte", "value": "2026-08-01 00:00:00"},
                 {"field": "runDate", "operator": "lte", "value": "2026-08-31 23:59:59"},
-                {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-                {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
+                {"field": "PortableELock", "operator": "eq", "value": "existing"},
+                {"field": "FixedELock", "operator": "eq", "value": "existing"},
                 {"field": "routeCategory", "operator": "eq", "value": "intracity"}
             ]
         }

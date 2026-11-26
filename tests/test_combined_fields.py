@@ -515,6 +515,69 @@ def test_date_range_does_not_match_as_vehicle_number():
             assert f.get("value") != "TO24NOV2026"
 
 
+def test_intracity_trips_both_fixed_and_portable_elock_payload():
+    from app.llm.fast_path import can_resolve_fast_path, build_fast_path_payload
+    from app.llm.intent_detector import IntentDetector
+
+    query = "How many  Intracity trips in August 2026 used both Fixed E-Lock and Portable E-Lock?"
+    assert can_resolve_fast_path(query) is True
+    payload = build_fast_path_payload(query)
+
+    expected_payload = {
+        "entity": "trip",
+        "operation": "count",
+        "analytics": [
+            {
+                "type": "withgps"
+            }
+        ],
+        "filters": [
+            {
+                "field": "groupId",
+                "operator": "eq",
+                "value": "0041"
+            },
+            {
+                "field": "tripStatus",
+                "operator": "eq",
+                "value": "valid"
+            },
+            {
+                "field": "runDate",
+                "operator": "gte",
+                "value": "2026-08-01 00:00:00"
+            },
+            {
+                "field": "runDate",
+                "operator": "lte",
+                "value": "2026-08-31 23:59:59"
+            },
+            {
+                "field": "PortableELock",
+                "operator": "eq",
+                "value": "existing"
+            },
+            {
+                "field": "FixedELock",
+                "operator": "eq",
+                "value": "existing"
+            },
+            {
+                "field": "routeCategory",
+                "operator": "eq",
+                "value": "intracity"
+            }
+        ]
+    }
+    assert payload == expected_payload
+
+    detector = IntentDetector()
+    res = _run_sync(detector.detect(query, [], "test_session"))
+    entities = res.get("entities", {})
+    assert entities == expected_payload
+
+
+
 
 
 

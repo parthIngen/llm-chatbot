@@ -473,9 +473,9 @@ def build_fast_path_payload(
         payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": dev_val})
     elif not is_only_single_device and has_pos_gps and has_pos_fixed_elock and has_pos_portable_elock:
         payload.setdefault("analytics", []).append({"type": "withgps"})
-        payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
-        payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
-        payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
+        payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
+        payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
+        payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
     elif (
         not bool(re.search(r'\b(?:only|single|sole|alone|exclusive)\b', msg_l))
         and not bool(re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_l))
@@ -502,8 +502,8 @@ def build_fast_path_payload(
         and bool(re.search(r'\bportable[\s-]e[\s-]?locks?\b', msg_l))
     ):
         payload.setdefault("analytics", []).append({"type": "withgps"})
-        payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
-        payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
+        payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
+        payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
 
     # 3. GPS & E-Lock analytics
     is_fast_no_gps = bool(
@@ -1047,6 +1047,18 @@ def build_fast_path_payload(
 
     is_together_in_query = bool(re.search(r'\btogether\b', msg_l))
 
+    is_fixed_portable_combo = bool(
+        not re.search(r'\b(?:only|single|sole|alone|exclusive)\b', msg_l)
+        and not re.search(r'\b(?:without|excluding|except)\s+.*(?:fixed|portable|gps|lock|elock)\b', msg_l)
+        and re.search(r'\bfixed[\s-]e[\s-]?locks?\b', msg_l)
+        and re.search(r'\bportable[\s-]e[\s-]?locks?\b', msg_l)
+        and not re.search(r'\b(?:fixed[\s-]gps|gps)\b', msg_l)
+    )
+    if is_fixed_portable_combo:
+        payload.pop("select", None)
+        payload.pop("groupBy", None)
+        payload.pop("metrics", None)
+
     def _fast_path_filter_sort_key(flt):
         if not isinstance(flt, dict):
             return 99
@@ -1058,9 +1070,9 @@ def build_fast_path_payload(
             return 2
         elif is_together_in_query and field in ("GPS", "fixed-gps-status", "gps", "fixedgps"):
             return 3
-        elif is_together_in_query and field in ("FixedELock", "fixed-elock-status", "fixedelock"):
-            return 3.1
         elif is_together_in_query and field in ("PortableELock", "portable-elock-status", "portableelock"):
+            return 3.1
+        elif is_together_in_query and field in ("FixedELock", "fixed-elock-status", "fixedelock"):
             return 3.2
         elif field == "runDate" and op == "gte":
             return 4
@@ -1074,9 +1086,9 @@ def build_fast_path_payload(
             return 5.03
         elif field in ("area", "branch"):
             return 5.05
-        elif not is_together_in_query and field in ("FixedELock", "fixed-elock-status", "fixedelock"):
-            return 5.1
         elif not is_together_in_query and field in ("PortableELock", "portable-elock-status", "portableelock"):
+            return 5.1
+        elif not is_together_in_query and field in ("FixedELock", "fixed-elock-status", "fixedelock"):
             return 5.2
         elif not is_together_in_query and field in ("GPS", "fixed-gps-status", "gps", "fixedgps"):
             return 5.3
@@ -1101,6 +1113,17 @@ def build_fast_path_payload(
         elif field == "shipmentMethod":
             return 12
         return 20
+
+    # Normalize any legacy device filter names to canonical names
+    for flt in payload.get("filters", []):
+        if isinstance(flt, dict):
+            fld = flt.get("field")
+            if fld in ("fixed-elock-status", "fixedelock"):
+                flt["field"] = "FixedELock"
+            elif fld in ("portable-elock-status", "portableelock"):
+                flt["field"] = "PortableELock"
+            elif fld in ("fixed-gps-status", "fixedgps"):
+                flt["field"] = "GPS"
 
     payload["filters"].sort(key=_fast_path_filter_sort_key)
 

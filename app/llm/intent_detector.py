@@ -1217,9 +1217,9 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
             return {
                 "analytics_type": "withoutorgps",
                 "device_filters": [
-                    {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
-                    {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-                    {"field": "fixed-elock-status", "operator": "eq", "value": "na"}
+                    {"field": "GPS", "operator": "eq", "value": "existing"},
+                    {"field": "PortableELock", "operator": "eq", "value": "existing"},
+                    {"field": "FixedELock", "operator": "eq", "value": "na"}
                 ]
             }
 
@@ -1229,9 +1229,7 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {
                     "analytics_type": "withoutorgps",
                     "device_filters": [
-                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
                         {"field": "GPS", "operator": "eq", "value": "active"},
-                        {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
                         {"field": "FixedELock", "operator": "eq", "value": "active"}
                     ]
                 }
@@ -1239,9 +1237,9 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {
                     "analytics_type": "withoutorgps",
                     "device_filters": [
-                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
-                        {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
-                        {"field": "portable-elock-status", "operator": "eq", "value": "na"}
+                        {"field": "GPS", "operator": "eq", "value": "existing"},
+                        {"field": "FixedELock", "operator": "eq", "value": "existing"},
+                        {"field": "PortableELock", "operator": "eq", "value": "na"}
                     ]
                 }
 
@@ -1251,9 +1249,7 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {
                     "analytics_type": "withoutorgps",
                     "device_filters": [
-                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
                         {"field": "PortableELock", "operator": "eq", "value": "active"},
-                        {"field": "fixed-elock-status", "operator": "eq", "value": "existing"},
                         {"field": "FixedELock", "operator": "eq", "value": "active"}
                     ]
                 }
@@ -1261,9 +1257,9 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {
                     "analytics_type": "withoutorgps",
                     "device_filters": [
-                        {"field": "fixed-gps-status", "operator": "eq", "value": "na"},
-                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-                        {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}
+                        {"field": "GPS", "operator": "eq", "value": "na"},
+                        {"field": "PortableELock", "operator": "eq", "value": "existing"},
+                        {"field": "FixedELock", "operator": "eq", "value": "existing"}
                     ]
                 }
 
@@ -1273,9 +1269,7 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {
                     "analytics_type": "withoutorgps",
                     "device_filters": [
-                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
                         {"field": "PortableELock", "operator": "eq", "value": "active"},
-                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
                         {"field": "GPS", "operator": "eq", "value": "active"}
                     ]
                 }
@@ -1283,9 +1277,7 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {
                     "analytics_type": "withoutorgps",
                     "device_filters": [
-                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
                         {"field": "PortableELock", "operator": "eq", "value": "inactive"},
-                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
                         {"field": "GPS", "operator": "eq", "value": "inactive"}
                     ]
                 }
@@ -1293,9 +1285,9 @@ def detect_device_analytics(message: str) -> Optional[Dict[str, Any]]:
                 return {
                     "analytics_type": "withoutorgps",
                     "device_filters": [
-                        {"field": "fixed-gps-status", "operator": "eq", "value": "existing"},
-                        {"field": "portable-elock-status", "operator": "eq", "value": "existing"},
-                        {"field": "fixed-elock-status", "operator": "eq", "value": "na"}
+                        {"field": "GPS", "operator": "eq", "value": "existing"},
+                        {"field": "PortableELock", "operator": "eq", "value": "existing"},
+                        {"field": "FixedELock", "operator": "eq", "value": "na"}
                     ]
                 }
 
@@ -2788,6 +2780,12 @@ class IntentDetector:
             field_alias_map = {
                 "fixedelock": "FixedELock",
                 "portableelock": "PortableELock",
+                "fixed-elock-status": "FixedELock",
+                "fixed-e-lock-status": "FixedELock",
+                "portable-elock-status": "PortableELock",
+                "portable-e-lock-status": "PortableELock",
+                "fixed-gps-status": "GPS",
+                "fixed-gps status": "GPS",
                 "gps": "FixedGPS",
                 "atd": "atd",
                 "ata": "ata",
@@ -4321,11 +4319,11 @@ class IntentDetector:
                             "operator": "eq",
                             "value": target_status
                         })
-                query_payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
+                query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
                 if has_fixed_elock:
-                    query_payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
                 if has_portable_elock:
-                    query_payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
             elif _is_no_gps_vehicle_query:
                 # Vehicles with no GPS: tripStatus eq "valid", analytics: [{"type": "gpsna"}], grouped by vehicleNo with countDistinct
                 query_payload["filters"] = [
@@ -4452,9 +4450,9 @@ class IntentDetector:
                     query_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
                 elif _has_together_gps and has_fixed_elock and has_portable_elock:
                     query_payload["analytics"] = [{"type": "withgps"}]
-                    query_payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
-                    query_payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
-                    query_payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
+                    query_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
                 else:
                     if _has_together_gps:
                         query_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
@@ -4507,10 +4505,10 @@ class IntentDetector:
                     ])
                 ]
                 query_payload["filters"].append(
-                    {"field": "portable-elock-status", "operator": "eq", "value": "existing"}
+                    {"field": "PortableELock", "operator": "eq", "value": "existing"}
                 )
                 query_payload["filters"].append(
-                    {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}
+                    {"field": "FixedELock", "operator": "eq", "value": "existing"}
                 )
                 query_payload.pop("select", None)
                 query_payload.pop("groupBy", None)
@@ -5391,9 +5389,9 @@ class IntentDetector:
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
-                    elif field == "portable-elock-status":
+                    elif field in ("PortableELock", "portable-elock-status"):
                         return 5
-                    elif field == "fixed-elock-status":
+                    elif field in ("FixedELock", "fixed-elock-status"):
                         return 6
                     elif field in ("routeCategory", "routeType"):
                         return 7
@@ -6960,11 +6958,11 @@ class IntentDetector:
                             "operator": "eq",
                             "value": target_status
                         })
-                fallback_payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
+                fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
                 if fb_has_fixed_elock:
-                    fallback_payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
                 if fb_has_portable_elock:
-                    fallback_payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
             elif fb_is_no_gps_vehicle_query:
                 # Vehicles with no GPS: tripStatus eq "valid", analytics: [{"type": "gpsna"}], grouped by vehicleNo with countDistinct
                 fallback_payload["filters"] = [
@@ -7073,9 +7071,9 @@ class IntentDetector:
                     fallback_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
                 elif fb_has_together_gps and fb_has_fixed_elock and fb_has_portable_elock:
                     fallback_payload["analytics"] = [{"type": "withgps"}]
-                    fallback_payload["filters"].append({"field": "fixed-gps-status", "operator": "eq", "value": "existing"})
-                    fallback_payload["filters"].append({"field": "portable-elock-status", "operator": "eq", "value": "existing"})
-                    fallback_payload["filters"].append({"field": "fixed-elock-status", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "PortableELock", "operator": "eq", "value": "existing"})
+                    fallback_payload["filters"].append({"field": "FixedELock", "operator": "eq", "value": "existing"})
                 else:
                     if fb_has_together_gps:
                         fallback_payload["filters"].append({"field": "GPS", "operator": "eq", "value": "existing"})
@@ -7128,10 +7126,10 @@ class IntentDetector:
                     ])
                 ]
                 fallback_payload["filters"].append(
-                    {"field": "portable-elock-status", "operator": "eq", "value": "existing"}
+                    {"field": "PortableELock", "operator": "eq", "value": "existing"}
                 )
                 fallback_payload["filters"].append(
-                    {"field": "fixed-elock-status", "operator": "eq", "value": "existing"}
+                    {"field": "FixedELock", "operator": "eq", "value": "existing"}
                 )
                 fallback_payload.pop("select", None)
                 fallback_payload.pop("groupBy", None)
@@ -7886,9 +7884,9 @@ class IntentDetector:
                         return 3
                     elif field == "runDate" and op == "lte":
                         return 4
-                    elif field == "portable-elock-status":
+                    elif field in ("PortableELock", "portable-elock-status"):
                         return 5
-                    elif field == "fixed-elock-status":
+                    elif field in ("FixedELock", "fixed-elock-status"):
                         return 6
                     elif field in ("routeCategory", "routeType"):
                         return 7
